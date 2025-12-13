@@ -79,12 +79,12 @@
                     <div class="swarm-topology">
                         @foreach (var manager in swarmServers.Where(s => s.Type == ServerType.SwarmManager))
                         {
-                            <ServerCard Server="@manager" Role="Manager" />
+                            <ServerCard Server="@(new ServerCard.ServerDto { Id = manager.Id, Name = manager.Name, Host = manager.Host, Type = manager.Type, Status = manager.Status, IsSwarm = manager.IsSwarm })" Role="Manager" />
                         }
                         
                         @foreach (var worker in swarmServers.Where(s => s.Type == ServerType.SwarmWorker))
                         {
-                            <ServerCard Server="@worker" Role="Worker" />
+                            <ServerCard Server="@(new ServerCard.ServerDto { Id = worker.Id, Name = worker.Name, Host = worker.Host, Type = worker.Type, Status = worker.Status, IsSwarm = worker.IsSwarm })" Role="Worker" />
                         }
                     </div>
                     
@@ -114,7 +114,7 @@
                     <div class="standalone-list">
                         @foreach (var server in standaloneServers)
                         {
-                            <ServerCard Server="@server" Role="Standalone" />
+                            <ServerCard Server="@(new ServerCard.ServerDto { Id = server.Id, Name = server.Name, Host = server.Host, Type = server.Type, Status = server.Status, IsSwarm = server.IsSwarm })" Role="Standalone" />
                         }
                     </div>
                 </div>
