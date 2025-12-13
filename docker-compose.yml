@@ -1,0 +1,51 @@
+version: '3.8'
+
+services:
+  hostcraft-web:
+    build:
+      context: .
+      dockerfile: src/HostCraft.Web/Dockerfile
+    ports:
+      - "5000:8080"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ASPNETCORE_URLS=http://+:8080
+      - ConnectionStrings__DefaultConnection=Host=postgres;Database=hostcraft;Username=hostcraft;Password=your_secure_password_here
+    depends_on:
+      - postgres
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock  # Access to Docker daemon
+      - hostcraft-data:/app/data
+
+  hostcraft-api:
+    build:
+      context: .
+      dockerfile: src/HostCraft.Api/Dockerfile
+    ports:
+      - "5001:8080"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ASPNETCORE_URLS=http://+:8080
+      - ConnectionStrings__DefaultConnection=Host=postgres;Database=hostcraft;Username=hostcraft;Password=your_secure_password_here
+    depends_on:
+      - postgres
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock  # Access to Docker daemon
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_DB=hostcraft
+      - POSTGRES_USER=hostcraft
+      - POSTGRES_PASSWORD=your_secure_password_here
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  hostcraft-data:

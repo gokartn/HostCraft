@@ -1,0 +1,169 @@
+# HostCraft - PaaS Platform
+
+HostCraft is a self-hosted Platform-as-a-Service (PaaS) built in C#/.NET 8, designed to properly handle Docker Swarm deployments with correct network management.
+
+## 🎯 Project Status
+
+**Phase 1 - Foundation** ✅ **COMPLETED**
+
+- ✅ Core domain entities (Server, Application, Deployment, Project, User)
+- ✅ Comprehensive enum types (ServerType, DeploymentStatus, ApplicationSourceType, etc.)
+- ✅ Service interfaces (IDockerService, INetworkManager, ISshService, etc.)
+- ✅ EF Core database context with entity configurations
+- ✅ Docker.DotNet integration with proper Swarm support
+- ✅ Network Manager with critical bridge vs overlay detection
+- ✅ Basic API with ServersController
+- ✅ NuGet packages installed (Docker.DotNet, SSH.NET, EF Core, Npgsql)
+
+## 🏗️ Architecture
+
+```
+HostCraft/
+├── src/
+│   ├── HostCraft.Core/          # Domain layer (entities, interfaces, enums)
+│   ├── HostCraft.Infrastructure/ # External integrations (Docker, SSH, Git)
+│   ├── HostCraft.Api/           # ASP.NET Core Web API
+│   ├── HostCraft.Web/           # Blazor Server UI (TODO)
+│   └── HostCraft.Shared/        # Shared DTOs (TODO)
+```
+
+## 🔑 Key Features Implemented
+
+### 🛡️ High Availability (HA)
+- **Multi-Manager Swarm Quorum** - 3/5/7 manager support for fault tolerance
+- **Automatic Failover** - Services auto-migrate to healthy nodes on failure
+- **Health Monitoring** - Continuous HTTP/TCP health checks with configurable thresholds
+- **Auto-Recovery** - Intelligent restart, redeploy, or rollback on failure
+- **Rolling Updates** - Zero-downtime deployments with automatic rollback
+- **Node Draining** - Graceful maintenance mode for servers
+
+### 💾 Disaster Recovery (DR)
+- **Multi-Region Support** - Deploy across datacenters for geographic redundancy
+- **Automated Backups** - Configuration, volume, and full backups with retention policies
+- **S3 Integration** - Off-site backup storage with S3-compatible providers
+- **DR Failover** - One-click failover to secondary region
+- **Backup Restore** - Point-in-time recovery with tested restore procedures
+- **DR Testing** - Dry-run failover testing without affecting production
+
+### 🔧 Network Management (CRITICAL)
+- **Proper bridge vs overlay detection** - fixes Coolify's critical bug
+- Automatic network type selection based on server mode
+- Validation of existing networks
+- Prevents deplo
+
+### Phase 2 - Deployment Engine
+- [ ] Deployment orchestration service implementation
+- [ ] Build from Dockerfile support
+- [ ] Git integration with LibGit2Sharp
+- [ ] Environment variables management UI
+- [ ] Real-time deployment logs with SignalR
+- [ ] Hangfire background job queue
+
+### Phase 3 - HA/DR Implementation
+- [ ] Health monitoring background service with Hangfire
+- [ ] Backup service with tar/S3 integration
+- [ ] Swarm HA service for cluster management
+- [ ] DR failover orchestration
+- [ ] Uptime tracking and SLA reporting
+- [ ] Alert system (email, Slack, webhooks)ger, and SwarmWorker types
+- Region assignment for multi-datacenter deployments
+
+### 🐳 Docker Service
+- Container operations (create, start, stop, remove, list)
+- Swarm service operations (create, update, remove, list, scale)
+- Network management (create, list, validate)
+- Image operations (pull, list)
+- Swarm initialization and management
+- Volume management for persistent storage
+
+## 🚀 Next Steps (Phase 2 - Deployment Engine)
+
+- [ ] Deployment orchestration service
+- [ ] Build from Dockerfile support
+- [ ] Git integration with LibGit2Sharp
+- [ ] Environment variables management UI
+- [ ] Real-time deployment logs with SignalR
+- [ ] Hangfire background job queue
+
+## 📦 Technology Stack
+
+| Component | Technology |
+|-----------|------------|
+| Backend API | ASP.NET Core 8 |
+| Web UI | Blazor Server (planned) |
+| Database | EF Core 8 + PostgreSQL/SQLite |
+| Docker API | Docker.DotNet |
+| SSH | SSH.NET |
+| Background Jobs | Hangfire (planned) |
+
+## 🏃 Running Locally
+
+```powershell
+# Build the solution
+dotnet build HostCraft.sln
+
+# Run the API (uses SQLite by default)
+dotnet run --project src/HostCraft.Api
+
+# API will be available at https://localhost:5001
+```
+
+## 📋 Database
+
+Currently configured to use SQLite for development. To use PostgreSQL, update the connection string in `appsettings.json`:
+
+```json
+{
+  "ConnectionStrings": {
+    "DefaultConnection": "Host=localhost;Database=hostcraft;Username=hostcraft;Password=yourpassword"
+  }
+}
+```
+
+## 🔧 API Endpoints
+
+### Servers
+- `GET /api/servers` - List all servers
+- `GET /api/servers/{id}` - Get server details
+- `POST /api/servers` - Add new server
+- `PUT /api/servers/{id}` - Update server
+- `DELETE /api/servers/{id}` - Remove server
+- `POST /api/servers/{id}/validate` - Validate server connection
+- `GET /api/servers/{id}/containers` - List containers on server
+- `GET /api/servers/{id}/services` - List Swarm services
+
+### Health
+- `GET /health` - Health check endpoint
+
+## 🐛 Known Limitations
+
+- Log streaming not yet fully implemented (MultiplexedStream handling needs work)
+- ResEnterprise HA/DR** - Built-in high availability and disaster recovery from day one
+3. **Type safety** - Strong typing prevents configuration mistakes  
+4. **Better performance** - C# is faster than PHP
+5. **Single language stack** - Blazor + ASP.NET Core
+6. **Integration potential** - Easy to integrate with existing C# projects
+7. **Production-ready** - Designed for self-hosted production deployments with real HA/DR needs
+
+## 📚 Documentation
+
+- [HA/DR Architecture](docs/HA-DR-ARCHITECTURE.md) - Comprehensive HA/DR design and best practices
+- [API Documentation](docs/API.md) - Complete API endpoint reference (coming soon)
+- [Deployment Guide](docs/DEPLOYMENT.md) - Production deployment instructions (coming soon)
+## 📝 Why HostCraft?
+
+After discovering fundamental bugs in Coolify's Docker Swarm implementation (network type mismatches, incorrect Swarm detection), we decided to build a proper solution from scratch in C#/.NET with:
+
+1. **Correct network handling** - Swarm uses overlay, standalone uses bridge
+2. **Type safety** - Strong typing prevents configuration mistakes  
+3. **Better performance** - C# is faster than PHP
+4. **Single language stack** - Blazor + ASP.NET Core
+5. **Integration potential** - Easy to integrate with existing C# projects
+
+## 📄 License
+
+TBD
+
+---
+
+*Last updated: December 13, 2025*

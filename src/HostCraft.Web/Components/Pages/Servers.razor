@@ -1,0 +1,572 @@
+@page "/servers"
+@using HostCraft.Core.Enums
+@inject HttpClient Http
+@inject NavigationManager Navigation
+
+<PageTitle>Servers - HostCraft</PageTitle>
+
+<div class="servers-page">
+    <div class="page-header">
+        <div>
+            <h1>Servers</h1>
+            <p class="subtitle">Manage your Docker hosts and Swarm clusters</p>
+        </div>
+        <button class="btn btn-primary" @onclick="NavigateToAdd">
+            <span class="icon">➕</span> Add Server
+        </button>
+    </div>
+
+    @if (loading)
+    {
+        <div class="loading-state">
+            <div class="spinner"></div>
+            <p>Loading servers...</p>
+        </div>
+    }
+    else if (servers == null || !servers.Any())
+    {
+        <div class="empty-state">
+            <div class="empty-icon">🖥️</div>
+            <h2>No Servers Yet</h2>
+            <p>Add your first Docker host to start deploying applications</p>
+            <button class="btn btn-primary btn-lg" @onclick="NavigateToAdd">
+                <span class="icon">➕</span> Add Your First Server
+            </button>
+        </div>
+    }
+    else
+    {
+        <div class="servers-grid">
+            @foreach (var server in servers)
+            {
+                <div class="server-item @GetStatusClass(server.Status)">
+                    <div class="server-header">
+                        <div class="server-title">
+                            <h3>@server.Name</h3>
+                            <span class="server-type-badge @GetTypeBadgeClass(server.Type)">
+                                @GetTypeIcon(server.Type) @server.Type
+                            </span>
+                        </div>
+                        <div class="server-actions">
+                            <button class="btn-icon" @onclick="() => NavigateToEdit(server.Id)" title="Edit">
+                                ✏️
+                            </button>
+                            <button class="btn-icon" @onclick="() => NavigateToDetails(server.Id)" title="Details">
+                                🔍
+                            </button>
+                            <button class="btn-icon btn-danger" @onclick="() => DeleteServer(server.Id)" title="Delete">
+                                🗑️
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="server-info">
+                        <div class="info-row">
+                            <span class="label">Host:</span>
+                            <span class="value">@server.Host:@server.Port</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="label">User:</span>
+                            <span class="value">@server.User</span>
+                        </div>
+                        @if (!string.IsNullOrEmpty(server.Region))
+                        {
+                            <div class="info-row">
+                                <span class="label">Region:</span>
+                                <span class="value">@server.Region</span>
+                            </div>
+                        }
+                        <div class="info-row">
+                            <span class="label">Status:</span>
+                            <span class="status-badge @GetStatusClass(server.Status)">
+                                @GetStatusIcon(server.Status) @server.Status
+                            </span>
+                        </div>
+                    </div>
+
+                    @if (server.IsSwarm)
+                    {
+                        <div class="swarm-info">
+                            <div class="swarm-badge">🐝 Swarm Cluster Member</div>
+                            @if (!string.IsNullOrEmpty(server.SwarmId))
+                            {
+                                <div class="swarm-detail">Cluster: <code>@server.SwarmId.Substring(0, 12)</code></div>
+                            }
+                        </div>
+                    }
+
+                    <div class="server-footer">
+                        <small class="text-muted">
+                            Added @server.CreatedAt.ToString("MMM dd, yyyy")
+                            @if (server.LastSeenAt.HasValue)
+                            {
+                                <span> • Last seen @GetTimeSince(server.LastSeenAt.Value)</span>
+                            }
+                        </small>
+                    </div>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+<style>
+    .servers-page {
+        max-width: 1400px;
+        margin: 0 auto;
+        padding: 24px;
+    }
+
+    .page-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        margin-bottom: 32px;
+        flex-wrap: wrap;
+        gap: 16px;
+    }
+
+    .page-header h1 {
+        margin: 0;
+        font-size: 32px;
+        color: #2c3e50;
+    }
+
+    .subtitle {
+        margin: 8px 0 0 0;
+        color: #6c757d;
+        font-size: 16px;
+    }
+
+    .btn {
+        padding: 10px 20px;
+        border: none;
+        border-radius: 6px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.2s;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .btn-primary {
+        background: #0066cc;
+        color: white;
+    }
+
+    .btn-primary:hover {
+        background: #0052a3;
+        transform: translateY(-1px);
+        box-shadow: 0 4px 12px rgba(0, 102, 204, 0.3);
+    }
+
+    .btn-lg {
+        padding: 14px 28px;
+        font-size: 16px;
+    }
+
+    .empty-state {
+        text-align: center;
+        padding: 80px 20px;
+        background: white;
+        border-radius: 12px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+
+    .empty-icon {
+        font-size: 80px;
+        margin-bottom: 20px;
+    }
+
+    .empty-state h2 {
+        color: #2c3e50;
+        margin-bottom: 12px;
+    }
+
+    .empty-state p {
+        color: #6c757d;
+        margin-bottom: 24px;
+    }
+
+    .loading-state {
+        text-align: center;
+        padding: 60px 20px;
+    }
+
+    .spinner {
+        width: 50px;
+        height: 50px;
+        margin: 0 auto 20px;
+        border: 4px solid #f3f3f3;
+        border-top: 4px solid #0066cc;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+    }
+
+    @@keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+    }
+
+    .servers-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
+        gap: 20px;
+    }
+
+    .server-item {
+        background: white;
+        border-radius: 12px;
+        border: 2px solid #e9ecef;
+        padding: 20px;
+        transition: all 0.2s;
+    }
+
+    .server-item:hover {
+        box-shadow: 0 4px 16px rgba(0,0,0,0.1);
+        transform: translateY(-2px);
+    }
+
+    .server-item.online {
+        border-color: #28a745;
+    }
+
+    .server-item.offline {
+        border-color: #dc3545;
+    }
+
+    .server-item.error {
+        border-color: #ffc107;
+    }
+
+    .server-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        margin-bottom: 16px;
+        gap: 12px;
+    }
+
+    .server-title {
+        flex: 1;
+    }
+
+    .server-title h3 {
+        margin: 0 0 8px 0;
+        font-size: 20px;
+        color: #2c3e50;
+    }
+
+    .server-type-badge {
+        display: inline-block;
+        padding: 4px 12px;
+        border-radius: 4px;
+        font-size: 12px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+
+    .server-type-badge.manager {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+    }
+
+    .server-type-badge.worker {
+        background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+        color: white;
+    }
+
+    .server-type-badge.standalone {
+        background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+        color: white;
+    }
+
+    .server-actions {
+        display: flex;
+        gap: 8px;
+    }
+
+    .btn-icon {
+        padding: 6px 10px;
+        border: 1px solid #dee2e6;
+        background: white;
+        border-radius: 6px;
+        cursor: pointer;
+        transition: all 0.2s;
+        font-size: 16px;
+    }
+
+    .btn-icon:hover {
+        background: #f8f9fa;
+        transform: scale(1.1);
+    }
+
+    .btn-icon.btn-danger:hover {
+        background: #dc3545;
+        border-color: #dc3545;
+    }
+
+    .server-info {
+        margin-bottom: 16px;
+    }
+
+    .info-row {
+        display: flex;
+        justify-content: space-between;
+        padding: 8px 0;
+        border-bottom: 1px solid #f1f3f5;
+    }
+
+    .info-row:last-child {
+        border-bottom: none;
+    }
+
+    .label {
+        color: #6c757d;
+        font-weight: 600;
+        font-size: 13px;
+    }
+
+    .value {
+        color: #2c3e50;
+        font-family: 'Consolas', 'Monaco', monospace;
+        font-size: 13px;
+    }
+
+    .status-badge {
+        padding: 4px 10px;
+        border-radius: 4px;
+        font-size: 12px;
+        font-weight: 600;
+    }
+
+    .status-badge.online {
+        background: #d4edda;
+        color: #155724;
+    }
+
+    .status-badge.offline {
+        background: #f8d7da;
+        color: #721c24;
+    }
+
+    .status-badge.error {
+        background: #fff3cd;
+        color: #856404;
+    }
+
+    .swarm-info {
+        background: linear-gradient(135deg, #667eea15 0%, #764ba215 100%);
+        padding: 12px;
+        border-radius: 8px;
+        margin-bottom: 16px;
+    }
+
+    .swarm-badge {
+        font-weight: 600;
+        color: #667eea;
+        margin-bottom: 6px;
+    }
+
+    .swarm-detail {
+        font-size: 13px;
+        color: #6c757d;
+    }
+
+    .swarm-detail code {
+        background: white;
+        padding: 2px 6px;
+        border-radius: 3px;
+        font-family: 'Consolas', 'Monaco', monospace;
+        font-size: 12px;
+    }
+
+    .server-footer {
+        padding-top: 12px;
+        border-top: 1px solid #f1f3f5;
+    }
+
+    .text-muted {
+        color: #6c757d;
+        font-size: 12px;
+    }
+
+    .icon {
+        font-size: 16px;
+    }
+</style>
+
+@code {
+    private List<ServerDto>? servers;
+    private bool loading = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadServers();
+    }
+
+    private async Task LoadServers()
+    {
+        loading = true;
+        try
+        {
+            // TODO: Replace with actual API call
+            // servers = await Http.GetFromJsonAsync<List<ServerDto>>("/api/servers");
+            
+            // Mock data for now
+            await Task.Delay(500); // Simulate API call
+            servers = new List<ServerDto>
+            {
+                new ServerDto 
+                { 
+                    Id = 1, 
+                    Name = "housio-Hetzner", 
+                    Host = "10.0.1.10",
+                    Port = 22,
+                    User = "root",
+                    Type = ServerType.SwarmManager, 
+                    Status = ServerStatus.Online,
+                    Region = "eu-west-1 (Hetzner)",
+                    SwarmId = "abc123def456",
+                    CreatedAt = DateTime.Now.AddDays(-30),
+                    LastSeenAt = DateTime.Now.AddMinutes(-5)
+                },
+                new ServerDto 
+                { 
+                    Id = 2, 
+                    Name = "housio-home", 
+                    Host = "10.0.1.11",
+                    Port = 22,
+                    User = "root",
+                    Type = ServerType.SwarmWorker, 
+                    Status = ServerStatus.Online,
+                    Region = "eu-west-1 (Home)",
+                    SwarmId = "abc123def456",
+                    CreatedAt = DateTime.Now.AddDays(-25),
+                    LastSeenAt = DateTime.Now.AddMinutes(-2)
+                },
+                new ServerDto 
+                { 
+                    Id = 3, 
+                    Name = "housio-worker-node", 
+                    Host = "10.0.1.12",
+                    Port = 22,
+                    User = "root",
+                    Type = ServerType.SwarmWorker, 
+                    Status = ServerStatus.Online,
+                    Region = "eu-west-1",
+                    SwarmId = "abc123def456",
+                    CreatedAt = DateTime.Now.AddDays(-20),
+                    LastSeenAt = DateTime.Now.AddMinutes(-1)
+                }
+            };
+        }
+        catch (Exception ex)
+        {
+            servers = new List<ServerDto>();
+        }
+        finally
+        {
+            loading = false;
+        }
+    }
+
+    private void NavigateToAdd()
+    {
+        Navigation.NavigateTo("/servers/new");
+    }
+
+    private void NavigateToEdit(int id)
+    {
+        Navigation.NavigateTo($"/servers/{id}/edit");
+    }
+
+    private void NavigateToDetails(int id)
+    {
+        Navigation.NavigateTo($"/servers/{id}");
+    }
+
+    private async Task DeleteServer(int id)
+    {
+        if (await JSRuntime.InvokeAsync<bool>("confirm", "Are you sure you want to delete this server?"))
+        {
+            try
+            {
+                // TODO: await Http.DeleteAsync($"/api/servers/{id}");
+                await LoadServers();
+            }
+            catch (Exception ex)
+            {
+                // TODO: Show error notification
+            }
+        }
+    }
+
+    private string GetStatusClass(ServerStatus status)
+    {
+        return status switch
+        {
+            ServerStatus.Online => "online",
+            ServerStatus.Offline => "offline",
+            _ => "error"
+        };
+    }
+
+    private string GetStatusIcon(ServerStatus status)
+    {
+        return status switch
+        {
+            ServerStatus.Online => "🟢",
+            ServerStatus.Offline => "🔴",
+            ServerStatus.Error => "⚠️",
+            _ => "🔄"
+        };
+    }
+
+    private string GetTypeBadgeClass(ServerType type)
+    {
+        return type switch
+        {
+            ServerType.SwarmManager => "manager",
+            ServerType.SwarmWorker => "worker",
+            _ => "standalone"
+        };
+    }
+
+    private string GetTypeIcon(ServerType type)
+    {
+        return type switch
+        {
+            ServerType.SwarmManager => "👑",
+            ServerType.SwarmWorker => "⚙️",
+            _ => "💻"
+        };
+    }
+
+    private string GetTimeSince(DateTime date)
+    {
+        var span = DateTime.Now - date;
+        if (span.TotalMinutes < 1) return "just now";
+        if (span.TotalMinutes < 60) return $"{(int)span.TotalMinutes}m ago";
+        if (span.TotalHours < 24) return $"{(int)span.TotalHours}h ago";
+        return $"{(int)span.TotalDays}d ago";
+    }
+
+    public class ServerDto
+    {
+        public int Id { get; set; }
+        public string Name { get; set; } = "";
+        public string Host { get; set; } = "";
+        public int Port { get; set; }
+        public string User { get; set; } = "";
+        public ServerType Type { get; set; }
+        public ServerStatus Status { get; set; }
+        public string? Region { get; set; }
+        public string? SwarmId { get; set; }
+        public DateTime CreatedAt { get; set; }
+        public DateTime? LastSeenAt { get; set; }
+        public bool IsSwarm => Type == ServerType.SwarmManager || Type == ServerType.SwarmWorker;
+    }
+}

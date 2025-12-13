@@ -1,0 +1,818 @@
+@page "/servers/{id:int}"
+@using HostCraft.Core.Enums
+@using Microsoft.AspNetCore.SignalR.Client
+@inject HttpClient Http
+@inject NavigationManager Navigation
+@implements IAsyncDisposable
+
+<PageTitle>@(server?.Name ?? "Server") - HostCraft</PageTitle>
+
+<div class="server-details-page">
+    <div class="page-header">
+        <button class="btn-back" @onclick="GoBack">← Back to Servers</button>
+        @if (server != null)
+        {
+            <div class="header-content">
+                <div class="header-info">
+                    <h1>@server.Name</h1>
+                    <div class="header-badges">
+                        <span class="badge badge-@GetTypeBadgeClass(server.Type)">
+                            @GetTypeIcon(server.Type) @server.Type
+                        </span>
+                        <span class="status-badge @GetStatusClass(server.Status)">
+                            @GetStatusIcon(server.Status) @server.Status
+                        </span>
+                    </div>
+                </div>
+                <div class="header-actions">
+                    <button class="btn btn-outline" @onclick="() => Navigation.NavigateTo($"/servers/{Id}/edit")">
+                        ✏️ Edit
+                    </button>
+                </div>
+            </div>
+        }
+    </div>
+
+    @if (loading)
+    {
+        <div class="loading-state">
+            <div class="spinner"></div>
+            <p>Loading server details...</p>
+        </div>
+    }
+    else if (server == null)
+    {
+        <div class="error-state">
+            <div class="error-icon">❌</div>
+            <h2>Server Not Found</h2>
+            <p>The server you're looking for doesn't exist or has been removed.</p>
+        </div>
+    }
+    else
+    {
+        <div class="details-container">
+            <!-- Server Information Card -->
+            <div class="info-card">
+                <h2>Server Information</h2>
+                <div class="info-grid">
+                    <div class="info-item">
+                        <span class="label">Host</span>
+                        <span class="value">@server.Host:@server.Port</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="label">User</span>
+                        <span class="value">@server.User</span>
+                    </div>
+                    @if (!string.IsNullOrEmpty(server.Region))
+                    {
+                        <div class="info-item">
+                            <span class="label">Region</span>
+                            <span class="value">@server.Region</span>
+                        </div>
+                    }
+                    <div class="info-item">
+                        <span class="label">Proxy</span>
+                        <span class="value">@server.ProxyType</span>
+                    </div>
+                    @if (server.IsSwarm && !string.IsNullOrEmpty(server.SwarmId))
+                    {
+                        <div class="info-item">
+                            <span class="label">Swarm ID</span>
+                            <span class="value"><code>@server.SwarmId.Substring(0, 12)</code></span>
+                        </div>
+                    }
+                    <div class="info-item">
+                        <span class="label">Added</span>
+                        <span class="value">@server.CreatedAt.ToString("MMM dd, yyyy HH:mm")</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Terminal Section -->
+            <div class="terminal-card">
+                <div class="terminal-header">
+                    <h2>🖥️ SSH Terminal</h2>
+                    <div class="terminal-controls">
+                        @if (!terminalConnected)
+                        {
+                            <button class="btn btn-primary btn-sm" @onclick="ConnectTerminal" disabled="@terminalConnecting">
+                                @if (terminalConnecting)
+                                {
+                                    <span class="spinner-sm"></span>
+                                    <span>Connecting...</span>
+                                }
+                                else
+                                {
+                                    <span>▶️ Connect</span>
+                                }
+                            </button>
+                        }
+                        else
+                        {
+                            <span class="status-indicator connected">🟢 Connected</span>
+                            <button class="btn btn-outline btn-sm" @onclick="ClearTerminal">
+                                🗑️ Clear
+                            </button>
+                            <button class="btn btn-danger btn-sm" @onclick="DisconnectTerminal">
+                                ⏹️ Disconnect
+                            </button>
+                        }
+                    </div>
+                </div>
+
+                <div class="terminal-container">
+                    @if (!terminalConnected && !terminalConnecting)
+                    {
+                        <div class="terminal-placeholder">
+                            <div class="placeholder-icon">🖥️</div>
+                            <p>Click "Connect" to open an SSH terminal session</p>
+                            <small>Full interactive shell with command history and tab completion</small>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="terminal" id="terminal-@Id">
+                            @foreach (var line in terminalOutput)
+                            {
+                                <div class="terminal-line @line.Type">@line.Content</div>
+                            }
+                            @if (terminalConnected)
+                            {
+                                <div class="terminal-input-line">
+                                    <span class="prompt">@terminalPrompt</span>
+                                    <input type="text" 
+                                           class="terminal-input" 
+                                           @bind="terminalCommand" 
+                                           @bind:event="oninput"
+                                           @onkeydown="HandleTerminalKeyPress"
+                                           placeholder="Type command..."
+                                           disabled="@(!terminalConnected || commandExecuting)" />
+                                    @if (commandExecuting)
+                                    {
+                                        <span class="executing-indicator">⏳</span>
+                                    }
+                                </div>
+                            }
+                        </div>
+                    }
+                </div>
+
+                @if (!string.IsNullOrEmpty(terminalError))
+                {
+                    <div class="alert alert-danger">
+                        <strong>❌ Terminal Error:</strong> @terminalError
+                    </div>
+                }
+            </div>
+
+            <!-- Quick Actions -->
+            <div class="actions-card">
+                <h2>Quick Actions</h2>
+                <div class="action-buttons">
+                    <button class="action-btn" @onclick="GetDockerInfo">
+                        <span class="action-icon">🐳</span>
+                        <span class="action-text">Docker Info</span>
+                    </button>
+                    <button class="action-btn" @onclick="ListContainers">
+                        <span class="action-icon">📦</span>
+                        <span class="action-text">List Containers</span>
+                    </button>
+                    <button class="action-btn" @onclick="ListServices">
+                        <span class="action-icon">⚙️</span>
+                        <span class="action-text">List Services</span>
+                    </button>
+                    <button class="action-btn" @onclick="CheckDiskSpace">
+                        <span class="action-icon">💾</span>
+                        <span class="action-text">Disk Space</span>
+                    </button>
+                    <button class="action-btn" @onclick="ViewSystemLoad">
+                        <span class="action-icon">📊</span>
+                        <span class="action-text">System Load</span>
+                    </button>
+                    <button class="action-btn" @onclick="RestartDocker">
+                        <span class="action-icon">🔄</span>
+                        <span class="action-text">Restart Docker</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+<style>
+    .server-details-page {
+        max-width: 1400px;
+        margin: 0 auto;
+        padding: 24px;
+    }
+
+    .page-header {
+        margin-bottom: 32px;
+    }
+
+    .btn-back {
+        background: none;
+        border: none;
+        color: #0066cc;
+        font-size: 16px;
+        cursor: pointer;
+        padding: 8px 0;
+        margin-bottom: 16px;
+        display: inline-block;
+        transition: color 0.2s;
+    }
+
+    .btn-back:hover {
+        color: #0052a3;
+    }
+
+    .header-content {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 20px;
+    }
+
+    .header-info h1 {
+        margin: 0 0 12px 0;
+        font-size: 32px;
+        color: #2c3e50;
+    }
+
+    .header-badges {
+        display: flex;
+        gap: 12px;
+        flex-wrap: wrap;
+    }
+
+    .badge {
+        padding: 6px 14px;
+        border-radius: 6px;
+        font-size: 13px;
+        font-weight: 600;
+    }
+
+    .badge-manager {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+    }
+
+    .badge-worker {
+        background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+        color: white;
+    }
+
+    .badge-standalone {
+        background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+        color: white;
+    }
+
+    .status-badge {
+        padding: 6px 14px;
+        border-radius: 6px;
+        font-size: 13px;
+        font-weight: 600;
+    }
+
+    .status-badge.online {
+        background: #d4edda;
+        color: #155724;
+    }
+
+    .details-container {
+        display: grid;
+        gap: 24px;
+    }
+
+    .info-card, .terminal-card, .actions-card {
+        background: white;
+        border-radius: 12px;
+        padding: 24px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+
+    .info-card h2, .terminal-card h2, .actions-card h2 {
+        margin: 0 0 20px 0;
+        font-size: 20px;
+        color: #2c3e50;
+    }
+
+    .info-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+        gap: 20px;
+    }
+
+    .info-item {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+    }
+
+    .label {
+        font-size: 12px;
+        font-weight: 600;
+        color: #6c757d;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+
+    .value {
+        font-size: 15px;
+        color: #2c3e50;
+        font-family: 'Consolas', 'Monaco', monospace;
+    }
+
+    .value code {
+        background: #f8f9fa;
+        padding: 4px 8px;
+        border-radius: 4px;
+        font-size: 13px;
+    }
+
+    /* Terminal Styles */
+    .terminal-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 20px;
+    }
+
+    .terminal-controls {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+    }
+
+    .status-indicator {
+        padding: 6px 12px;
+        border-radius: 6px;
+        font-size: 13px;
+        font-weight: 600;
+    }
+
+    .status-indicator.connected {
+        background: #d4edda;
+        color: #155724;
+    }
+
+    .terminal-container {
+        background: #1e1e1e;
+        border-radius: 8px;
+        min-height: 400px;
+        max-height: 600px;
+        overflow-y: auto;
+        position: relative;
+    }
+
+    .terminal-placeholder {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 80px 20px;
+        color: #6c757d;
+    }
+
+    .placeholder-icon {
+        font-size: 60px;
+        margin-bottom: 20px;
+        opacity: 0.5;
+    }
+
+    .terminal-placeholder p {
+        margin: 0 0 8px 0;
+        font-size: 16px;
+    }
+
+    .terminal-placeholder small {
+        font-size: 13px;
+        opacity: 0.7;
+    }
+
+    .terminal {
+        padding: 16px;
+        font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+        font-size: 14px;
+        line-height: 1.6;
+        color: #d4d4d4;
+    }
+
+    .terminal-line {
+        margin-bottom: 4px;
+        white-space: pre-wrap;
+        word-break: break-all;
+    }
+
+    .terminal-line.output {
+        color: #d4d4d4;
+    }
+
+    .terminal-line.error {
+        color: #f48771;
+    }
+
+    .terminal-line.success {
+        color: #89d185;
+    }
+
+    .terminal-line.info {
+        color: #6796e6;
+    }
+
+    .terminal-input-line {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-top: 8px;
+    }
+
+    .prompt {
+        color: #89d185;
+        font-weight: 600;
+        flex-shrink: 0;
+    }
+
+    .terminal-input {
+        flex: 1;
+        background: transparent;
+        border: none;
+        color: #d4d4d4;
+        font-family: 'Consolas', 'Monaco', monospace;
+        font-size: 14px;
+        outline: none;
+        padding: 4px;
+    }
+
+    .terminal-input::placeholder {
+        color: #6c757d;
+    }
+
+    .executing-indicator {
+        animation: pulse 1s infinite;
+    }
+
+    @@keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.5; }
+    }
+
+    /* Action Buttons */
+    .action-buttons {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+        gap: 12px;
+    }
+
+    .action-btn {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 8px;
+        padding: 20px;
+        background: #f8f9fa;
+        border: 2px solid #e9ecef;
+        border-radius: 8px;
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+
+    .action-btn:hover {
+        background: white;
+        border-color: #0066cc;
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(0, 102, 204, 0.1);
+    }
+
+    .action-icon {
+        font-size: 32px;
+    }
+
+    .action-text {
+        font-size: 13px;
+        font-weight: 600;
+        color: #2c3e50;
+    }
+
+    /* Buttons */
+    .btn {
+        padding: 8px 16px;
+        border: none;
+        border-radius: 6px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.2s;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 13px;
+    }
+
+    .btn-sm {
+        padding: 6px 12px;
+        font-size: 12px;
+    }
+
+    .btn-primary {
+        background: #0066cc;
+        color: white;
+    }
+
+    .btn-primary:hover:not(:disabled) {
+        background: #0052a3;
+    }
+
+    .btn-outline {
+        background: white;
+        color: #0066cc;
+        border: 2px solid #0066cc;
+    }
+
+    .btn-outline:hover:not(:disabled) {
+        background: #0066cc;
+        color: white;
+    }
+
+    .btn-danger {
+        background: #dc3545;
+        color: white;
+    }
+
+    .btn-danger:hover:not(:disabled) {
+        background: #c82333;
+    }
+
+    .btn:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+    }
+
+    .spinner, .spinner-sm {
+        border: 2px solid rgba(255,255,255,0.3);
+        border-top: 2px solid white;
+        border-radius: 50%;
+        animation: spin 0.8s linear infinite;
+    }
+
+    .spinner {
+        width: 50px;
+        height: 50px;
+    }
+
+    .spinner-sm {
+        width: 14px;
+        height: 14px;
+    }
+
+    @@keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+    }
+
+    .loading-state, .error-state {
+        text-align: center;
+        padding: 80px 20px;
+    }
+
+    .alert {
+        padding: 12px 16px;
+        border-radius: 6px;
+        margin-top: 16px;
+        font-size: 13px;
+    }
+
+    .alert-danger {
+        background: #f8d7da;
+        color: #721c24;
+        border: 1px solid #f5c6cb;
+    }
+</style>
+
+@code {
+    [Parameter]
+    public int Id { get; set; }
+
+    private ServerDto? server;
+    private bool loading = true;
+
+    // Terminal state
+    private bool terminalConnected = false;
+    private bool terminalConnecting = false;
+    private bool commandExecuting = false;
+    private string terminalCommand = "";
+    private string terminalPrompt = "user@server:~$";
+    private string? terminalError;
+    private List<TerminalLine> terminalOutput = new();
+    private HubConnection? hubConnection;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadServer();
+    }
+
+    private async Task LoadServer()
+    {
+        loading = true;
+        try
+        {
+            // TODO: Replace with actual API call
+            // server = await Http.GetFromJsonAsync<ServerDto>($"/api/servers/{Id}");
+            
+            await Task.Delay(500);
+            server = new ServerDto
+            {
+                Id = Id,
+                Name = "housio-Hetzner",
+                Host = "10.0.1.10",
+                Port = 22,
+                User = "root",
+                Type = ServerType.SwarmManager,
+                Status = ServerStatus.Online,
+                Region = "eu-west-1 (Hetzner)",
+                ProxyType = ProxyType.Traefik,
+                SwarmId = "abc123def456789",
+                CreatedAt = DateTime.Now.AddDays(-30),
+                LastSeenAt = DateTime.Now.AddMinutes(-2)
+            };
+        }
+        catch (Exception ex)
+        {
+            server = null;
+        }
+        finally
+        {
+            loading = false;
+        }
+    }
+
+    private async Task ConnectTerminal()
+    {
+        terminalConnecting = true;
+        terminalError = null;
+
+        try
+        {
+            // Initialize SignalR connection
+            hubConnection = new HubConnectionBuilder()
+                .WithUrl(Navigation.ToAbsoluteUri("/terminalhub"))
+                .Build();
+
+            hubConnection.On<string>("ReceiveOutput", (output) =>
+            {
+                terminalOutput.Add(new TerminalLine { Content = output, Type = "output" });
+                StateHasChanged();
+            });
+
+            hubConnection.On<string>("ReceiveError", (error) =>
+            {
+                terminalOutput.Add(new TerminalLine { Content = error, Type = "error" });
+                StateHasChanged();
+            });
+
+            hubConnection.On<string>("UpdatePrompt", (prompt) =>
+            {
+                terminalPrompt = prompt;
+                StateHasChanged();
+            });
+
+            await hubConnection.StartAsync();
+            
+            // Connect to server
+            await hubConnection.SendAsync("ConnectToServer", Id);
+            
+            terminalConnected = true;
+            terminalOutput.Add(new TerminalLine 
+            { 
+                Content = $"Connected to {server?.Name} ({server?.Host})", 
+                Type = "success" 
+            });
+        }
+        catch (Exception ex)
+        {
+            terminalError = $"Failed to connect: {ex.Message}";
+            terminalConnected = false;
+        }
+        finally
+        {
+            terminalConnecting = false;
+        }
+    }
+
+    private async Task DisconnectTerminal()
+    {
+        if (hubConnection != null)
+        {
+            await hubConnection.StopAsync();
+            await hubConnection.DisposeAsync();
+            hubConnection = null;
+        }
+        
+        terminalConnected = false;
+        terminalOutput.Add(new TerminalLine { Content = "Disconnected", Type = "info" });
+    }
+
+    private void ClearTerminal()
+    {
+        terminalOutput.Clear();
+    }
+
+    private async Task HandleTerminalKeyPress(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !string.IsNullOrWhiteSpace(terminalCommand) && !commandExecuting)
+        {
+            await ExecuteCommand(terminalCommand);
+            terminalCommand = "";
+        }
+    }
+
+    private async Task ExecuteCommand(string command)
+    {
+        if (hubConnection == null || !terminalConnected) return;
+
+        commandExecuting = true;
+        terminalOutput.Add(new TerminalLine { Content = $"{terminalPrompt} {command}", Type = "output" });
+
+        try
+        {
+            await hubConnection.SendAsync("ExecuteCommand", command);
+        }
+        catch (Exception ex)
+        {
+            terminalOutput.Add(new TerminalLine { Content = $"Error: {ex.Message}", Type = "error" });
+        }
+        finally
+        {
+            commandExecuting = false;
+        }
+    }
+
+    // Quick action methods
+    private async Task GetDockerInfo() => await ExecuteCommand("docker info");
+    private async Task ListContainers() => await ExecuteCommand("docker ps -a");
+    private async Task ListServices() => await ExecuteCommand("docker service ls");
+    private async Task CheckDiskSpace() => await ExecuteCommand("df -h");
+    private async Task ViewSystemLoad() => await ExecuteCommand("top -bn1 | head -20");
+    private async Task RestartDocker() => await ExecuteCommand("systemctl restart docker");
+
+    private void GoBack() => Navigation.NavigateTo("/servers");
+    
+    private string GetStatusClass(ServerStatus status) => status switch
+    {
+        ServerStatus.Online => "online",
+        ServerStatus.Offline => "offline",
+        _ => "error"
+    };
+
+    private string GetStatusIcon(ServerStatus status) => status switch
+    {
+        ServerStatus.Online => "🟢",
+        ServerStatus.Offline => "🔴",
+        ServerStatus.Error => "⚠️",
+        _ => "🔄"
+    };
+
+    private string GetTypeBadgeClass(ServerType type) => type switch
+    {
+        ServerType.SwarmManager => "manager",
+        ServerType.SwarmWorker => "worker",
+        _ => "standalone"
+    };
+
+    private string GetTypeIcon(ServerType type) => type switch
+    {
+        ServerType.SwarmManager => "👑",
+        ServerType.SwarmWorker => "⚙️",
+        _ => "💻"
+    };
+
+    public async ValueTask DisposeAsync()
+    {
+        if (hubConnection != null)
+        {
+            await hubConnection.DisposeAsync();
+        }
+    }
+
+    private class TerminalLine
+    {
+        public string Content { get; set; } = "";
+        public string Type { get; set; } = "output"; // output, error, success, info
+    }
+
+    public class ServerDto
+    {
+        public int Id { get; set; }
+        public string Name { get; set; } = "";
+        public string Host { get; set; } = "";
+        public int Port { get; set; }
+        public string User { get; set; } = "";
+        public ServerType Type { get; set; }
+        public ServerStatus Status { get; set; }
+        public string? Region { get; set; }
+        public ProxyType ProxyType { get; set; }
+        public string? SwarmId { get; set; }
+        public DateTime CreatedAt { get; set; }
+        public DateTime? LastSeenAt { get; set; }
+        public bool IsSwarm => Type == ServerType.SwarmManager || Type == ServerType.SwarmWorker;
+    }
+}

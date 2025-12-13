@@ -1,0 +1,105 @@
+@using HostCraft.Core.Enums
+
+<div class="deployment-type-card deployment-@Color">
+    <div class="card-icon">@Icon</div>
+    <div class="card-content">
+        <h3>@Type</h3>
+        <div class="card-status status-@Status">
+            @GetStatusBadge()
+        </div>
+        <p class="card-description">@Description</p>
+        <div class="card-meta">
+            <span>@ServerCount server@(ServerCount != 1 ? "s" : "")</span>
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter] public string Type { get; set; } = "";
+    [Parameter] public string Icon { get; set; } = "";
+    [Parameter] public string Color { get; set; } = "primary";
+    [Parameter] public int ServerCount { get; set; }
+    [Parameter] public string Status { get; set; } = "";
+    [Parameter] public string Description { get; set; } = "";
+
+    private string GetStatusBadge()
+    {
+        return Status switch
+        {
+            "healthy" => "✅ HEALTHY",
+            "degraded" => "⚠️ DEGRADED",
+            "critical" => "🔴 CRITICAL",
+            "online" => "🟢 ONLINE",
+            "offline" => "⚫ OFFLINE",
+            "coming-soon" => "🚧 COMING SOON",
+            _ => "❓ UNKNOWN"
+        };
+    }
+}
+
+<style>
+    .deployment-type-card {
+        background: white;
+        border-radius: 12px;
+        padding: 24px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        border-left: 5px solid;
+        display: flex;
+        gap: 20px;
+        transition: all 0.3s ease;
+    }
+
+    .deployment-type-card:hover {
+        box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+        transform: translateY(-2px);
+    }
+
+    .deployment-primary { border-left-color: #0066cc; }
+    .deployment-info { border-left-color: #17a2b8; }
+    .deployment-success { border-left-color: #28a745; }
+    .deployment-warning { border-left-color: #ffc107; }
+
+    .card-icon {
+        font-size: 48px;
+        line-height: 1;
+    }
+
+    .card-content {
+        flex: 1;
+    }
+
+    .card-content h3 {
+        margin: 0 0 8px 0;
+        font-size: 20px;
+        font-weight: 600;
+        color: #2c3e50;
+    }
+
+    .card-status {
+        display: inline-block;
+        padding: 4px 12px;
+        border-radius: 4px;
+        font-size: 12px;
+        font-weight: 600;
+        margin-bottom: 8px;
+    }
+
+    .status-healthy { background: #d4edda; color: #155724; }
+    .status-degraded { background: #fff3cd; color: #856404; }
+    .status-critical { background: #f8d7da; color: #721c24; }
+    .status-online { background: #d4edda; color: #155724; }
+    .status-offline { background: #e2e3e5; color: #383d41; }
+    .status-coming-soon { background: #d1ecf1; color: #0c5460; }
+
+    .card-description {
+        color: #6c757d;
+        font-size: 14px;
+        margin: 8px 0;
+    }
+
+    .card-meta {
+        font-size: 13px;
+        color: #6c757d;
+        font-weight: 500;
+    }
+</style>

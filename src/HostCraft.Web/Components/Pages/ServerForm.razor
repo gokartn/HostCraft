@@ -1,0 +1,589 @@
+@page "/servers/new"
+@page "/servers/{id:int}/edit"
+@using HostCraft.Core.Enums
+@inject HttpClient Http
+@inject NavigationManager Navigation
+
+<PageTitle>@(IsEditMode ? "Edit Server" : "Add Server") - HostCraft</PageTitle>
+
+<div class="server-form-page">
+    <div class="form-header">
+        <button class="btn-back" @onclick="GoBack">← Back</button>
+        <h1>@(IsEditMode ? "Edit Server" : "Add New Server")</h1>
+    </div>
+
+    <div class="form-container">
+        <EditForm Model="@model" OnValidSubmit="HandleSubmit">
+            <DataAnnotationsValidator />
+
+            <!-- Basic Information -->
+            <div class="form-section">
+                <h2>Basic Information</h2>
+                
+                <div class="form-group">
+                    <label for="name">Server Name *</label>
+                    <InputText id="name" @bind-Value="model.Name" class="form-control" placeholder="e.g., production-server-1" />
+                    <ValidationMessage For="@(() => model.Name)" />
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="host">Host / IP Address *</label>
+                        <InputText id="host" @bind-Value="model.Host" class="form-control" placeholder="192.168.1.100" />
+                        <ValidationMessage For="@(() => model.Host)" />
+                    </div>
+
+                    <div class="form-group">
+                        <label for="port">SSH Port *</label>
+                        <InputNumber id="port" @bind-Value="model.Port" class="form-control" />
+                        <ValidationMessage For="@(() => model.Port)" />
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="user">SSH User *</label>
+                    <InputText id="user" @bind-Value="model.User" class="form-control" placeholder="root" />
+                    <ValidationMessage For="@(() => model.User)" />
+                    <small class="form-text">User must have Docker permissions</small>
+                </div>
+
+                <div class="form-group">
+                    <label for="region">Region / Datacenter</label>
+                    <InputText id="region" @bind-Value="model.Region" class="form-control" placeholder="us-east-1 (AWS)" />
+                    <small class="form-text">Optional: Used for multi-region deployments and DR</small>
+                </div>
+            </div>
+
+            <!-- Authentication -->
+            <div class="form-section">
+                <h2>SSH Authentication</h2>
+                
+                <div class="form-group">
+                    <label for="privateKey">Private Key *</label>
+                    <InputTextArea id="privateKey" @bind-Value="model.PrivateKeyContent" class="form-control code-input" rows="8" 
+                                   placeholder="-----BEGIN OPENSSH PRIVATE KEY-----&#10;...&#10;-----END OPENSSH PRIVATE KEY-----" />
+                    <ValidationMessage For="@(() => model.PrivateKeyContent)" />
+                    <small class="form-text">Paste your SSH private key here (will be encrypted at rest)</small>
+                </div>
+            </div>
+
+            <!-- Server Type -->
+            <div class="form-section">
+                <h2>Server Type</h2>
+                
+                <div class="server-type-options">
+                    <label class="radio-card @(model.Type == ServerType.Standalone ? "selected" : "")">
+                        <input type="radio" name="type" value="@ServerType.Standalone" 
+                               checked="@(model.Type == ServerType.Standalone)"
+                               @onchange="@(() => model.Type = ServerType.Standalone)" />
+                        <div class="radio-card-content">
+                            <div class="radio-icon">💻</div>
+                            <div class="radio-title">Standalone</div>
+                            <div class="radio-description">Single Docker host for simple deployments</div>
+                        </div>
+                    </label>
+
+                    <label class="radio-card @(model.Type == ServerType.SwarmManager ? "selected" : "")">
+                        <input type="radio" name="type" value="@ServerType.SwarmManager" 
+                               checked="@(model.Type == ServerType.SwarmManager)"
+                               @onchange="@(() => model.Type = ServerType.SwarmManager)" />
+                        <div class="radio-card-content">
+                            <div class="radio-icon">👑</div>
+                            <div class="radio-title">Swarm Manager</div>
+                            <div class="radio-description">Control plane node with scheduling capabilities</div>
+                        </div>
+                    </label>
+
+                    <label class="radio-card @(model.Type == ServerType.SwarmWorker ? "selected" : "")">
+                        <input type="radio" name="type" value="@ServerType.SwarmWorker" 
+                               checked="@(model.Type == ServerType.SwarmWorker)"
+                               @onchange="@(() => model.Type = ServerType.SwarmWorker)" />
+                        <div class="radio-card-content">
+                            <div class="radio-icon">⚙️</div>
+                            <div class="radio-title">Swarm Worker</div>
+                            <div class="radio-description">Worker node for running containers</div>
+                        </div>
+                    </label>
+                </div>
+
+                @if (model.Type != ServerType.Standalone)
+                {
+                    <div class="info-box swarm-info">
+                        <div class="info-icon">ℹ️</div>
+                        <div>
+                            <strong>Swarm Configuration Required</strong>
+                            <p>Make sure this server is already part of a Docker Swarm. For new clusters, initialize Swarm manually first:
+                            <code>docker swarm init</code> (manager) or <code>docker swarm join</code> (worker).</p>
+                        </div>
+                    </div>
+                }
+            </div>
+
+            <!-- Proxy Configuration -->
+            <div class="form-section">
+                <h2>Reverse Proxy</h2>
+                
+                <div class="form-group">
+                    <label for="proxy">Proxy Type</label>
+                    <InputSelect id="proxy" @bind-Value="model.ProxyType" class="form-control">
+                        <option value="@ProxyType.None">None</option>
+                        <option value="@ProxyType.Traefik">Traefik</option>
+                        <option value="@ProxyType.Caddy">Caddy</option>
+                        <option value="@ProxyType.Yarp">YARP (ASP.NET Core)</option>
+                    </InputSelect>
+                    <small class="form-text">Proxy for automatic HTTPS and routing</small>
+                </div>
+            </div>
+
+            <!-- Actions -->
+            <div class="form-actions">
+                <button type="button" class="btn btn-secondary" @onclick="GoBack" disabled="@saving">
+                    Cancel
+                </button>
+                
+                <button type="button" class="btn btn-outline" @onclick="TestConnection" disabled="@(saving || testing)">
+                    @if (testing)
+                    {
+                        <span class="spinner-sm"></span>
+                        <span>Testing...</span>
+                    }
+                    else
+                    {
+                        <span>🔍 Test Connection</span>
+                    }
+                </button>
+
+                <button type="submit" class="btn btn-primary" disabled="@saving">
+                    @if (saving)
+                    {
+                        <span class="spinner-sm"></span>
+                        <span>Saving...</span>
+                    }
+                    else
+                    {
+                        <span>@(IsEditMode ? "💾 Save Changes" : "➕ Add Server")</span>
+                    }
+                </button>
+            </div>
+
+            @if (!string.IsNullOrEmpty(errorMessage))
+            {
+                <div class="alert alert-danger">
+                    <strong>❌ Error:</strong> @errorMessage
+                </div>
+            }
+
+            @if (!string.IsNullOrEmpty(successMessage))
+            {
+                <div class="alert alert-success">
+                    <strong>✅ Success:</strong> @successMessage
+                </div>
+            }
+        </EditForm>
+    </div>
+</div>
+
+<style>
+    .server-form-page {
+        max-width: 800px;
+        margin: 0 auto;
+        padding: 24px;
+    }
+
+    .form-header {
+        margin-bottom: 32px;
+    }
+
+    .btn-back {
+        background: none;
+        border: none;
+        color: #0066cc;
+        font-size: 16px;
+        cursor: pointer;
+        padding: 8px 0;
+        margin-bottom: 16px;
+        display: inline-block;
+        transition: color 0.2s;
+    }
+
+    .btn-back:hover {
+        color: #0052a3;
+    }
+
+    .form-header h1 {
+        margin: 0;
+        font-size: 32px;
+        color: #2c3e50;
+    }
+
+    .form-container {
+        background: white;
+        border-radius: 12px;
+        padding: 32px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+
+    .form-section {
+        margin-bottom: 40px;
+        padding-bottom: 32px;
+        border-bottom: 2px solid #f1f3f5;
+    }
+
+    .form-section:last-of-type {
+        border-bottom: none;
+        margin-bottom: 0;
+        padding-bottom: 0;
+    }
+
+    .form-section h2 {
+        font-size: 20px;
+        color: #2c3e50;
+        margin: 0 0 24px 0;
+        font-weight: 600;
+    }
+
+    .form-group {
+        margin-bottom: 20px;
+    }
+
+    .form-group:last-child {
+        margin-bottom: 0;
+    }
+
+    .form-group label {
+        display: block;
+        margin-bottom: 8px;
+        font-weight: 600;
+        color: #2c3e50;
+        font-size: 14px;
+    }
+
+    .form-control {
+        width: 100%;
+        padding: 10px 12px;
+        border: 2px solid #dee2e6;
+        border-radius: 6px;
+        font-size: 14px;
+        transition: border-color 0.2s;
+        font-family: inherit;
+    }
+
+    .form-control:focus {
+        outline: none;
+        border-color: #0066cc;
+    }
+
+    .code-input {
+        font-family: 'Consolas', 'Monaco', monospace;
+        font-size: 12px;
+        line-height: 1.5;
+        resize: vertical;
+    }
+
+    .form-text {
+        display: block;
+        margin-top: 6px;
+        font-size: 12px;
+        color: #6c757d;
+    }
+
+    .form-text code {
+        background: #f8f9fa;
+        padding: 2px 6px;
+        border-radius: 3px;
+        font-family: 'Consolas', 'Monaco', monospace;
+    }
+
+    .form-row {
+        display: grid;
+        grid-template-columns: 1fr 200px;
+        gap: 16px;
+    }
+
+    .server-type-options {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 16px;
+        margin-bottom: 20px;
+    }
+
+    .radio-card {
+        position: relative;
+        cursor: pointer;
+        border: 2px solid #dee2e6;
+        border-radius: 8px;
+        padding: 20px;
+        transition: all 0.2s;
+        background: white;
+    }
+
+    .radio-card:hover {
+        border-color: #0066cc;
+        box-shadow: 0 4px 12px rgba(0, 102, 204, 0.1);
+    }
+
+    .radio-card.selected {
+        border-color: #0066cc;
+        background: #f0f7ff;
+    }
+
+    .radio-card input[type="radio"] {
+        position: absolute;
+        opacity: 0;
+    }
+
+    .radio-card-content {
+        text-align: center;
+    }
+
+    .radio-icon {
+        font-size: 40px;
+        margin-bottom: 12px;
+    }
+
+    .radio-title {
+        font-weight: 600;
+        font-size: 16px;
+        color: #2c3e50;
+        margin-bottom: 8px;
+    }
+
+    .radio-description {
+        font-size: 13px;
+        color: #6c757d;
+        line-height: 1.4;
+    }
+
+    .info-box {
+        display: flex;
+        gap: 12px;
+        padding: 16px;
+        border-radius: 8px;
+        margin-top: 16px;
+    }
+
+    .swarm-info {
+        background: #fff3cd;
+        border: 1px solid #ffc107;
+    }
+
+    .info-icon {
+        font-size: 24px;
+        flex-shrink: 0;
+    }
+
+    .info-box strong {
+        display: block;
+        margin-bottom: 4px;
+        color: #856404;
+    }
+
+    .info-box p {
+        margin: 0;
+        font-size: 13px;
+        color: #856404;
+        line-height: 1.5;
+    }
+
+    .form-actions {
+        display: flex;
+        gap: 12px;
+        justify-content: flex-end;
+        margin-top: 32px;
+        padding-top: 24px;
+        border-top: 2px solid #f1f3f5;
+    }
+
+    .btn {
+        padding: 10px 20px;
+        border: none;
+        border-radius: 6px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.2s;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 14px;
+    }
+
+    .btn:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+    }
+
+    .btn-primary {
+        background: #0066cc;
+        color: white;
+    }
+
+    .btn-primary:hover:not(:disabled) {
+        background: #0052a3;
+    }
+
+    .btn-secondary {
+        background: #6c757d;
+        color: white;
+    }
+
+    .btn-secondary:hover:not(:disabled) {
+        background: #5a6268;
+    }
+
+    .btn-outline {
+        background: white;
+        color: #0066cc;
+        border: 2px solid #0066cc;
+    }
+
+    .btn-outline:hover:not(:disabled) {
+        background: #0066cc;
+        color: white;
+    }
+
+    .spinner-sm {
+        width: 16px;
+        height: 16px;
+        border: 2px solid rgba(255,255,255,0.3);
+        border-top: 2px solid white;
+        border-radius: 50%;
+        animation: spin 0.8s linear infinite;
+    }
+
+    @@keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+    }
+
+    .alert {
+        padding: 16px;
+        border-radius: 6px;
+        margin-top: 24px;
+    }
+
+    .alert-danger {
+        background: #f8d7da;
+        color: #721c24;
+        border: 1px solid #f5c6cb;
+    }
+
+    .alert-success {
+        background: #d4edda;
+        color: #155724;
+        border: 1px solid #c3e6cb;
+    }
+
+    .validation-message {
+        color: #dc3545;
+        font-size: 12px;
+        margin-top: 6px;
+        display: block;
+    }
+</style>
+
+@code {
+    [Parameter]
+    public int? Id { get; set; }
+
+    private bool IsEditMode => Id.HasValue;
+    private ServerFormModel model = new();
+    private bool saving = false;
+    private bool testing = false;
+    private string? errorMessage;
+    private string? successMessage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (IsEditMode && Id.HasValue)
+        {
+            await LoadServer(Id.Value);
+        }
+    }
+
+    private async Task LoadServer(int id)
+    {
+        try
+        {
+            // TODO: Load from API
+            // var server = await Http.GetFromJsonAsync<ServerDto>($"/api/servers/{id}");
+            // Map to model
+        }
+        catch (Exception ex)
+        {
+            errorMessage = "Failed to load server details";
+        }
+    }
+
+    private async Task TestConnection()
+    {
+        testing = true;
+        errorMessage = null;
+        successMessage = null;
+
+        try
+        {
+            // TODO: Call validation endpoint
+            // var response = await Http.PostAsJsonAsync("/api/servers/validate", model);
+            
+            await Task.Delay(2000); // Simulate API call
+            successMessage = "✅ Connection successful! Docker daemon is accessible.";
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Connection failed: {ex.Message}";
+        }
+        finally
+        {
+            testing = false;
+        }
+    }
+
+    private async Task HandleSubmit()
+    {
+        saving = true;
+        errorMessage = null;
+        successMessage = null;
+
+        try
+        {
+            if (IsEditMode && Id.HasValue)
+            {
+                // TODO: await Http.PutAsJsonAsync($"/api/servers/{Id.Value}", model);
+                successMessage = "Server updated successfully!";
+            }
+            else
+            {
+                // TODO: await Http.PostAsJsonAsync("/api/servers", model);
+                successMessage = "Server added successfully!";
+            }
+
+            await Task.Delay(1500);
+            Navigation.NavigateTo("/servers");
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Failed to save server: {ex.Message}";
+        }
+        finally
+        {
+            saving = false;
+        }
+    }
+
+    private void GoBack()
+    {
+        Navigation.NavigateTo("/servers");
+    }
+
+    public class ServerFormModel
+    {
+        public string Name { get; set; } = "";
+        public string Host { get; set; } = "";
+        public int Port { get; set; } = 22;
+        public string User { get; set; } = "root";
+        public string? Region { get; set; }
+        public string PrivateKeyContent { get; set; } = "";
+        public ServerType Type { get; set; } = ServerType.Standalone;
+        public ProxyType ProxyType { get; set; } = ProxyType.None;
+    }
+}

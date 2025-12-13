@@ -1,0 +1,170 @@
+@using HostCraft.Core.Enums
+
+<div class="server-card @GetStatusClass()">
+    <div class="server-header">
+        <div class="server-role">
+            <span class="role-badge role-@Role.ToLower()">@GetRoleIcon() @Role.ToUpper()</span>
+        </div>
+        <div class="server-status">
+            @GetStatusIcon()
+        </div>
+    </div>
+    
+    <h4 class="server-name">@Server.Name</h4>
+    <div class="server-details">
+        <div class="detail">
+            <span class="label">Host:</span>
+            <span class="value">@Server.Host</span>
+        </div>
+        @if (!string.IsNullOrEmpty(Server.Region))
+        {
+            <div class="detail">
+                <span class="label">Region:</span>
+                <span class="value">🌍 @Server.Region</span>
+            </div>
+        }
+        @if (Server.Type == ServerType.SwarmManager && Server.SwarmManagerCount.HasValue)
+        {
+            <div class="detail">
+                <span class="label">Cluster:</span>
+                <span class="value">@Server.SwarmManagerCount managers, @Server.SwarmWorkerCount workers</span>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter] public required ServerDto Server { get; set; }
+    [Parameter] public string Role { get; set; } = "";
+
+    private string GetStatusClass()
+    {
+        return Server.Status switch
+        {
+            ServerStatus.Online => "status-online",
+            ServerStatus.Offline => "status-offline",
+            ServerStatus.Error => "status-error",
+            ServerStatus.Validating => "status-validating",
+            _ => ""
+        };
+    }
+
+    private string GetStatusIcon()
+    {
+        return Server.Status switch
+        {
+            ServerStatus.Online => "🟢",
+            ServerStatus.Offline => "🔴",
+            ServerStatus.Error => "⚠️",
+            ServerStatus.Validating => "🔄",
+            _ => "❓"
+        };
+    }
+
+    private string GetRoleIcon()
+    {
+        return Role.ToLower() switch
+        {
+            "manager" => "👑",
+            "worker" => "⚙️",
+            "standalone" => "💻",
+            _ => "📦"
+        };
+    }
+
+    public class ServerDto
+    {
+        public int Id { get; set; }
+        public string Name { get; set; } = "";
+        public string Host { get; set; } = "";
+        public ServerType Type { get; set; }
+        public ServerStatus Status { get; set; }
+        public string? Region { get; set; }
+        public int? SwarmManagerCount { get; set; }
+        public int? SwarmWorkerCount { get; set; }
+    }
+}
+
+<style>
+    .server-card {
+        background: white;
+        border-radius: 8px;
+        padding: 16px;
+        border: 2px solid #e9ecef;
+        transition: all 0.2s ease;
+    }
+
+    .server-card:hover {
+        border-color: #0066cc;
+        box-shadow: 0 2px 8px rgba(0,102,204,0.1);
+    }
+
+    .server-card.status-online { border-left: 4px solid #28a745; }
+    .server-card.status-offline { border-left: 4px solid #dc3545; }
+    .server-card.status-error { border-left: 4px solid #ffc107; }
+    .server-card.status-validating { border-left: 4px solid #17a2b8; }
+
+    .server-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 12px;
+    }
+
+    .role-badge {
+        display: inline-block;
+        padding: 4px 10px;
+        border-radius: 4px;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.5px;
+    }
+
+    .role-manager {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+    }
+
+    .role-worker {
+        background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+        color: white;
+    }
+
+    .role-standalone {
+        background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+        color: white;
+    }
+
+    .server-status {
+        font-size: 20px;
+    }
+
+    .server-name {
+        margin: 0 0 12px 0;
+        font-size: 16px;
+        font-weight: 600;
+        color: #2c3e50;
+    }
+
+    .server-details {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+    }
+
+    .detail {
+        display: flex;
+        font-size: 13px;
+    }
+
+    .detail .label {
+        color: #6c757d;
+        min-width: 60px;
+        font-weight: 500;
+    }
+
+    .detail .value {
+        color: #2c3e50;
+        font-family: 'Courier New', monospace;
+    }
+</style>
