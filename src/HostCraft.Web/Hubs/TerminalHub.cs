@@ -31,7 +31,7 @@ public class TerminalHub : Hub
             var username = "root";
             var privateKey = ""; // TODO: Get from database and decrypt
 
-            var connectionInfo = new ConnectionInfo(
+            var connectionInfo = new Renci.SshNet.ConnectionInfo(
                 host,
                 port,
                 username,

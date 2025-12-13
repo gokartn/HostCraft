@@ -25,7 +25,7 @@
                     </div>
                 </div>
                 <div class="header-actions">
-                    <button class="btn btn-outline" @onclick="() => Navigation.NavigateTo($"/servers/{Id}/edit")">
+                    <button class="btn btn-outline" @onclick="@(() => Navigation.NavigateTo($"/servers/{Id}/edit"))">
                         ✏️ Edit
                     </button>
                 </div>
