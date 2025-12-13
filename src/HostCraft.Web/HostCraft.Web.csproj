@@ -7,4 +7,14 @@
     <BlazorDisableThrowNavigationException>true</BlazorDisableThrowNavigationException>
   </PropertyGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\HostCraft.Core\HostCraft.Core.csproj" />
+    <ProjectReference Include="..\HostCraft.Infrastructure\HostCraft.Infrastructure.csproj" />
+    <ProjectReference Include="..\HostCraft.Shared\HostCraft.Shared.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="10.0.0" />
+  </ItemGroup>
+
 </Project>
