@@ -31,13 +31,19 @@ public class ServersController : ControllerBase
     [HttpGet]
     public async Task<ActionResult<IEnumerable<Server>>> GetServers()
     {
-        return await _context.Servers.ToListAsync();
+        return await _context.Servers
+            .Include(s => s.PrivateKey)
+            .Include(s => s.Region)
+            .ToListAsync();
     }
     
     [HttpGet("{id}")]
     public async Task<ActionResult<Server>> GetServer(int id)
     {
-        var server = await _context.Servers.FindAsync(id);
+        var server = await _context.Servers
+            .Include(s => s.PrivateKey)
+            .Include(s => s.Region)
+            .FirstOrDefaultAsync(s => s.Id == id);
         
         if (server == null)
         {
