@@ -1,0 +1,386 @@
+@page "/servers/{ServerId:int}/images"
+@rendermode InteractiveServer
+@inject HttpClient Http
+@inject NavigationManager Navigation
+@inject IJSRuntime JS
+
+<PageTitle>Images - HostCraft</PageTitle>
+
+<div class="page-container">
+    <div class="page-header">
+        <div class="header-left">
+            <button class="btn-back" @onclick="GoBack">← Back</button>
+            <h1>🖼️ Docker Images</h1>
+            <p class="subtitle">Manage Docker images on this server</p>
+        </div>
+        <div class="header-actions">
+            <button class="btn btn-primary" @onclick="ShowPullDialog">
+                ⬇️ Pull Image
+            </button>
+        </div>
+    </div>
+
+    @if (isLoading)
+    {
+        <div class="loading-spinner">
+            <div class="spinner"></div>
+            <p>Loading images...</p>
+        </div>
+    }
+    else if (!string.IsNullOrEmpty(errorMessage))
+    {
+        <div class="alert alert-danger">
+            <strong>❌ Error:</strong> @errorMessage
+        </div>
+    }
+    else if (images == null || !images.Any())
+    {
+        <div class="empty-state">
+            <div class="empty-icon">🖼️</div>
+            <h2>No Images</h2>
+            <p>Pull an image to get started</p>
+            <button class="btn btn-primary" @onclick="ShowPullDialog">
+                ⬇️ Pull Image
+            </button>
+        </div>
+    }
+    else
+    {
+        <div class="images-list">
+            @foreach (var image in images)
+            {
+                <div class="image-card">
+                    <div class="image-header">
+                        <div>
+                            <h3>@GetImageName(image.RepoTags)</h3>
+                            @if (image.RepoTags != null && image.RepoTags.Any())
+                            {
+                                <div class="image-tags">
+                                    @foreach (var tag in image.RepoTags.Take(3))
+                                    {
+                                        <span class="tag">@tag</span>
+                                    }
+                                    @if (image.RepoTags.Count > 3)
+                                    {
+                                        <span class="tag">+@(image.RepoTags.Count - 3) more</span>
+                                    }
+                                </div>
+                            }
+                        </div>
+                        <button class="btn-icon btn-danger" @onclick="() => DeleteImage(image.Id)" title="Delete">
+                            🗑️
+                        </button>
+                    </div>
+                    <div class="image-body">
+                        <div class="info-row">
+                            <span class="label">ID:</span>
+                            <span class="value code">@image.Id.Substring(0, 12)</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="label">Size:</span>
+                            <span class="value">@FormatSize(image.Size)</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="label">Created:</span>
+                            <span class="value">@image.Created.ToString("g")</span>
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@if (showPullDialog)
+{
+    <div class="modal-overlay" @onclick="ClosePullDialog">
+        <div class="modal-content" @onclick:stopPropagation>
+            <div class="modal-header">
+                <h3>Pull Image</h3>
+                <button class="btn-close" @onclick="ClosePullDialog">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Image Name *</label>
+                    <input type="text" @bind="imageName" class="form-control" placeholder="nginx:latest" />
+                    <small class="form-text">Format: image:tag or registry/image:tag</small>
+                </div>
+                @if (pulling)
+                {
+                    <div class="pull-progress">
+                        <div class="progress-bar">
+                            <div class="progress-fill" style="width: @pullProgress%"></div>
+                        </div>
+                        <p>Pulling image... @pullProgress%</p>
+                    </div>
+                }
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" @onclick="ClosePullDialog" disabled="@pulling">Cancel</button>
+                <button class="btn btn-primary" @onclick="PullImage" disabled="@pulling">
+                    @if (pulling)
+                    {
+                        <span>⬇️ Pulling...</span>
+                    }
+                    else
+                    {
+                        <span>⬇️ Pull</span>
+                    }
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+<style>
+    .images-list {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+        gap: var(--space-lg);
+        margin-top: var(--space-lg);
+    }
+
+    .image-card {
+        background: var(--card-bg);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-md);
+        padding: var(--space-lg);
+    }
+
+    .image-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        margin-bottom: var(--space-md);
+        padding-bottom: var(--space-md);
+        border-bottom: 1px solid var(--border-color);
+    }
+
+    .image-header h3 {
+        margin: 0 0 var(--space-sm) 0;
+        color: var(--primary-color);
+        word-break: break-all;
+    }
+
+    .image-tags {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--space-xs);
+        margin-top: var(--space-sm);
+    }
+
+    .tag {
+        display: inline-block;
+        padding: 2px 8px;
+        background: var(--primary-color-alpha);
+        color: var(--primary-color);
+        border-radius: 4px;
+        font-size: 0.75rem;
+        font-weight: 600;
+    }
+
+    .image-body .info-row {
+        display: flex;
+        justify-content: space-between;
+        margin-bottom: var(--space-sm);
+    }
+
+    .image-body .label {
+        color: var(--text-secondary);
+        font-weight: 500;
+    }
+
+    .image-body .value {
+        color: var(--text-primary);
+    }
+
+    .image-body .code {
+        font-family: 'Courier New', monospace;
+        font-size: 0.9em;
+        background: var(--bg-secondary);
+        padding: 2px 6px;
+        border-radius: 4px;
+    }
+
+    .pull-progress {
+        margin-top: var(--space-md);
+    }
+
+    .progress-bar {
+        width: 100%;
+        height: 8px;
+        background: var(--bg-secondary);
+        border-radius: 4px;
+        overflow: hidden;
+        margin-bottom: var(--space-sm);
+    }
+
+    .progress-fill {
+        height: 100%;
+        background: var(--primary-color);
+        transition: width 0.3s;
+    }
+</style>
+
+@code {
+    [Parameter]
+    public int ServerId { get; set; }
+
+    private List<ImageDto>? images;
+    private bool isLoading = true;
+    private string? errorMessage;
+    private bool showPullDialog = false;
+    private string imageName = "";
+    private bool pulling = false;
+    private int pullProgress = 0;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadImages();
+    }
+
+    private async Task LoadImages()
+    {
+        isLoading = true;
+        errorMessage = null;
+
+        try
+        {
+            images = await Http.GetFromJsonAsync<List<ImageDto>>($"api/servers/{ServerId}/images");
+        }
+        catch (Exception ex)
+        {
+            errorMessage = ex.Message;
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private void ShowPullDialog()
+    {
+        imageName = "";
+        pullProgress = 0;
+        showPullDialog = true;
+    }
+
+    private void ClosePullDialog()
+    {
+        if (!pulling)
+        {
+            showPullDialog = false;
+        }
+    }
+
+    private async Task PullImage()
+    {
+        if (string.IsNullOrWhiteSpace(imageName))
+        {
+            errorMessage = "Image name is required";
+            return;
+        }
+
+        pulling = true;
+        pullProgress = 0;
+        errorMessage = null;
+
+        try
+        {
+            // Simulate progress (in a real implementation, you'd track actual progress)
+            var progressTask = Task.Run(async () =>
+            {
+                for (int i = 0; i <= 90; i += 10)
+                {
+                    if (!pulling) break;
+                    pullProgress = i;
+                    StateHasChanged();
+                    await Task.Delay(500);
+                }
+            });
+
+            var response = await Http.PostAsJsonAsync($"api/servers/{ServerId}/images/pull", new
+            {
+                Image = imageName
+            });
+
+            pullProgress = 100;
+            StateHasChanged();
+            await Task.Delay(500);
+
+            if (response.IsSuccessStatusCode)
+            {
+                ClosePullDialog();
+                await LoadImages();
+            }
+            else
+            {
+                errorMessage = "Failed to pull image";
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error pulling image: {ex.Message}";
+        }
+        finally
+        {
+            pulling = false;
+        }
+    }
+
+    private async Task DeleteImage(string imageId)
+    {
+        if (!await JS.InvokeAsync<bool>("confirm", "Are you sure you want to delete this image?"))
+            return;
+
+        try
+        {
+            var response = await Http.DeleteAsync($"api/servers/{ServerId}/images/{imageId}");
+            if (response.IsSuccessStatusCode)
+            {
+                await LoadImages();
+            }
+            else
+            {
+                errorMessage = "Failed to delete image";
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error deleting image: {ex.Message}";
+        }
+    }
+
+    private string GetImageName(List<string>? repoTags)
+    {
+        if (repoTags == null || !repoTags.Any())
+            return "<none>";
+        return repoTags.First();
+    }
+
+    private string FormatSize(long bytes)
+    {
+        string[] sizes = { "B", "KB", "MB", "GB", "TB" };
+        double len = bytes;
+        int order = 0;
+        while (len >= 1024 && order < sizes.Length - 1)
+        {
+            order++;
+            len = len / 1024;
+        }
+        return $"{len:0.##} {sizes[order]}";
+    }
+
+    private void GoBack()
+    {
+        Navigation.NavigateTo($"/servers/{ServerId}");
+    }
+
+    public class ImageDto
+    {
+        public string Id { get; set; } = "";
+        public List<string>? RepoTags { get; set; }
+        public long Size { get; set; }
+        public DateTime Created { get; set; }
+    }
+}

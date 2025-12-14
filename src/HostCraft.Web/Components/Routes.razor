@@ -4,3 +4,8 @@
         <FocusOnNavigate RouteData="routeData" Selector="h1" />
     </Found>
 </Router>
+
+@code {
+    [CascadingParameter]
+    public HttpContext? HttpContext { get; set; }
+}

@@ -1,0 +1,308 @@
+@page "/settings"
+@rendermode InteractiveServer
+@inject HttpClient Http
+@inject IJSRuntime JS
+
+<PageTitle>Settings - HostCraft</PageTitle>
+
+<div class="page-container">
+    <div class="page-header">
+        <h1>⚙️ Settings</h1>
+        <p class="page-subtitle">Application configuration and system information</p>
+    </div>
+
+    <!-- Version & Updates Section -->
+    <div class="card">
+        <div class="card-header">
+            <h2 class="card-title">
+                <span>🔄</span> Version & Updates
+            </h2>
+            @if (updateInfo?.UpdateAvailable == true)
+            {
+                <span class="badge badge-success">Update Available</span>
+            }
+            else if (checkingForUpdates)
+            {
+                <span class="badge">Checking...</span>
+            }
+            else
+            {
+                <span class="badge badge-info">Up to Date</span>
+            }
+        </div>
+
+        <div class="settings-section">
+            <div class="version-info">
+                <div class="info-row">
+                    <span class="label">Current Version:</span>
+                    <span class="value">
+                        <code>v@(versionInfo?.Version ?? "Loading...")</code>
+                    </span>
+                </div>
+                @if (versionInfo != null)
+                {
+                    <div class="info-row">
+                        <span class="label">Build Date:</span>
+                        <span class="value">@versionInfo.BuildDate.ToString("MMMM dd, yyyy HH:mm")</span>
+                    </div>
+                }
+                @if (updateInfo != null)
+                {
+                    @if (updateInfo.UpdateAvailable && !string.IsNullOrEmpty(updateInfo.LatestVersion))
+                    {
+                        <div class="info-row highlight">
+                            <span class="label">Latest Version:</span>
+                            <span class="value">
+                                <code>v@updateInfo.LatestVersion</code>
+                                <span class="badge badge-success">New!</span>
+                            </span>
+                        </div>
+                        @if (updateInfo.PublishedAt.HasValue)
+                        {
+                            <div class="info-row">
+                                <span class="label">Released:</span>
+                                <span class="value">@updateInfo.PublishedAt.Value.ToString("MMMM dd, yyyy")</span>
+                            </div>
+                        }
+                        @if (!string.IsNullOrEmpty(updateInfo.ReleaseNotes))
+                        {
+                            <div class="release-notes">
+                                <h3>Release Notes:</h3>
+                                <div class="notes-content">@updateInfo.ReleaseNotes</div>
+                            </div>
+                        }
+                    }
+                }
+
+                <div class="action-buttons">
+                    <button class="btn btn-outline" @onclick="CheckForUpdates" disabled="@checkingForUpdates">
+                        @if (checkingForUpdates)
+                        {
+                            <span class="spinner-sm"></span>
+                            <span>Checking...</span>
+                        }
+                        else
+                        {
+                            <span>🔍 Check for Updates</span>
+                        }
+                    </button>
+
+                    @if (updateInfo?.UpdateAvailable == true && !string.IsNullOrEmpty(updateInfo.HtmlUrl))
+                    {
+                        <a href="@updateInfo.HtmlUrl" target="_blank" class="btn btn-primary">
+                            📥 View Release
+                        </a>
+                    }
+
+                    @if (updateInfo?.UpdateAvailable == true)
+                    {
+                        <button class="btn btn-success" @onclick="TriggerUpdate" disabled="@updatingInProgress">
+                            @if (updatingInProgress)
+                            {
+                                <span class="spinner-sm"></span>
+                                <span>Updating...</span>
+                            }
+                            else
+                            {
+                                <span>⬆️ Update Now</span>
+                            }
+                        </button>
+                    }
+                </div>
+
+                @if (!string.IsNullOrEmpty(updateError))
+                {
+                    <div class="alert alert-danger">
+                        <strong>Error:</strong> @updateError
+                    </div>
+                }
+
+                @if (!string.IsNullOrEmpty(updateSuccess))
+                {
+                    <div class="alert alert-success">
+                        <strong>Success:</strong> @updateSuccess
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+
+    <!-- System Information -->
+    <div class="card">
+        <div class="card-header">
+            <h2 class="card-title">
+                <span>💻</span> System Information
+            </h2>
+        </div>
+
+        <div class="settings-section">
+            <div class="info-grid">
+                <div class="info-item">
+                    <span class="label">Platform:</span>
+                    <span class="value">@GetPlatform()</span>
+                </div>
+                <div class="info-item">
+                    <span class="label">Runtime:</span>
+                    <span class="value">.NET @Environment.Version.ToString()</span>
+                </div>
+                <div class="info-item">
+                    <span class="label">Architecture:</span>
+                    <span class="value">@GetArchitecture()</span>
+                </div>
+                <div class="info-item">
+                    <span class="label">Working Directory:</span>
+                    <span class="value"><code>@Environment.CurrentDirectory</code></span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- About Section -->
+    <div class="card">
+        <div class="card-header">
+            <h2 class="card-title">
+                <span>ℹ️</span> About HostCraft
+            </h2>
+        </div>
+
+        <div class="settings-section">
+            <div class="about-content">
+                <p>
+                    <strong>HostCraft</strong> is a self-hosted Docker Platform-as-a-Service (PaaS) 
+                    that simplifies container orchestration and deployment management.
+                </p>
+                <div class="about-links">
+                    <a href="https://github.com/gokartn/hostcraft" target="_blank" class="about-link">
+                        📚 Documentation
+                    </a>
+                    <a href="https://github.com/gokartn/hostcraft" target="_blank" class="about-link">
+                        🐙 GitHub Repository
+                    </a>
+                    <a href="https://github.com/gokartn/hostcraft/issues" target="_blank" class="about-link">
+                        🐛 Report Issue
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    private VersionInfo? versionInfo;
+    private UpdateInfo? updateInfo;
+    private bool checkingForUpdates = false;
+    private bool updatingInProgress = false;
+    private string? updateError;
+    private string? updateSuccess;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadVersion();
+        await CheckForUpdates();
+    }
+
+    private async Task LoadVersion()
+    {
+        try
+        {
+            versionInfo = await Http.GetFromJsonAsync<VersionInfo>("api/update/version");
+        }
+        catch (Exception ex)
+        {
+            updateError = $"Failed to load version: {ex.Message}";
+        }
+    }
+
+    private async Task CheckForUpdates()
+    {
+        checkingForUpdates = true;
+        updateError = null;
+        updateSuccess = null;
+
+        try
+        {
+            updateInfo = await Http.GetFromJsonAsync<UpdateInfo>("api/update/check");
+            
+            if (updateInfo?.UpdateAvailable == true)
+            {
+                updateSuccess = $"New version {updateInfo.LatestVersion} is available!";
+            }
+        }
+        catch (Exception ex)
+        {
+            updateError = $"Failed to check for updates: {ex.Message}";
+        }
+        finally
+        {
+            checkingForUpdates = false;
+        }
+    }
+
+    private async Task TriggerUpdate()
+    {
+        if (updateInfo == null || string.IsNullOrEmpty(updateInfo.LatestVersion)) return;
+
+        var confirmed = await JS.InvokeAsync<bool>(
+            "confirm", 
+            $"Are you sure you want to update to version {updateInfo.LatestVersion}? The application will restart."
+        );
+
+        if (!confirmed) return;
+
+        updatingInProgress = true;
+        updateError = null;
+        updateSuccess = null;
+
+        try
+        {
+            var response = await Http.PostAsJsonAsync("api/update/trigger", new { Version = updateInfo.LatestVersion });
+            
+            if (response.IsSuccessStatusCode)
+            {
+                updateSuccess = "Update triggered successfully! The application will restart shortly.";
+            }
+            else
+            {
+                updateError = "Update trigger failed. Please check the deployment configuration.";
+            }
+        }
+        catch (Exception ex)
+        {
+            updateError = $"Failed to trigger update: {ex.Message}";
+        }
+        finally
+        {
+            updatingInProgress = false;
+        }
+    }
+
+    private string GetPlatform()
+    {
+        if (OperatingSystem.IsWindows()) return "Windows";
+        if (OperatingSystem.IsLinux()) return "Linux";
+        if (OperatingSystem.IsMacOS()) return "macOS";
+        return "Unknown";
+    }
+
+    private string GetArchitecture()
+    {
+        return System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture.ToString();
+    }
+
+    public class VersionInfo
+    {
+        public string Version { get; set; } = "";
+        public DateTime BuildDate { get; set; }
+    }
+
+    public class UpdateInfo
+    {
+        public string CurrentVersion { get; set; } = "";
+        public string? LatestVersion { get; set; }
+        public bool UpdateAvailable { get; set; }
+        public DateTime? PublishedAt { get; set; }
+        public string? ReleaseNotes { get; set; }
+        public string? DownloadUrl { get; set; }
+        public string? HtmlUrl { get; set; }
+    }
+}

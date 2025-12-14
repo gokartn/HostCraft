@@ -1,0 +1,174 @@
+@page "/servers/{ServerId:int}/containers/{ContainerId}/logs"
+@page "/servers/{ServerId:int}/services/{ServiceId}/logs"
+@rendermode InteractiveServer
+@using System.Net.Http.Json
+@inject HttpClient Http
+@inject NavigationManager Navigation
+@inject ILogger<LogViewer> Logger
+
+<div class="page-container log-viewer-container">
+    <div class="page-header">
+        <div class="header-left">
+            <h1>📄 Logs</h1>
+            <p class="subtitle">@(ContainerId != null ? $"Container: {ContainerId.Substring(0, 12)}" : $"Service: {ServiceId}")</p>
+        </div>
+        <div class="header-actions">
+            <button class="btn-secondary" @onclick="RefreshLogs">
+                🔄 Refresh
+            </button>
+            <button class="btn-secondary" @onclick="DownloadLogs">
+                💾 Download
+            </button>
+            <button class="btn-secondary" @onclick="GoBack">
+                ← Back
+            </button>
+        </div>
+    </div>
+    
+    <div class="log-viewer-card">
+        @if (isLoading)
+        {
+            <div class="loading-spinner">
+                <div class="spinner"></div>
+                <p>Loading logs...</p>
+            </div>
+        }
+        else if (string.IsNullOrEmpty(logs))
+        {
+            <div class="empty-logs">
+                <p>No logs available</p>
+            </div>
+        }
+        else
+        {
+            <div class="log-controls">
+                <label class="checkbox-label">
+                    <input type="checkbox" @bind="autoScroll" />
+                    Auto-scroll
+                </label>
+                <label class="checkbox-label">
+                    <input type="checkbox" @bind="wordWrap" />
+                    Word wrap
+                </label>
+                <input type="text" @bind="searchText" @bind:event="oninput" placeholder="Search logs..." class="search-input" />
+            </div>
+            
+            <div class="log-content @(wordWrap ? "word-wrap" : "")" @ref="logContainer">
+                @if (string.IsNullOrEmpty(searchText))
+                {
+                    <pre>@logs</pre>
+                }
+                else
+                {
+                    @foreach (var line in GetFilteredLines())
+                    {
+                        <div class="log-line">@line</div>
+                    }
+                }
+            </div>
+        }
+        
+        @if (!string.IsNullOrEmpty(errorMessage))
+        {
+            <div class="alert alert-danger">
+                ⚠️ @errorMessage
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter]
+    public int ServerId { get; set; }
+    
+    [Parameter]
+    public string? ContainerId { get; set; }
+    
+    [Parameter]
+    public string? ServiceId { get; set; }
+    
+    private string? logs;
+    private bool isLoading = true;
+    private bool autoScroll = true;
+    private bool wordWrap = false;
+    private string searchText = "";
+    private string? errorMessage;
+    private ElementReference logContainer;
+    
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadLogs();
+    }
+    
+    private async Task LoadLogs()
+    {
+        isLoading = true;
+        errorMessage = null;
+        StateHasChanged();
+        
+        try
+        {
+            string endpoint;
+            if (!string.IsNullOrEmpty(ContainerId))
+            {
+                endpoint = $"api/servers/{ServerId}/containers/{ContainerId}/logs";
+            }
+            else if (!string.IsNullOrEmpty(ServiceId))
+            {
+                endpoint = $"api/servers/{ServerId}/services/{ServiceId}/logs";
+            }
+            else
+            {
+                errorMessage = "Invalid container or service ID";
+                return;
+            }
+            
+            var response = await Http.GetFromJsonAsync<LogsResponse>(endpoint);
+            logs = response?.Logs ?? "No logs available";
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading logs");
+            errorMessage = "Failed to load logs";
+            logs = "";
+        }
+        finally
+        {
+            isLoading = false;
+            StateHasChanged();
+        }
+    }
+    
+    private async Task RefreshLogs()
+    {
+        await LoadLogs();
+    }
+    
+    private void DownloadLogs()
+    {
+        if (string.IsNullOrEmpty(logs)) return;
+        
+        var fileName = ContainerId != null 
+            ? $"container-{ContainerId.Substring(0, 12)}-logs.txt"
+            : $"service-{ServiceId}-logs.txt";
+        
+        // Create download (would need JS interop for actual download)
+        Logger.LogInformation("Download logs: {FileName}", fileName);
+    }
+    
+    private void GoBack()
+    {
+        Navigation.NavigateTo($"/servers/{ServerId}/containers");
+    }
+    
+    private IEnumerable<string> GetFilteredLines()
+    {
+        if (string.IsNullOrEmpty(logs) || string.IsNullOrEmpty(searchText))
+            return logs?.Split('\n') ?? Array.Empty<string>();
+        
+        return logs.Split('\n')
+            .Where(line => line.Contains(searchText, StringComparison.OrdinalIgnoreCase));
+    }
+    
+    private record LogsResponse(string Logs);
+}

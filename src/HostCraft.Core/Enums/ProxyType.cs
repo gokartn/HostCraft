@@ -21,7 +21,12 @@ public enum ProxyType
     Caddy = 2,
     
     /// <summary>
+    /// Nginx reverse proxy with SSL termination.
+    /// </summary>
+    Nginx = 3,
+    
+    /// <summary>
     /// YARP (Yet Another Reverse Proxy) built into HostCraft.
     /// </summary>
-    Yarp = 3
+    Yarp = 4
 }

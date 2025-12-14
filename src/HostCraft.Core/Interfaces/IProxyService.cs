@@ -11,4 +11,5 @@ public interface IProxyService
     Task<bool> RemoveApplicationAsync(Application application, CancellationToken cancellationToken = default);
     Task<bool> ReloadConfigurationAsync(Server server, CancellationToken cancellationToken = default);
     Task<string> GenerateConfigAsync(Application application, CancellationToken cancellationToken = default);
+    Task<bool> EnsureProxyDeployedAsync(Server server, CancellationToken cancellationToken = default);
 }

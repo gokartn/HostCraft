@@ -1,5 +1,6 @@
 @page "/servers/new"
 @page "/servers/{id:int}/edit"
+@rendermode InteractiveServer
 @using HostCraft.Core.Enums
 @inject HttpClient Http
 @inject NavigationManager Navigation
@@ -59,12 +60,36 @@
                 <h2>SSH Authentication</h2>
                 
                 <div class="form-group">
-                    <label for="privateKey">Private Key *</label>
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-sm);">
+                        <label for="privateKey">Private Key *</label>
+                        <button type="button" class="btn btn-outline btn-sm" @onclick="GenerateKeyPair">
+                            🔑 Generate Key Pair
+                        </button>
+                    </div>
                     <InputTextArea id="privateKey" @bind-Value="model.PrivateKeyContent" class="form-control code-input" rows="8" 
                                    placeholder="-----BEGIN OPENSSH PRIVATE KEY-----&#10;...&#10;-----END OPENSSH PRIVATE KEY-----" />
                     <ValidationMessage For="@(() => model.PrivateKeyContent)" />
                     <small class="form-text">Paste your SSH private key here (will be encrypted at rest)</small>
                 </div>
+
+                @if (!string.IsNullOrEmpty(generatedPublicKey))
+                {
+                    <div class="alert alert-success">
+                        <strong>✅ Key Pair Generated!</strong>
+                        <p>Public key (add this to your server's ~/.ssh/authorized_keys):</p>
+                        <div class="key-display">
+                            <code>@generatedPublicKey</code>
+                        </div>
+                        <div style="margin-top: var(--space-md); display: flex; gap: var(--space-sm);">
+                            <button type="button" class="btn btn-outline btn-sm" @onclick="CopyPublicKey">
+                                📋 Copy Public Key
+                            </button>
+                            <button type="button" class="btn btn-outline btn-sm" @onclick="DownloadPrivateKey">
+                                💾 Download Private Key
+                            </button>
+                        </div>
+                    </div>
+                }
             </div>
 
             <!-- Server Type -->
@@ -72,38 +97,35 @@
                 <h2>Server Type</h2>
                 
                 <div class="server-type-options">
-                    <label class="radio-card @(model.Type == ServerType.Standalone ? "selected" : "")">
+                    <div class="radio-card @(model.Type == ServerType.Standalone ? "selected" : "")" @onclick="@(() => SelectServerType(ServerType.Standalone))">
                         <input type="radio" name="type" value="@ServerType.Standalone" 
-                               checked="@(model.Type == ServerType.Standalone)"
-                               @onchange="@(() => model.Type = ServerType.Standalone)" />
+                               checked="@(model.Type == ServerType.Standalone)" />
                         <div class="radio-card-content">
                             <div class="radio-icon">💻</div>
                             <div class="radio-title">Standalone</div>
                             <div class="radio-description">Single Docker host for simple deployments</div>
                         </div>
-                    </label>
+                    </div>
 
-                    <label class="radio-card @(model.Type == ServerType.SwarmManager ? "selected" : "")">
+                    <div class="radio-card @(model.Type == ServerType.SwarmManager ? "selected" : "")" @onclick="@(() => SelectServerType(ServerType.SwarmManager))">
                         <input type="radio" name="type" value="@ServerType.SwarmManager" 
-                               checked="@(model.Type == ServerType.SwarmManager)"
-                               @onchange="@(() => model.Type = ServerType.SwarmManager)" />
+                               checked="@(model.Type == ServerType.SwarmManager)" />
                         <div class="radio-card-content">
                             <div class="radio-icon">👑</div>
                             <div class="radio-title">Swarm Manager</div>
                             <div class="radio-description">Control plane node with scheduling capabilities</div>
                         </div>
-                    </label>
+                    </div>
 
-                    <label class="radio-card @(model.Type == ServerType.SwarmWorker ? "selected" : "")">
+                    <div class="radio-card @(model.Type == ServerType.SwarmWorker ? "selected" : "")" @onclick="@(() => SelectServerType(ServerType.SwarmWorker))">
                         <input type="radio" name="type" value="@ServerType.SwarmWorker" 
-                               checked="@(model.Type == ServerType.SwarmWorker)"
-                               @onchange="@(() => model.Type = ServerType.SwarmWorker)" />
+                               checked="@(model.Type == ServerType.SwarmWorker)" />
                         <div class="radio-card-content">
                             <div class="radio-icon">⚙️</div>
                             <div class="radio-title">Swarm Worker</div>
                             <div class="radio-description">Worker node for running containers</div>
                         </div>
-                    </label>
+                    </div>
                 </div>
 
                 @if (model.Type != ServerType.Standalone)
@@ -123,15 +145,29 @@
             <div class="form-section">
                 <h2>Reverse Proxy</h2>
                 
+                <div class="info-box">
+                    <div class="info-icon">✅</div>
+                    <div>
+                        <strong>Automatic Proxy Deployment</strong>
+                        <p>When you select a proxy type, HostCraft will automatically deploy and configure it on your server. Applications will be automatically registered with the proxy for HTTPS and routing.</p>
+                    </div>
+                </div>
+
                 <div class="form-group">
                     <label for="proxy">Proxy Type</label>
                     <InputSelect id="proxy" @bind-Value="model.ProxyType" class="form-control">
-                        <option value="@ProxyType.None">None</option>
-                        <option value="@ProxyType.Traefik">Traefik</option>
-                        <option value="@ProxyType.Caddy">Caddy</option>
-                        <option value="@ProxyType.Yarp">YARP (ASP.NET Core)</option>
+                        <option value="@ProxyType.None">None - No reverse proxy</option>
+                        <option value="@ProxyType.Traefik">Traefik - Automatic service discovery & HTTPS</option>
+                        <option value="@ProxyType.Caddy">Caddy - Automatic HTTPS with zero config</option>
+                        <option value="@ProxyType.Nginx">Nginx - High-performance web server & reverse proxy</option>
+                        <option value="@ProxyType.Yarp">YARP - ASP.NET Core reverse proxy (Coming Soon)</option>
                     </InputSelect>
-                    <small class="form-text">Proxy for automatic HTTPS and routing</small>
+                    <small class="form-text">
+                        <strong>Traefik:</strong> Port 80, 443 (web), 8080 (dashboard)<br/>
+                        <strong>Caddy:</strong> Port 80, 443 (web), 2019 (admin API)<br/>
+                        <strong>Nginx:</strong> Port 80, 443 (web) - Use certbot for HTTPS<br/>
+                        Automatic HTTPS certificates via Let's Encrypt (Traefik/Caddy)
+                    </small>
                 </div>
             </div>
 
@@ -183,304 +219,6 @@
     </div>
 </div>
 
-<style>
-    .server-form-page {
-        max-width: 800px;
-        margin: 0 auto;
-        padding: 24px;
-    }
-
-    .form-header {
-        margin-bottom: 32px;
-    }
-
-    .btn-back {
-        background: none;
-        border: none;
-        color: #0066cc;
-        font-size: 16px;
-        cursor: pointer;
-        padding: 8px 0;
-        margin-bottom: 16px;
-        display: inline-block;
-        transition: color 0.2s;
-    }
-
-    .btn-back:hover {
-        color: #0052a3;
-    }
-
-    .form-header h1 {
-        margin: 0;
-        font-size: 32px;
-        color: #2c3e50;
-    }
-
-    .form-container {
-        background: white;
-        border-radius: 12px;
-        padding: 32px;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-    }
-
-    .form-section {
-        margin-bottom: 40px;
-        padding-bottom: 32px;
-        border-bottom: 2px solid #f1f3f5;
-    }
-
-    .form-section:last-of-type {
-        border-bottom: none;
-        margin-bottom: 0;
-        padding-bottom: 0;
-    }
-
-    .form-section h2 {
-        font-size: 20px;
-        color: #2c3e50;
-        margin: 0 0 24px 0;
-        font-weight: 600;
-    }
-
-    .form-group {
-        margin-bottom: 20px;
-    }
-
-    .form-group:last-child {
-        margin-bottom: 0;
-    }
-
-    .form-group label {
-        display: block;
-        margin-bottom: 8px;
-        font-weight: 600;
-        color: #2c3e50;
-        font-size: 14px;
-    }
-
-    .form-control {
-        width: 100%;
-        padding: 10px 12px;
-        border: 2px solid #dee2e6;
-        border-radius: 6px;
-        font-size: 14px;
-        transition: border-color 0.2s;
-        font-family: inherit;
-    }
-
-    .form-control:focus {
-        outline: none;
-        border-color: #0066cc;
-    }
-
-    .code-input {
-        font-family: 'Consolas', 'Monaco', monospace;
-        font-size: 12px;
-        line-height: 1.5;
-        resize: vertical;
-    }
-
-    .form-text {
-        display: block;
-        margin-top: 6px;
-        font-size: 12px;
-        color: #6c757d;
-    }
-
-    .form-text code {
-        background: #f8f9fa;
-        padding: 2px 6px;
-        border-radius: 3px;
-        font-family: 'Consolas', 'Monaco', monospace;
-    }
-
-    .form-row {
-        display: grid;
-        grid-template-columns: 1fr 200px;
-        gap: 16px;
-    }
-
-    .server-type-options {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-        gap: 16px;
-        margin-bottom: 20px;
-    }
-
-    .radio-card {
-        position: relative;
-        cursor: pointer;
-        border: 2px solid #dee2e6;
-        border-radius: 8px;
-        padding: 20px;
-        transition: all 0.2s;
-        background: white;
-    }
-
-    .radio-card:hover {
-        border-color: #0066cc;
-        box-shadow: 0 4px 12px rgba(0, 102, 204, 0.1);
-    }
-
-    .radio-card.selected {
-        border-color: #0066cc;
-        background: #f0f7ff;
-    }
-
-    .radio-card input[type="radio"] {
-        position: absolute;
-        opacity: 0;
-    }
-
-    .radio-card-content {
-        text-align: center;
-    }
-
-    .radio-icon {
-        font-size: 40px;
-        margin-bottom: 12px;
-    }
-
-    .radio-title {
-        font-weight: 600;
-        font-size: 16px;
-        color: #2c3e50;
-        margin-bottom: 8px;
-    }
-
-    .radio-description {
-        font-size: 13px;
-        color: #6c757d;
-        line-height: 1.4;
-    }
-
-    .info-box {
-        display: flex;
-        gap: 12px;
-        padding: 16px;
-        border-radius: 8px;
-        margin-top: 16px;
-    }
-
-    .swarm-info {
-        background: #fff3cd;
-        border: 1px solid #ffc107;
-    }
-
-    .info-icon {
-        font-size: 24px;
-        flex-shrink: 0;
-    }
-
-    .info-box strong {
-        display: block;
-        margin-bottom: 4px;
-        color: #856404;
-    }
-
-    .info-box p {
-        margin: 0;
-        font-size: 13px;
-        color: #856404;
-        line-height: 1.5;
-    }
-
-    .form-actions {
-        display: flex;
-        gap: 12px;
-        justify-content: flex-end;
-        margin-top: 32px;
-        padding-top: 24px;
-        border-top: 2px solid #f1f3f5;
-    }
-
-    .btn {
-        padding: 10px 20px;
-        border: none;
-        border-radius: 6px;
-        font-weight: 600;
-        cursor: pointer;
-        transition: all 0.2s;
-        display: inline-flex;
-        align-items: center;
-        gap: 8px;
-        font-size: 14px;
-    }
-
-    .btn:disabled {
-        opacity: 0.6;
-        cursor: not-allowed;
-    }
-
-    .btn-primary {
-        background: #0066cc;
-        color: white;
-    }
-
-    .btn-primary:hover:not(:disabled) {
-        background: #0052a3;
-    }
-
-    .btn-secondary {
-        background: #6c757d;
-        color: white;
-    }
-
-    .btn-secondary:hover:not(:disabled) {
-        background: #5a6268;
-    }
-
-    .btn-outline {
-        background: white;
-        color: #0066cc;
-        border: 2px solid #0066cc;
-    }
-
-    .btn-outline:hover:not(:disabled) {
-        background: #0066cc;
-        color: white;
-    }
-
-    .spinner-sm {
-        width: 16px;
-        height: 16px;
-        border: 2px solid rgba(255,255,255,0.3);
-        border-top: 2px solid white;
-        border-radius: 50%;
-        animation: spin 0.8s linear infinite;
-    }
-
-    @@keyframes spin {
-        0% { transform: rotate(0deg); }
-        100% { transform: rotate(360deg); }
-    }
-
-    .alert {
-        padding: 16px;
-        border-radius: 6px;
-        margin-top: 24px;
-    }
-
-    .alert-danger {
-        background: #f8d7da;
-        color: #721c24;
-        border: 1px solid #f5c6cb;
-    }
-
-    .alert-success {
-        background: #d4edda;
-        color: #155724;
-        border: 1px solid #c3e6cb;
-    }
-
-    .validation-message {
-        color: #dc3545;
-        font-size: 12px;
-        margin-top: 6px;
-        display: block;
-    }
-</style>
-
 @code {
     [Parameter]
     public int? Id { get; set; }
@@ -491,6 +229,11 @@
     private bool testing = false;
     private string? errorMessage;
     private string? successMessage;
+    private string? generatedPublicKey;
+    private string? generatedPrivateKey;
+
+    [Inject]
+    private IJSRuntime JS { get; set; } = default!;
 
     protected override async Task OnInitializedAsync()
     {
@@ -504,9 +247,20 @@
     {
         try
         {
-            // TODO: Load from API
-            // var server = await Http.GetFromJsonAsync<ServerDto>($"/api/servers/{id}");
-            // Map to model
+            var server = await Http.GetFromJsonAsync<ServerResponseDto>($"api/servers/{id}");
+            if (server != null)
+            {
+                model = new ServerFormModel
+                {
+                    Name = server.Name,
+                    Host = server.Host,
+                    Port = server.Port,
+                    User = server.User,
+                    Region = server.Region,
+                    Type = server.Type,
+                    ProxyType = server.ProxyType
+                };
+            }
         }
         catch (Exception ex)
         {
@@ -522,11 +276,16 @@
 
         try
         {
-            // TODO: Call validation endpoint
-            // var response = await Http.PostAsJsonAsync("/api/servers/validate", model);
-            
-            await Task.Delay(2000); // Simulate API call
-            successMessage = "✅ Connection successful! Docker daemon is accessible.";
+            var response = await Http.PostAsJsonAsync("api/servers/validate", model);
+            if (response.IsSuccessStatusCode)
+            {
+                successMessage = "✅ Connection successful! Docker daemon is accessible.";
+            }
+            else
+            {
+                var error = await response.Content.ReadAsStringAsync();
+                errorMessage = $"Connection failed: {error}";
+            }
         }
         catch (Exception ex)
         {
@@ -548,17 +307,30 @@
         {
             if (IsEditMode && Id.HasValue)
             {
-                // TODO: await Http.PutAsJsonAsync($"/api/servers/{Id.Value}", model);
-                successMessage = "Server updated successfully!";
+                var response = await Http.PutAsJsonAsync($"api/servers/{Id.Value}", model);
+                if (response.IsSuccessStatusCode)
+                {
+                    Navigation.NavigateTo("/servers");
+                }
+                else
+                {
+                    var error = await response.Content.ReadAsStringAsync();
+                    errorMessage = $"Failed to update server: {error}";
+                }
             }
             else
             {
-                // TODO: await Http.PostAsJsonAsync("/api/servers", model);
-                successMessage = "Server added successfully!";
+                var response = await Http.PostAsJsonAsync("api/servers", model);
+                if (response.IsSuccessStatusCode)
+                {
+                    Navigation.NavigateTo("/servers");
+                }
+                else
+                {
+                    var error = await response.Content.ReadAsStringAsync();
+                    errorMessage = $"Failed to add server: {error}";
+                }
             }
-
-            await Task.Delay(1500);
-            Navigation.NavigateTo("/servers");
         }
         catch (Exception ex)
         {
@@ -575,6 +347,111 @@
         Navigation.NavigateTo("/servers");
     }
 
+    private void SelectServerType(ServerType type)
+    {
+        model.Type = type;
+    }
+
+    private void GenerateKeyPair()
+    {
+        try
+        {
+            // Generate ED25519 key pair (simulated - in production, use proper SSH library)
+            var keyPair = GenerateED25519KeyPair();
+            generatedPrivateKey = keyPair.privateKey;
+            generatedPublicKey = keyPair.publicKey;
+            model.PrivateKeyContent = generatedPrivateKey;
+            successMessage = "Key pair generated successfully!";
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Failed to generate key pair: {ex.Message}";
+        }
+    }
+
+    private (string privateKey, string publicKey) GenerateED25519KeyPair()
+    {
+        // Generate a real RSA 4096-bit key pair using .NET cryptography
+        var timestamp = DateTime.UtcNow.ToString("yyyyMMddHHmmss");
+        
+        using var rsa = System.Security.Cryptography.RSA.Create(4096);
+        
+        // Export private key in PEM format
+        var privateKeyBytes = rsa.ExportRSAPrivateKey();
+        var privateKeyBase64 = Convert.ToBase64String(privateKeyBytes);
+        var privateKey = FormatPemKey(privateKeyBase64, "RSA PRIVATE KEY");
+        
+        // Export public key in OpenSSH format
+        var parameters = rsa.ExportParameters(false);
+        using var ms = new MemoryStream();
+        using var writer = new BinaryWriter(ms);
+        
+        // Write SSH RSA public key format: algorithm name, exponent, modulus
+        WriteSSHBytes(writer, System.Text.Encoding.ASCII.GetBytes("ssh-rsa"));
+        WriteSSHBytes(writer, parameters.Exponent);
+        WriteSSHBytes(writer, parameters.Modulus);
+        
+        var publicKeyBase64 = Convert.ToBase64String(ms.ToArray());
+        var publicKey = $"ssh-rsa {publicKeyBase64} hostcraft-generated-{timestamp}";
+        
+        return (privateKey, publicKey);
+    }
+    
+    private string FormatPemKey(string base64Key, string keyType)
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"-----BEGIN {keyType}-----");
+        
+        // Split into 64-character lines
+        for (int i = 0; i < base64Key.Length; i += 64)
+        {
+            int length = Math.Min(64, base64Key.Length - i);
+            sb.AppendLine(base64Key.Substring(i, length));
+        }
+        
+        sb.AppendLine($"-----END {keyType}-----");
+        return sb.ToString();
+    }
+    
+    private void WriteSSHBytes(BinaryWriter writer, byte[] data)
+    {
+        // Write length as big-endian 32-bit integer
+        var lengthBytes = BitConverter.GetBytes(data.Length);
+        if (BitConverter.IsLittleEndian)
+            Array.Reverse(lengthBytes);
+        writer.Write(lengthBytes);
+        writer.Write(data);
+    }
+
+    private async Task CopyPublicKey()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", generatedPublicKey);
+            successMessage = "Public key copied to clipboard!";
+        }
+        catch
+        {
+            errorMessage = "Failed to copy to clipboard";
+        }
+    }
+
+    private async Task DownloadPrivateKey()
+    {
+        try
+        {
+            var fileName = $"hostcraft-private-key-{DateTime.UtcNow:yyyyMMddHHmmss}.pem";
+            var bytes = System.Text.Encoding.UTF8.GetBytes(generatedPrivateKey ?? "");
+            var base64 = Convert.ToBase64String(bytes);
+            
+            await JS.InvokeVoidAsync("downloadFile", fileName, base64);
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Failed to download key: {ex.Message}";
+        }
+    }
+
     public class ServerFormModel
     {
         public string Name { get; set; } = "";
@@ -585,5 +462,19 @@
         public string PrivateKeyContent { get; set; } = "";
         public ServerType Type { get; set; } = ServerType.Standalone;
         public ProxyType ProxyType { get; set; } = ProxyType.None;
+    }
+
+    public class ServerResponseDto
+    {
+        public int Id { get; set; }
+        public string Name { get; set; } = "";
+        public string Host { get; set; } = "";
+        public int Port { get; set; }
+        public string User { get; set; } = "";
+        public string? Region { get; set; }
+        public ServerType Type { get; set; }
+        public ProxyType ProxyType { get; set; }
+        // Note: For security, we don't return the PrivateKey from the API
+        // If editing, user must re-enter the key
     }
 }

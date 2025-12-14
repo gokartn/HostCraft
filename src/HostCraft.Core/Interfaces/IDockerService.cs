@@ -1,5 +1,6 @@
 using HostCraft.Core.Entities;
 using HostCraft.Core.Enums;
+using Docker.DotNet.Models;
 
 namespace HostCraft.Core.Interfaces;
 
@@ -11,6 +12,7 @@ public interface IDockerService
 {
     // Container operations (Standalone mode)
     Task<string> CreateContainerAsync(Server server, CreateContainerRequest request, CancellationToken cancellationToken = default);
+    Task<string> CreateContainerAsync(Server server, CreateContainerParameters parameters, CancellationToken cancellationToken = default);
     Task<bool> StartContainerAsync(Server server, string containerId, CancellationToken cancellationToken = default);
     Task<bool> StopContainerAsync(Server server, string containerId, CancellationToken cancellationToken = default);
     Task<bool> RemoveContainerAsync(Server server, string containerId, CancellationToken cancellationToken = default);

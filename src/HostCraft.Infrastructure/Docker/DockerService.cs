@@ -60,6 +60,13 @@ public class DockerService : IDockerService
         var response = await client.Containers.CreateContainerAsync(createParams, cancellationToken);
         return response.ID;
     }
+
+    public async Task<string> CreateContainerAsync(Server server, CreateContainerParameters parameters, CancellationToken cancellationToken = default)
+    {
+        var client = GetClient(server);
+        var response = await client.Containers.CreateContainerAsync(parameters, cancellationToken);
+        return response.ID;
+    }
     
     public async Task<bool> StartContainerAsync(Server server, string containerId, CancellationToken cancellationToken = default)
     {

@@ -9,33 +9,41 @@ public class TerminalHub : Hub
 {
     private static readonly ConcurrentDictionary<string, SshTerminalSession> _sessions = new();
     private readonly ILogger<TerminalHub> _logger;
-    
-    // TODO: Inject IServerRepository to get server details
-    // private readonly IServerRepository _serverRepository;
+    private readonly HttpClient _httpClient;
 
-    public TerminalHub(ILogger<TerminalHub> logger)
+    public TerminalHub(ILogger<TerminalHub> logger, HttpClient httpClient)
     {
         _logger = logger;
+        _httpClient = httpClient;
     }
 
     public async Task ConnectToServer(int serverId)
     {
         try
         {
-            // TODO: Get server details from database
-            // var server = await _serverRepository.GetByIdAsync(serverId);
+            // Get server details from API
+            var response = await _httpClient.GetAsync($"http://localhost:5100/api/servers/{serverId}");
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new Exception($"Failed to fetch server details: {response.ReasonPhrase}");
+            }
             
-            // Mock server data for now
-            var host = "10.0.1.10";
-            var port = 22;
-            var username = "root";
-            var privateKey = ""; // TODO: Get from database and decrypt
+            var server = await response.Content.ReadFromJsonAsync<ServerDto>();
+            if (server == null || server.PrivateKey == null)
+            {
+                throw new Exception("Server or private key not found");
+            }
+            
+            var host = server.Host;
+            var port = server.Port;
+            var username = server.Username;
+            var privateKeyData = server.PrivateKey.KeyData;
 
             var connectionInfo = new Renci.SshNet.ConnectionInfo(
                 host,
                 port,
                 username,
-                new PrivateKeyAuthenticationMethod(username, new PrivateKeyFile(new MemoryStream(Encoding.UTF8.GetBytes(privateKey))))
+                new PrivateKeyAuthenticationMethod(username, new PrivateKeyFile(new MemoryStream(Encoding.UTF8.GetBytes(privateKeyData))))
             );
 
             var client = new SshClient(connectionInfo);
@@ -100,6 +108,34 @@ public class TerminalHub : Hub
         }
     }
 
+    public async Task SendInput(string input)
+    {
+        if (!_sessions.TryGetValue(Context.ConnectionId, out var session))
+        {
+            await Clients.Caller.SendAsync("ReceiveError", "Not connected to any server\n");
+            return;
+        }
+
+        try
+        {
+            if (session.Shell == null || !session.Shell.CanWrite)
+            {
+                await Clients.Caller.SendAsync("ReceiveError", "Terminal session is not active\n");
+                return;
+            }
+
+            // Write raw input to shell (for XTerm.js integration)
+            var bytes = Encoding.UTF8.GetBytes(input);
+            await session.Shell.WriteAsync(bytes, 0, bytes.Length);
+            await session.Shell.FlushAsync();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to send input");
+            await Clients.Caller.SendAsync("ReceiveError", $"Input failed: {ex.Message}\n");
+        }
+    }
+
     public override async Task OnDisconnectedAsync(Exception? exception)
     {
         if (_sessions.TryRemove(Context.ConnectionId, out var session))
@@ -129,9 +165,7 @@ public class TerminalHub : Hub
                 {
                     var output = Encoding.UTF8.GetString(buffer, 0, bytesRead);
                     
-                    // Clean up ANSI escape codes for simpler display
-                    output = CleanAnsiCodes(output);
-                    
+                    // Send raw output with ANSI codes (XTerm.js will handle them)
                     await Clients.Client(connectionId).SendAsync("ReceiveOutput", output);
                 }
                 
@@ -198,4 +232,19 @@ public class SshTerminalSession
     public SshClient? Client { get; set; }
     public ShellStream? Shell { get; set; }
     public int ServerId { get; set; }
+}
+
+public class ServerDto
+{
+    public int Id { get; set; }
+    public string Host { get; set; } = "";
+    public int Port { get; set; }
+    public string Username { get; set; } = "";
+    public PrivateKeyDto? PrivateKey { get; set; }
+}
+
+public class PrivateKeyDto
+{
+    public int Id { get; set; }
+    public string KeyData { get; set; } = "";
 }

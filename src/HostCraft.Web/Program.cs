@@ -11,7 +11,11 @@ builder.Services.AddRazorComponents()
 builder.Services.AddSignalR();
 
 // Add HttpClient for API calls
-builder.Services.AddHttpClient();
+builder.Services.AddHttpClient("HostCraftAPI", client =>
+{
+    client.BaseAddress = new Uri(builder.Configuration["ApiUrl"] ?? "http://localhost:5100");
+});
+builder.Services.AddScoped(sp => sp.GetRequiredService<IHttpClientFactory>().CreateClient("HostCraftAPI"));
 
 var app = builder.Build();
 

@@ -30,6 +30,8 @@ else
 // Services
 builder.Services.AddScoped<IDockerService, DockerService>();
 builder.Services.AddScoped<INetworkManager, NetworkManager>();
+builder.Services.AddScoped<IProxyService, HostCraft.Infrastructure.Proxy.ProxyService>();
+builder.Services.AddHttpClient<IUpdateService, HostCraft.Infrastructure.Updates.UpdateService>();
 
 // CORS for development
 builder.Services.AddCors(options =>
@@ -43,6 +45,13 @@ builder.Services.AddCors(options =>
 });
 
 var app = builder.Build();
+
+// Seed database
+using (var scope = app.Services.CreateScope())
+{
+    var context = scope.ServiceProvider.GetRequiredService<HostCraftDbContext>();
+    await HostCraft.Infrastructure.Persistence.DbSeeder.SeedAsync(context);
+}
 
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())

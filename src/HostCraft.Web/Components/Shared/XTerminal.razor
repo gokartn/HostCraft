@@ -1,0 +1,115 @@
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+
+<div class="xterm-container" @ref="terminalContainer">
+    <div id="@TerminalId" class="xterm-element"></div>
+</div>
+
+@code {
+    [Parameter] public string TerminalId { get; set; } = $"xterm-{Guid.NewGuid():N}";
+    [Parameter] public EventCallback<string> OnInput { get; set; }
+    [Parameter] public EventCallback OnReady { get; set; }
+
+    private ElementReference terminalContainer;
+    private DotNetObjectReference<XTerminal>? dotNetRef;
+    private IJSObjectReference? jsModule;
+    private IJSObjectReference? terminalInstance;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            try
+            {
+                dotNetRef = DotNetObjectReference.Create(this);
+                jsModule = await JS.InvokeAsync<IJSObjectReference>("import", "./Components/Shared/XTerminal.razor.js");
+                terminalInstance = await jsModule.InvokeAsync<IJSObjectReference>("initTerminal", TerminalId, dotNetRef);
+                await OnReady.InvokeAsync();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Failed to initialize XTerm: {ex.Message}");
+            }
+        }
+    }
+
+    public async Task WriteOutput(string data)
+    {
+        if (jsModule != null && terminalInstance != null)
+        {
+            await jsModule.InvokeVoidAsync("writeOutput", terminalInstance, data);
+        }
+    }
+
+    public async Task Clear()
+    {
+        if (jsModule != null && terminalInstance != null)
+        {
+            await jsModule.InvokeVoidAsync("clear", terminalInstance);
+        }
+    }
+
+    public async Task Focus()
+    {
+        if (jsModule != null && terminalInstance != null)
+        {
+            await jsModule.InvokeVoidAsync("focus", terminalInstance);
+        }
+    }
+
+    [JSInvokable]
+    public async Task HandleInput(string data)
+    {
+        await OnInput.InvokeAsync(data);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            if (jsModule != null && terminalInstance != null)
+            {
+                await jsModule.InvokeVoidAsync("dispose", terminalInstance);
+            }
+
+            if (jsModule != null)
+            {
+                await jsModule.DisposeAsync();
+            }
+
+            dotNetRef?.Dispose();
+        }
+        catch { /* Cleanup errors can be ignored */ }
+    }
+}
+
+<style>
+    .xterm-container {
+        width: 100%;
+        height: 100%;
+        background: #000;
+        border-radius: var(--radius);
+        overflow: hidden;
+    }
+
+    .xterm-element {
+        width: 100%;
+        height: 100%;
+        padding: 10px;
+    }
+
+    /* XTerm.js theme customization */
+    .xterm-container :deep(.xterm) {
+        font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+        font-size: 14px;
+        line-height: 1.4;
+    }
+
+    .xterm-container :deep(.xterm-viewport) {
+        background-color: #000 !important;
+    }
+
+    .xterm-container :deep(.xterm-screen) {
+        background-color: #000 !important;
+    }
+</style>

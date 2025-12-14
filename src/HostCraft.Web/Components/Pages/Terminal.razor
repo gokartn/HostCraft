@@ -1,0 +1,271 @@
+@page "/servers/{ServerId:int}/terminal"
+@rendermode InteractiveServer
+@using Microsoft.AspNetCore.SignalR.Client
+@inject HttpClient Http
+@inject NavigationManager Navigation
+@implements IAsyncDisposable
+
+<PageTitle>Terminal - @(server?.Name ?? "Server")</PageTitle>
+
+<div class="terminal-page">
+    <div class="page-header">
+        <button class="btn-back" @onclick="GoBack">← Back to Server</button>
+        @if (server != null)
+        {
+            <div class="header-content">
+                <h1>🖥️ SSH Terminal</h1>
+                <div class="server-info">
+                    <span class="server-name">@server.Name</span>
+                    <span class="server-host">@server.User@@@server.Host:@server.Port</span>
+                    @if (connected)
+                    {
+                        <span class="status-badge online">🟢 Connected</span>
+                    }
+                    else
+                    {
+                        <span class="status-badge offline">🔴 Disconnected</span>
+                    }
+                </div>
+            </div>
+        }
+        <div class="terminal-controls">
+            @if (!connected)
+            {
+                <button class="btn btn-primary" @onclick="Connect" disabled="@connecting">
+                    @if (connecting)
+                    {
+                        <span class="spinner-sm"></span>
+                        <span>Connecting...</span>
+                    }
+                    else
+                    {
+                        <span>▶️ Connect</span>
+                    }
+                </button>
+            }
+            else
+            {
+                <button class="btn btn-outline" @onclick="ClearTerminal">
+                    🗑️ Clear
+                </button>
+                <button class="btn btn-danger" @onclick="Disconnect">
+                    ⏹️ Disconnect
+                </button>
+            }
+        </div>
+    </div>
+
+    <div class="terminal-container">
+        @if (!connected && !connecting && string.IsNullOrEmpty(error))
+        {
+            <div class="terminal-placeholder">
+                <div class="placeholder-icon">🖥️</div>
+                <h2>SSH Terminal</h2>
+                <p>Connect to <strong>@server?.Name</strong> via SSH</p>
+                <button class="btn btn-primary btn-lg" @onclick="Connect">
+                    ▶️ Connect Now
+                </button>
+            </div>
+        }
+        else if (!string.IsNullOrEmpty(error))
+        {
+            <div class="error-state">
+                <div class="error-icon">❌</div>
+                <h2>Connection Failed</h2>
+                <p>@error</p>
+                <button class="btn btn-primary" @onclick="Retry">
+                    🔄 Retry Connection
+                </button>
+            </div>
+        }
+        else
+        {
+            <XTerminal @ref="terminal" 
+                      TerminalId="@terminalId" 
+                      OnInput="HandleTerminalInput"
+                      OnReady="OnTerminalReady" />
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter]
+    public int ServerId { get; set; }
+
+    private ServerDto? server;
+    private XTerminal? terminal;
+    private HubConnection? hubConnection;
+    private bool connected = false;
+    private bool connecting = false;
+    private string? error;
+    private string terminalId = $"terminal-{Guid.NewGuid():N}";
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadServer();
+    }
+
+    private async Task LoadServer()
+    {
+        try
+        {
+            server = await Http.GetFromJsonAsync<ServerDto>($"api/servers/{ServerId}");
+        }
+        catch (Exception ex)
+        {
+            error = $"Failed to load server: {ex.Message}";
+        }
+    }
+
+    private async Task Connect()
+    {
+        if (connecting || connected) return;
+
+        connecting = true;
+        error = null;
+
+        try
+        {
+            // Initialize SignalR connection
+            hubConnection = new HubConnectionBuilder()
+                .WithUrl(Navigation.ToAbsoluteUri("/terminalhub"))
+                .WithAutomaticReconnect()
+                .Build();
+
+            hubConnection.On<string>("ReceiveOutput", async (output) =>
+            {
+                if (terminal != null)
+                {
+                    await terminal.WriteOutput(output);
+                }
+            });
+
+            hubConnection.On<string>("ReceiveError", async (errorMsg) =>
+            {
+                if (terminal != null)
+                {
+                    await terminal.WriteOutput($"\r\n\x1b[31mError: {errorMsg}\x1b[0m\r\n");
+                }
+            });
+
+            hubConnection.Closed += async (error) =>
+            {
+                connected = false;
+                if (terminal != null)
+                {
+                    await terminal.WriteOutput("\r\n\x1b[33m[Connection closed]\x1b[0m\r\n");
+                }
+                await InvokeAsync(StateHasChanged);
+            };
+
+            await hubConnection.StartAsync();
+            await hubConnection.SendAsync("ConnectToServer", ServerId);
+            
+            connected = true;
+
+            if (terminal != null)
+            {
+                await terminal.WriteOutput($"\x1b[32mConnected to {server?.Name} ({server?.Host})\x1b[0m\r\n");
+                await terminal.Focus();
+            }
+        }
+        catch (Exception ex)
+        {
+            error = $"Connection failed: {ex.Message}";
+            connected = false;
+        }
+        finally
+        {
+            connecting = false;
+        }
+    }
+
+    private async Task Disconnect()
+    {
+        if (hubConnection != null)
+        {
+            try
+            {
+                await hubConnection.StopAsync();
+                await hubConnection.DisposeAsync();
+            }
+            catch { /* Ignore disconnect errors */ }
+            hubConnection = null;
+        }
+        
+        connected = false;
+        if (terminal != null)
+        {
+            await terminal.WriteOutput("\r\n\x1b[33m[Disconnected]\x1b[0m\r\n");
+        }
+    }
+
+    private async Task ClearTerminal()
+    {
+        if (terminal != null)
+        {
+            await terminal.Clear();
+        }
+    }
+
+    private async Task Retry()
+    {
+        error = null;
+        await Connect();
+    }
+
+    private async Task OnTerminalReady()
+    {
+        if (connecting || connected)
+        {
+            // Terminal is ready, connection might already be in progress
+            StateHasChanged();
+        }
+    }
+
+    private async Task HandleTerminalInput(string input)
+    {
+        if (hubConnection != null && connected)
+        {
+            try
+            {
+                await hubConnection.SendAsync("SendInput", input);
+            }
+            catch (Exception ex)
+            {
+                if (terminal != null)
+                {
+                    await terminal.WriteOutput($"\r\n\x1b[31mError sending input: {ex.Message}\x1b[0m\r\n");
+                }
+            }
+        }
+    }
+
+    private void GoBack() => Navigation.NavigateTo($"/servers/{ServerId}");
+
+    public async ValueTask DisposeAsync()
+    {
+        if (hubConnection != null)
+        {
+            try
+            {
+                await hubConnection.DisposeAsync();
+            }
+            catch { /* Ignore */ }
+        }
+
+        if (terminal != null)
+        {
+            await terminal.DisposeAsync();
+        }
+    }
+
+    public class ServerDto
+    {
+        public int Id { get; set; }
+        public string Name { get; set; } = "";
+        public string Host { get; set; } = "";
+        public int Port { get; set; }
+        public string User { get; set; } = "";
+    }
+}

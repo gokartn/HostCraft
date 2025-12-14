@@ -1,36 +1,107 @@
-﻿<div class="top-row ps-3 navbar navbar-dark">
-    <div class="container-fluid">
-        <a class="navbar-brand" href="">🚀 HostCraft</a>
+﻿<div class="sidebar-header">
+    <div class="logo">
+        <span class="logo-icon">🚀</span>
+        <span class="logo-text">HostCraft</span>
     </div>
 </div>
 
-<input type="checkbox" title="Navigation menu" class="navbar-toggler" />
+<nav class="sidebar-nav">
+    <NavLink class="nav-link" href="" Match="NavLinkMatch.All">
+        <span class="nav-icon">🏠</span>
+        <span class="nav-text">Dashboard</span>
+    </NavLink>
 
-<div class="nav-scrollable" onclick="document.querySelector('.navbar-toggler').click()">
-    <nav class="nav flex-column">
-        <div class="nav-item px-3">
-            <NavLink class="nav-link" href="" Match="NavLinkMatch.All">
-                <span class="bi bi-house-door-fill-nav-menu" aria-hidden="true"></span> Dashboard
-            </NavLink>
-        </div>
+    <NavLink class="nav-link" href="servers">
+        <span class="nav-icon">🖥️</span>
+        <span class="nav-text">Servers</span>
+    </NavLink>
 
-        <div class="nav-item px-3">
-            <NavLink class="nav-link" href="servers">
-                <span class="bi bi-hdd-rack-fill-nav-menu" aria-hidden="true"></span> Servers
-            </NavLink>
-        </div>
+    <NavLink class="nav-link" href="applications">
+        <span class="nav-icon">📦</span>
+        <span class="nav-text">Applications</span>
+    </NavLink>
 
-        <div class="nav-item px-3">
-            <NavLink class="nav-link" href="applications">
-                <span class="bi bi-app-indicator-nav-menu" aria-hidden="true"></span> Applications
-            </NavLink>
-        </div>
+    <NavLink class="nav-link" href="deployments">
+        <span class="nav-icon">🚢</span>
+        <span class="nav-text">Deployments</span>
+    </NavLink>
 
-        <div class="nav-item px-3">
-            <NavLink class="nav-link" href="deployments">
-                <span class="bi bi-rocket-takeoff-fill-nav-menu" aria-hidden="true"></span> Deployments
-            </NavLink>
-        </div>
-    </nav>
+    <div class="nav-divider"></div>
+
+    <NavLink class="nav-link" href="settings">
+        <span class="nav-icon">⚙️</span>
+        <span class="nav-text">Settings</span>
+        @if (updateAvailable)
+        {
+            <span class="update-badge">•</span>
+        }
+    </NavLink>
+</nav>
+
+<div class="sidebar-footer">
+    <div class="version-info">
+        <span class="version-text">v@currentVersion</span>
+        @if (updateAvailable)
+        {
+            <span class="update-indicator" title="Update available">🔔</span>
+        }
+    </div>
 </div>
+
+@code {
+    private string currentVersion = "1.0.0";
+    private bool updateAvailable = false;
+    private System.Threading.Timer? updateCheckTimer;
+
+    [Inject] private HttpClient Http { get; set; } = default!;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await CheckVersion();
+        
+        // Check for updates every hour
+        updateCheckTimer = new System.Threading.Timer(async _ =>
+        {
+            await CheckVersion();
+            await InvokeAsync(StateHasChanged);
+        }, null, TimeSpan.FromHours(1), TimeSpan.FromHours(1));
+    }
+
+    private async Task CheckVersion()
+    {
+        try
+        {
+            var versionInfo = await Http.GetFromJsonAsync<VersionDto>("api/update/version");
+            if (versionInfo != null)
+            {
+                currentVersion = versionInfo.Version;
+            }
+
+            var updateInfo = await Http.GetFromJsonAsync<UpdateDto>("api/update/check");
+            if (updateInfo != null)
+            {
+                updateAvailable = updateInfo.UpdateAvailable;
+            }
+        }
+        catch
+        {
+            // Silently fail - not critical
+        }
+    }
+
+    public void Dispose()
+    {
+        updateCheckTimer?.Dispose();
+    }
+
+    private class VersionDto
+    {
+        public string Version { get; set; } = "";
+    }
+
+    private class UpdateDto
+    {
+        public bool UpdateAvailable { get; set; }
+    }
+}
 

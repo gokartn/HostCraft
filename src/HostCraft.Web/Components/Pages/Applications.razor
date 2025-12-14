@@ -1,0 +1,222 @@
+@page "/applications"
+@rendermode InteractiveServer
+@using System.Net.Http.Json
+@inject HttpClient Http
+@inject NavigationManager Navigation
+@inject ILogger<Applications> Logger
+
+<div class="page-container">
+    <div class="page-header">
+        <div class="header-left">
+            <h1>🚀 Applications</h1>
+            <p class="subtitle">Deploy and manage your applications</p>
+        </div>
+        <div class="header-actions">
+            <button class="btn-secondary" @onclick="RefreshApplications">
+                <i class="icon">🔄</i> Refresh
+            </button>
+            <button class="btn-primary" @onclick="NavigateToCreate">
+                <i class="icon">➕</i> New Application
+            </button>
+        </div>
+    </div>
+
+    @if (isLoading)
+    {
+        <div class="loading-spinner">
+            <div class="spinner"></div>
+            <p>Loading applications...</p>
+        </div>
+    }
+    else if (applications == null || !applications.Any())
+    {
+        <div class="empty-state">
+            <div class="empty-icon">📦</div>
+            <h2>No Applications</h2>
+            <p>Deploy your first application to get started</p>
+            <button class="btn-primary" @onclick="NavigateToCreate">
+                <i class="icon">➕</i> Deploy Application
+            </button>
+        </div>
+    }
+    else
+    {
+        <div class="container-grid">
+            @foreach (var app in applications)
+            {
+                <div class="app-card @GetStatusClass(app.Status)">
+                    <div class="app-header">
+                        <div class="app-name">
+                            <h3>@app.Name</h3>
+                            @if (!string.IsNullOrEmpty(app.Description))
+                            {
+                                <p class="app-description">@app.Description</p>
+                            }
+                        </div>
+                        <span class="status-badge @GetStatusClass(app.Status)">
+                            @GetStatusIcon(app.Status) @app.Status
+                        </span>
+                    </div>
+                    
+                    <div class="app-info">
+                        <div class="info-row">
+                            <span class="label">Server:</span>
+                            <span class="value">@app.ServerName</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="label">Project:</span>
+                            <span class="value">@app.ProjectName</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="label">Image:</span>
+                            <span class="value">@app.DockerImage</span>
+                        </div>
+                        @if (app.LastDeployedAt.HasValue)
+                        {
+                            <div class="info-row">
+                                <span class="label">Last Deployed:</span>
+                                <span class="value">@app.LastDeployedAt.Value.ToString("g")</span>
+                            </div>
+                        }
+                    </div>
+                    
+                    <div class="app-actions">
+                        <button class="btn-icon" @onclick="() => ViewDetails(app.Id)" title="View Details">
+                            👁️
+                        </button>
+                        @if (!string.IsNullOrEmpty(app.ContainerId) || !string.IsNullOrEmpty(app.ServiceId))
+                        {
+                            <button class="btn-icon" @onclick="() => ViewLogs(app.Id)" title="Logs">
+                                📄
+                            </button>
+                        }
+                        <button class="btn-icon btn-primary" @onclick="() => Redeploy(app.Id)" title="Redeploy">
+                            🔄
+                        </button>
+                        <button class="btn-icon btn-danger" @onclick="() => DeleteApplication(app.Id)" title="Delete">
+                            🗑️
+                        </button>
+                    </div>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    private List<ApplicationDto>? applications;
+    private bool isLoading = true;
+    
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadApplications();
+    }
+    
+    private async Task LoadApplications()
+    {
+        isLoading = true;
+        StateHasChanged();
+        
+        try
+        {
+            applications = await Http.GetFromJsonAsync<List<ApplicationDto>>("api/applications");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading applications");
+        }
+        finally
+        {
+            isLoading = false;
+            StateHasChanged();
+        }
+    }
+    
+    private async Task RefreshApplications()
+    {
+        await LoadApplications();
+    }
+    
+    private void NavigateToCreate()
+    {
+        Navigation.NavigateTo("/applications/new");
+    }
+    
+    private void ViewDetails(int appId)
+    {
+        Navigation.NavigateTo($"/applications/{appId}");
+    }
+    
+    private void ViewLogs(int appId)
+    {
+        Navigation.NavigateTo($"/applications/{appId}/logs");
+    }
+    
+    private async Task Redeploy(int appId)
+    {
+        try
+        {
+            var response = await Http.PostAsync($"api/applications/{appId}/deploy", null);
+            if (response.IsSuccessStatusCode)
+            {
+                await LoadApplications();
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error redeploying application");
+        }
+    }
+    
+    private async Task DeleteApplication(int appId)
+    {
+        try
+        {
+            var response = await Http.DeleteAsync($"api/applications/{appId}");
+            if (response.IsSuccessStatusCode)
+            {
+                await LoadApplications();
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error deleting application");
+        }
+    }
+    
+    private string GetStatusClass(DeploymentStatus status) => status switch
+    {
+        DeploymentStatus.Running => "status-running",
+        DeploymentStatus.Success => "status-success",
+        DeploymentStatus.Failed => "status-failed",
+        DeploymentStatus.Queued => "status-queued",
+        DeploymentStatus.Cancelled => "status-cancelled",
+        _ => "status-unknown"
+    };
+    
+    private string GetStatusIcon(DeploymentStatus status) => status switch
+    {
+        DeploymentStatus.Running => "🔄",
+        DeploymentStatus.Success => "✅",
+        DeploymentStatus.Failed => "❌",
+        DeploymentStatus.Queued => "⏳",
+        DeploymentStatus.Cancelled => "🚫",
+        _ => "⚪"
+    };
+    
+    private record ApplicationDto(
+        int Id,
+        string Name,
+        string? Description,
+        int ServerId,
+        string ServerName,
+        int ProjectId,
+        string ProjectName,
+        string? DockerImage,
+        DeploymentStatus Status,
+        string? ContainerId,
+        string? ServiceId,
+        DateTime? LastDeployedAt,
+        DateTime CreatedAt
+    );
+}

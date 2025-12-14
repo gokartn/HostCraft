@@ -13,15 +13,18 @@ public class ServersController : ControllerBase
 {
     private readonly HostCraftDbContext _context;
     private readonly IDockerService _dockerService;
+    private readonly IProxyService _proxyService;
     private readonly ILogger<ServersController> _logger;
     
     public ServersController(
         HostCraftDbContext context,
         IDockerService dockerService,
+        IProxyService proxyService,
         ILogger<ServersController> logger)
     {
         _context = context;
         _dockerService = dockerService;
+        _proxyService = proxyService;
         _logger = logger;
     }
     
@@ -47,23 +50,78 @@ public class ServersController : ControllerBase
     [HttpPost]
     public async Task<ActionResult<Server>> CreateServer(CreateServerRequest request)
     {
+        // Create PrivateKey entity if provided
+        PrivateKey? privateKey = null;
+        if (!string.IsNullOrEmpty(request.PrivateKeyContent))
+        {
+            privateKey = new PrivateKey
+            {
+                Name = $"{request.Name} SSH Key",
+                KeyData = request.PrivateKeyContent,
+                CreatedAt = DateTime.UtcNow
+            };
+            _context.PrivateKeys.Add(privateKey);
+        }
+        
+        // Find or create Region if provided
+        Region? region = null;
+        if (!string.IsNullOrEmpty(request.Region))
+        {
+            // Try to find existing region by name or code
+            region = await _context.Regions
+                .FirstOrDefaultAsync(r => r.Name == request.Region || r.Code == request.Region);
+            
+            // Create new region if not found
+            if (region == null)
+            {
+                region = new Region
+                {
+                    Name = request.Region,
+                    Code = request.Region.ToLower().Replace(" ", "-"),
+                    CreatedAt = DateTime.UtcNow
+                };
+                _context.Regions.Add(region);
+            }
+        }
+        
         var server = new Server
         {
             Name = request.Name,
             Host = request.Host,
             Port = request.Port,
-            Username = request.Username,
+            Username = request.User,
             Type = request.Type,
             ProxyType = request.ProxyType,
             Status = ServerStatus.Validating,
-            CreatedAt = DateTime.UtcNow
+            CreatedAt = DateTime.UtcNow,
+            PrivateKey = privateKey,
+            Region = region
         };
         
         _context.Servers.Add(server);
         await _context.SaveChangesAsync();
         
-        // Validate connection in background
-        _ = Task.Run(async () => await ValidateServerAsync(server.Id));
+        // Validate connection and deploy proxy in background
+        _ = Task.Run(async () => 
+        {
+            await ValidateServerAsync(server.Id);
+            
+            // Deploy reverse proxy if configured
+            if (server.ProxyType != ProxyType.None)
+            {
+                var serverWithKey = await _context.Servers
+                    .Include(s => s.PrivateKey)
+                    .FirstOrDefaultAsync(s => s.Id == server.Id);
+                    
+                if (serverWithKey != null && serverWithKey.Status == ServerStatus.Online)
+                {
+                    _logger.LogInformation("Deploying {ProxyType} on server {ServerName}", 
+                        serverWithKey.ProxyType, serverWithKey.Name);
+                    
+                    await _proxyService.EnsureProxyDeployedAsync(serverWithKey);
+                }
+            }
+        });
         
         return CreatedAtAction(nameof(GetServer), new { id = server.Id }, server);
     }
@@ -86,6 +144,49 @@ public class ServersController : ControllerBase
         
         if (request.Port.HasValue)
             server.Port = request.Port.Value;
+        
+        if (!string.IsNullOrEmpty(request.User))
+            server.Username = request.User;
+        
+        // Update Region
+        if (!string.IsNullOrEmpty(request.Region))
+        {
+            var region = await _context.Regions
+                .FirstOrDefaultAsync(r => r.Name == request.Region || r.Code == request.Region);
+            
+            if (region == null)
+            {
+                region = new Region
+                {
+                    Name = request.Region,
+                    Code = request.Region.ToLower().Replace(" ", "-"),
+                    CreatedAt = DateTime.UtcNow
+                };
+                _context.Regions.Add(region);
+            }
+            
+            server.Region = region;
+        }
+        
+        // Update PrivateKey
+        if (!string.IsNullOrEmpty(request.PrivateKeyContent))
+        {
+            // Remove old key if exists
+            if (server.PrivateKey != null)
+            {
+                _context.PrivateKeys.Remove(server.PrivateKey);
+            }
+            
+            // Create new key
+            var privateKey = new PrivateKey
+            {
+                Name = $"{server.Name} SSH Key",
+                KeyData = request.PrivateKeyContent,
+                CreatedAt = DateTime.UtcNow
+            };
+            _context.PrivateKeys.Add(privateKey);
+            server.PrivateKey = privateKey;
+        }
         
         if (request.Type.HasValue)
             server.Type = request.Type.Value;
@@ -114,8 +215,69 @@ public class ServersController : ControllerBase
         return NoContent();
     }
     
+    [HttpPost("validate")]
+    public async Task<ActionResult<ServerValidationResult>> ValidateServerConnection(CreateServerRequest request)
+    {
+        try
+        {
+            // Create temporary PrivateKey object for validation
+            PrivateKey? tempKey = null;
+            if (!string.IsNullOrEmpty(request.PrivateKeyContent))
+            {
+                tempKey = new PrivateKey
+                {
+                    Name = "Temp Validation Key",
+                    KeyData = request.PrivateKeyContent
+                };
+            }
+            
+            // Create a temporary server object for validation (don't save it)
+            var tempServer = new Server
+            {
+                Name = request.Name,
+                Host = request.Host,
+                Port = request.Port,
+                Username = request.User,
+                PrivateKey = tempKey,
+                Type = request.Type
+            };
+            
+            var isValid = await _dockerService.ValidateConnectionAsync(tempServer);
+            
+            if (isValid)
+            {
+                var systemInfo = await _dockerService.GetSystemInfoAsync(tempServer);
+                
+                return new ServerValidationResult
+                {
+                    IsValid = true,
+                    SystemInfo = systemInfo,
+                    Message = "Connection successful! Docker daemon is accessible."
+                };
+            }
+            else
+            {
+                return new ServerValidationResult
+                {
+                    IsValid = false,
+                    Message = "Cannot connect to Docker daemon. Check credentials and network access."
+                };
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error validating server connection");
+            
+            return new ServerValidationResult
+            {
+                IsValid = false,
+                Message = $"Connection failed: {ex.Message}"
+            };
+        }
+    }
+    
     [HttpPost("{id}/validate")]
-    public async Task<ActionResult<ServerValidationResult>> ValidateServer(int id)
+    public async Task<ActionResult<ServerValidationResult>> ValidateExistingServer(int id)
     {
         var server = await _context.Servers.FindAsync(id);
         
@@ -251,7 +413,9 @@ public record CreateServerRequest(
     string Name,
     string Host,
     int Port = 22,
-    string Username = "root",
+    string User = "root",
+    string? Region = null,
+    string? PrivateKeyContent = null,
     ServerType Type = ServerType.Standalone,
     ProxyType ProxyType = ProxyType.None);
 
@@ -259,6 +423,9 @@ public record UpdateServerRequest(
     string? Name = null,
     string? Host = null,
     int? Port = null,
+    string? User = null,
+    string? Region = null,
+    string? PrivateKeyContent = null,
     ServerType? Type = null,
     ProxyType? ProxyType = null);
 

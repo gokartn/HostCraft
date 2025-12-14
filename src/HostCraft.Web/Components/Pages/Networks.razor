@@ -1,0 +1,322 @@
+@page "/servers/{ServerId:int}/networks"
+@rendermode InteractiveServer
+@inject HttpClient Http
+@inject NavigationManager Navigation
+@inject IJSRuntime JS
+
+<PageTitle>Networks - HostCraft</PageTitle>
+
+<div class="page-container">
+    <div class="page-header">
+        <div class="header-left">
+            <button class="btn-back" @onclick="GoBack">← Back</button>
+            <h1>🌐 Docker Networks</h1>
+            <p class="subtitle">Manage Docker networks on this server</p>
+        </div>
+        <div class="header-actions">
+            <button class="btn btn-primary" @onclick="ShowCreateDialog">
+                ➕ Create Network
+            </button>
+        </div>
+    </div>
+
+    @if (isLoading)
+    {
+        <div class="loading-spinner">
+            <div class="spinner"></div>
+            <p>Loading networks...</p>
+        </div>
+    }
+    else if (!string.IsNullOrEmpty(errorMessage))
+    {
+        <div class="alert alert-danger">
+            <strong>❌ Error:</strong> @errorMessage
+        </div>
+    }
+    else if (networks == null || !networks.Any())
+    {
+        <div class="empty-state">
+            <div class="empty-icon">🌐</div>
+            <h2>No Custom Networks</h2>
+            <p>Create a network to connect your containers</p>
+            <button class="btn btn-primary" @onclick="ShowCreateDialog">
+                ➕ Create Network
+            </button>
+        </div>
+    }
+    else
+    {
+        <div class="networks-list">
+            @foreach (var network in networks)
+            {
+                <div class="network-card">
+                    <div class="network-header">
+                        <div>
+                            <h3>@network.Name</h3>
+                            <span class="network-driver">@network.Driver</span>
+                        </div>
+                        @if (!IsSystemNetwork(network.Name))
+                        {
+                            <button class="btn-icon btn-danger" @onclick="() => DeleteNetwork(network.Id)" title="Delete">
+                                🗑️
+                            </button>
+                        }
+                    </div>
+                    <div class="network-body">
+                        <div class="info-row">
+                            <span class="label">ID:</span>
+                            <span class="value code">@network.Id.Substring(0, 12)</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="label">Scope:</span>
+                            <span class="value">@network.Scope</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="label">Internal:</span>
+                            <span class="value">@(network.Internal ? "Yes" : "No")</span>
+                        </div>
+                        @if (!string.IsNullOrEmpty(network.Subnet))
+                        {
+                            <div class="info-row">
+                                <span class="label">Subnet:</span>
+                                <span class="value">@network.Subnet</span>
+                            </div>
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@if (showCreateDialog)
+{
+    <div class="modal-overlay" @onclick="CloseCreateDialog">
+        <div class="modal-content" @onclick:stopPropagation>
+            <div class="modal-header">
+                <h3>Create Network</h3>
+                <button class="btn-close" @onclick="CloseCreateDialog">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Network Name *</label>
+                    <input type="text" @bind="networkName" class="form-control" placeholder="my-network" />
+                </div>
+                <div class="form-group">
+                    <label>Driver</label>
+                    <select @bind="networkDriver" class="form-control">
+                        <option value="bridge">bridge</option>
+                        <option value="overlay">overlay</option>
+                        <option value="host">host</option>
+                        <option value="none">none</option>
+                    </select>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" @onclick="CloseCreateDialog">Cancel</button>
+                <button class="btn btn-primary" @onclick="CreateNetwork" disabled="@creating">
+                    @if (creating)
+                    {
+                        <span>Creating...</span>
+                    }
+                    else
+                    {
+                        <span>Create</span>
+                    }
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+<style>
+    .networks-list {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+        gap: var(--space-lg);
+        margin-top: var(--space-lg);
+    }
+
+    .network-card {
+        background: var(--card-bg);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-md);
+        padding: var(--space-lg);
+    }
+
+    .network-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        margin-bottom: var(--space-md);
+        padding-bottom: var(--space-md);
+        border-bottom: 1px solid var(--border-color);
+    }
+
+    .network-header h3 {
+        margin: 0 0 var(--space-sm) 0;
+        color: var(--primary-color);
+    }
+
+    .network-driver {
+        display: inline-block;
+        padding: 4px 8px;
+        background: var(--primary-color-alpha);
+        color: var(--primary-color);
+        border-radius: 4px;
+        font-size: 0.85rem;
+        font-weight: 600;
+    }
+
+    .network-body .info-row {
+        display: flex;
+        justify-content: space-between;
+        margin-bottom: var(--space-sm);
+    }
+
+    .network-body .label {
+        color: var(--text-secondary);
+        font-weight: 500;
+    }
+
+    .network-body .value {
+        color: var(--text-primary);
+    }
+
+    .network-body .code {
+        font-family: 'Courier New', monospace;
+        font-size: 0.9em;
+        background: var(--bg-secondary);
+        padding: 2px 6px;
+        border-radius: 4px;
+    }
+</style>
+
+@code {
+    [Parameter]
+    public int ServerId { get; set; }
+
+    private List<NetworkDto>? networks;
+    private bool isLoading = true;
+    private string? errorMessage;
+    private bool showCreateDialog = false;
+    private string networkName = "";
+    private string networkDriver = "bridge";
+    private bool creating = false;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadNetworks();
+    }
+
+    private async Task LoadNetworks()
+    {
+        isLoading = true;
+        errorMessage = null;
+
+        try
+        {
+            networks = await Http.GetFromJsonAsync<List<NetworkDto>>($"api/servers/{ServerId}/networks");
+        }
+        catch (Exception ex)
+        {
+            errorMessage = ex.Message;
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private void ShowCreateDialog()
+    {
+        networkName = "";
+        networkDriver = "bridge";
+        showCreateDialog = true;
+    }
+
+    private void CloseCreateDialog()
+    {
+        showCreateDialog = false;
+    }
+
+    private async Task CreateNetwork()
+    {
+        if (string.IsNullOrWhiteSpace(networkName))
+        {
+            errorMessage = "Network name is required";
+            return;
+        }
+
+        creating = true;
+        try
+        {
+            var response = await Http.PostAsJsonAsync($"api/servers/{ServerId}/networks", new
+            {
+                Name = networkName,
+                Driver = networkDriver
+            });
+
+            if (response.IsSuccessStatusCode)
+            {
+                CloseCreateDialog();
+                await LoadNetworks();
+            }
+            else
+            {
+                errorMessage = "Failed to create network";
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error creating network: {ex.Message}";
+        }
+        finally
+        {
+            creating = false;
+        }
+    }
+
+    private async Task DeleteNetwork(string networkId)
+    {
+        if (!await JS.InvokeAsync<bool>("confirm", "Are you sure you want to delete this network?"))
+            return;
+
+        try
+        {
+            var response = await Http.DeleteAsync($"api/servers/{ServerId}/networks/{networkId}");
+            if (response.IsSuccessStatusCode)
+            {
+                await LoadNetworks();
+            }
+            else
+            {
+                errorMessage = "Failed to delete network";
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error deleting network: {ex.Message}";
+        }
+    }
+
+    private bool IsSystemNetwork(string name)
+    {
+        return name == "bridge" || name == "host" || name == "none";
+    }
+
+    private void GoBack()
+    {
+        Navigation.NavigateTo($"/servers/{ServerId}");
+    }
+
+    public class NetworkDto
+    {
+        public string Id { get; set; } = "";
+        public string Name { get; set; } = "";
+        public string Driver { get; set; } = "";
+        public string Scope { get; set; } = "";
+        public bool Internal { get; set; }
+        public string? Subnet { get; set; }
+    }
+}

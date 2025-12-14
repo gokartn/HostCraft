@@ -1,0 +1,268 @@
+@page "/deployments"
+@rendermode InteractiveServer
+@using System.Net.Http.Json
+@inject HttpClient Http
+@inject NavigationManager Navigation
+@inject ILogger<Deployments> Logger
+
+<div class="page-container">
+    <div class="page-header">
+        <div class="header-left">
+            <h1>🚢 Deployments</h1>
+            <p class="subtitle">Track deployment history and status</p>
+        </div>
+        <div class="header-actions">
+            <button class="btn-secondary" @onclick="RefreshDeployments">
+                <i class="icon">🔄</i> Refresh
+            </button>
+        </div>
+    </div>
+
+    @if (isLoading)
+    {
+        <div class="loading-spinner">
+            <div class="spinner"></div>
+            <p>Loading deployments...</p>
+        </div>
+    }
+    else if (deployments == null || !deployments.Any())
+    {
+        <div class="empty-state">
+            <div class="empty-icon">📋</div>
+            <h2>No Deployments</h2>
+            <p>Deploy an application to see deployment history</p>
+            <button class="btn-primary" @onclick="NavigateToApplications">
+                <i class="icon">🚀</i> View Applications
+            </button>
+        </div>
+    }
+    else
+    {
+        <div class="deployments-table">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Application</th>
+                        <th>Status</th>
+                        <th>Type</th>
+                        <th>Started</th>
+                        <th>Duration</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var deployment in deployments.OrderByDescending(d => d.StartedAt))
+                    {
+                        <tr class="deployment-row @GetStatusClass(deployment.Status)">
+                            <td>
+                                <div class="deployment-app">
+                                    <strong>@deployment.ApplicationName</strong>
+                                    @if (!string.IsNullOrEmpty(deployment.ContainerId))
+                                    {
+                                        <span class="deployment-id">Container: @deployment.ContainerId.Substring(0, 12)</span>
+                                    }
+                                    @if (!string.IsNullOrEmpty(deployment.ServiceId))
+                                    {
+                                        <span class="deployment-id">Service: @deployment.ServiceId</span>
+                                    }
+                                </div>
+                            </td>
+                            <td>
+                                <span class="status-badge @GetStatusClass(deployment.Status)">
+                                    @GetStatusIcon(deployment.Status) @deployment.Status
+                                </span>
+                            </td>
+                            <td>
+                                @if (!string.IsNullOrEmpty(deployment.ServiceId))
+                                {
+                                    <span class="type-badge">🐝 Swarm</span>
+                                }
+                                else if (!string.IsNullOrEmpty(deployment.ContainerId))
+                                {
+                                    <span class="type-badge">🐳 Container</span>
+                                }
+                                else
+                                {
+                                    <span class="type-badge">❓ Unknown</span>
+                                }
+                            </td>
+                            <td>@deployment.StartedAt.ToString("g")</td>
+                            <td>
+                                @if (deployment.FinishedAt.HasValue)
+                                {
+                                    var duration = deployment.FinishedAt.Value - deployment.StartedAt;
+                                    <span>@FormatDuration(duration)</span>
+                                }
+                                else if (deployment.Status == DeploymentStatus.Running)
+                                {
+                                    <span class="text-muted">In progress...</span>
+                                }
+                                else
+                                {
+                                    <span class="text-muted">-</span>
+                                }
+                            </td>
+                            <td>
+                                <div class="action-buttons">
+                                    <button class="btn-icon" @onclick="() => ViewApplication(deployment.ApplicationId)" title="View Application">
+                                        👁️
+                                    </button>
+                                    @if (deployment.Status == DeploymentStatus.Failed && !string.IsNullOrEmpty(deployment.ErrorMessage))
+                                    {
+                                        <button class="btn-icon btn-warning" @onclick="() => ShowError(deployment.ErrorMessage)" title="View Error">
+                                            ⚠️
+                                        </button>
+                                    }
+                                </div>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</div>
+
+@if (showErrorDialog && !string.IsNullOrEmpty(currentError))
+{
+    <div class="modal-overlay" @onclick="HideError">
+        <div class="modal-content" @onclick:stopPropagation="true">
+            <div class="modal-header">
+                <h2>⚠️ Deployment Error</h2>
+                <button class="btn-icon" @onclick="HideError">✖️</button>
+            </div>
+            <div class="modal-body">
+                <pre class="error-text">@currentError</pre>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-secondary" @onclick="HideError">Close</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private List<DeploymentDto>? deployments;
+    private bool isLoading = true;
+    private bool showErrorDialog = false;
+    private string? currentError;
+    
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadDeployments();
+    }
+    
+    private async Task LoadDeployments()
+    {
+        isLoading = true;
+        StateHasChanged();
+        
+        try
+        {
+            // Get all applications with their deployment history
+            var apps = await Http.GetFromJsonAsync<List<ApplicationListDto>>("api/applications");
+            
+            if (apps != null)
+            {
+                // For now, show a simplified list since we don't have full deployment data
+                // In a real implementation, we'd have a dedicated deployments endpoint
+                deployments = new List<DeploymentDto>();
+                Logger.LogInformation("Loaded {Count} applications", apps.Count);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading deployments");
+            deployments = new List<DeploymentDto>();
+        }
+        finally
+        {
+            isLoading = false;
+            StateHasChanged();
+        }
+    }
+    
+    private async Task RefreshDeployments()
+    {
+        await LoadDeployments();
+    }
+    
+    private void NavigateToApplications()
+    {
+        Navigation.NavigateTo("/applications");
+    }
+    
+    private void ViewApplication(int appId)
+    {
+        Navigation.NavigateTo($"/applications/{appId}");
+    }
+    
+    private void ShowError(string error)
+    {
+        currentError = error;
+        showErrorDialog = true;
+    }
+    
+    private void HideError()
+    {
+        showErrorDialog = false;
+        currentError = null;
+    }
+    
+    private string FormatDuration(TimeSpan duration)
+    {
+        if (duration.TotalSeconds < 60)
+            return $"{(int)duration.TotalSeconds}s";
+        if (duration.TotalMinutes < 60)
+            return $"{(int)duration.TotalMinutes}m {duration.Seconds}s";
+        return $"{(int)duration.TotalHours}h {duration.Minutes}m";
+    }
+    
+    private string GetStatusClass(DeploymentStatus status) => status switch
+    {
+        DeploymentStatus.Running => "status-running",
+        DeploymentStatus.Success => "status-success",
+        DeploymentStatus.Failed => "status-failed",
+        DeploymentStatus.Queued => "status-queued",
+        DeploymentStatus.Cancelled => "status-cancelled",
+        _ => "status-unknown"
+    };
+    
+    private string GetStatusIcon(DeploymentStatus status) => status switch
+    {
+        DeploymentStatus.Running => "🔄",
+        DeploymentStatus.Success => "✅",
+        DeploymentStatus.Failed => "❌",
+        DeploymentStatus.Queued => "⏳",
+        DeploymentStatus.Cancelled => "🚫",
+        _ => "⚪"
+    };
+    
+    private record DeploymentDto(
+        int Id,
+        int ApplicationId,
+        string ApplicationName,
+        DeploymentStatus Status,
+        string? ContainerId,
+        string? ServiceId,
+        DateTime StartedAt,
+        DateTime? FinishedAt,
+        string? ErrorMessage
+    );
+    
+    private record ApplicationListDto(
+        int Id,
+        string Name,
+        string? Description,
+        int ServerId,
+        string ServerName,
+        int ProjectId,
+        string ProjectName,
+        string? DockerImage,
+        DeploymentStatus Status,
+        string? ContainerId,
+        string? ServiceId,
+        DateTime? LastDeployedAt,
+        DateTime CreatedAt
+    );
+}

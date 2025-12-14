@@ -1,0 +1,352 @@
+@page "/applications/new"
+@page "/applications/{Id:int}/edit"
+@rendermode InteractiveServer
+@using System.Net.Http.Json
+@inject HttpClient Http
+@inject NavigationManager Navigation
+@inject ILogger<ApplicationForm> Logger
+
+<div class="page-container">
+    <div class="page-header">
+        <div class="header-left">
+            <h1>@(IsEditMode ? "✏️ Edit Application" : "➕ Deploy New Application")</h1>
+            <p class="subtitle">@(IsEditMode ? "Update application configuration" : "Configure and deploy your application")</p>
+        </div>
+    </div>
+
+    <div class="form-container">
+        @if (isLoading)
+        {
+            <div class="loading-spinner">
+                <div class="spinner"></div>
+                <p>Loading...</p>
+            </div>
+        }
+        else
+        {
+            <div class="form-card">
+                <div class="form-section">
+                    <h2>Basic Information</h2>
+                    
+                    <div class="form-group">
+                        <label for="name">Application Name *</label>
+                        <input type="text" id="name" @bind="model.Name" class="form-control" placeholder="my-awesome-app" />
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="description">Description</label>
+                        <textarea id="description" @bind="model.Description" class="form-control" rows="3" placeholder="What does this application do?"></textarea>
+                    </div>
+                    
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="server">Server *</label>
+                            <select id="server" @bind="model.ServerId" @bind:after="OnServerChanged" class="form-control">
+                                <option value="0">-- Select Server --</option>
+                                @if (servers != null)
+                                {
+                                    foreach (var server in servers)
+                                    {
+                                        <option value="@server.Id">@server.Name @(server.IsSwarm ? "🐝 Swarm" : "🐳 Standalone")</option>
+                                    }
+                                }
+                            </select>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="project">Project *</label>
+                            <select id="project" @bind="model.ProjectId" class="form-control">
+                                <option value="0">-- Select Project --</option>
+                                @if (projects != null)
+                                {
+                                    foreach (var project in projects)
+                                    {
+                                        <option value="@project.Id">@project.Name</option>
+                                    }
+                                }
+                            </select>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="form-section">
+                    <h2>Docker Configuration</h2>
+                    
+                    <div class="form-group">
+                        <label for="image">Docker Image *</label>
+                        <input type="text" id="image" @bind="model.Image" class="form-control" placeholder="nginx:latest" />
+                        <small class="form-hint">Format: image:tag or registry/image:tag</small>
+                    </div>
+                    
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="port">Port</label>
+                            <input type="number" id="port" @bind="model.Port" class="form-control" placeholder="8080" />
+                            <small class="form-hint">Internal container port</small>
+                        </div>
+                        
+                        @if (selectedServerIsSwarm)
+                        {
+                            <div class="form-group">
+                                <label for="replicas">Replicas</label>
+                                <input type="number" id="replicas" @bind="model.Replicas" class="form-control" min="1" max="10" />
+                                <small class="form-hint">Number of container instances</small>
+                            </div>
+                        }
+                    </div>
+                </div>
+                
+                <div class="form-section">
+                    <h2>Environment Variables</h2>
+                    <p class="form-hint">Add environment variables for your application</p>
+                    
+                    @foreach (var (key, index) in envVars.Select((kv, i) => (kv, i)))
+                    {
+                        <div class="env-var-row">
+                            <input type="text" @bind="key.Key" placeholder="KEY" class="form-control env-key" />
+                            <span class="env-separator">=</span>
+                            <input type="text" @bind="key.Value" placeholder="value" class="form-control env-value" />
+                            <button type="button" class="btn-icon btn-danger" @onclick="() => RemoveEnvVar(index)">🗑️</button>
+                        </div>
+                    }
+                    
+                    <button type="button" class="btn-secondary" @onclick="AddEnvVar">
+                        <i class="icon">➕</i> Add Variable
+                    </button>
+                </div>
+                
+                <div class="form-section">
+                    <h2>Network Configuration</h2>
+                    <p class="form-hint">Docker networks to connect (optional)</p>
+                    
+                    @foreach (var (network, index) in networks.Select((n, i) => (n, i)))
+                    {
+                        <div class="network-row">
+                            <input type="text" @bind="networks[index]" placeholder="network-name" class="form-control" />
+                            <button type="button" class="btn-icon btn-danger" @onclick="() => RemoveNetwork(index)">🗑️</button>
+                        </div>
+                    }
+                    
+                    <button type="button" class="btn-secondary" @onclick="AddNetwork">
+                        <i class="icon">➕</i> Add Network
+                    </button>
+                </div>
+                
+                <div class="form-actions">
+                    <button type="button" class="btn-secondary" @onclick="Cancel">Cancel</button>
+                    <button type="button" class="btn-primary" @onclick="Deploy" disabled="@isSubmitting">
+                        @if (isSubmitting)
+                        {
+                            <span>🔄 Deploying...</span>
+                        }
+                        else
+                        {
+                            <span>🚀 Deploy Application</span>
+                        }
+                    </button>
+                </div>
+                
+                @if (!string.IsNullOrEmpty(errorMessage))
+                {
+                    <div class="alert alert-danger">
+                        ⚠️ @errorMessage
+                    </div>
+                }
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter]
+    public int? Id { get; set; }
+    
+    private bool IsEditMode => Id.HasValue;
+    private bool isLoading = true;
+    private bool isSubmitting = false;
+    private string? errorMessage;
+    private bool selectedServerIsSwarm = false;
+    
+    private List<ServerDto>? servers;
+    private List<ProjectDto>? projects;
+    
+    private ApplicationFormModel model = new();
+    private List<EnvVar> envVars = new();
+    private List<string> networks = new();
+    
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadData();
+        isLoading = false;
+    }
+    
+    private async Task LoadData()
+    {
+        try
+        {
+            servers = await Http.GetFromJsonAsync<List<ServerDto>>("api/applications/servers/0");
+            projects = await Http.GetFromJsonAsync<List<ProjectDto>>("api/applications/projects");
+            
+            if (IsEditMode && Id.HasValue)
+            {
+                // Load existing application
+                var app = await Http.GetFromJsonAsync<ApplicationWithDeploymentsDto>($"api/applications/{Id.Value}");
+                if (app != null)
+                {
+                    model = new ApplicationFormModel
+                    {
+                        Name = app.Name,
+                        Description = app.Description,
+                        ServerId = app.ServerId,
+                        ProjectId = app.ProjectId,
+                        Image = app.DockerImage ?? "",
+                        Port = app.Port,
+                        Replicas = app.Replicas
+                    };
+                    
+                    if (app.EnvironmentVariables != null)
+                    {
+                        envVars = app.EnvironmentVariables.Select(kv => new EnvVar { Key = kv.Key, Value = kv.Value }).ToList();
+                    }
+                    
+                    UpdateServerSwarmStatus();
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading data");
+            errorMessage = "Failed to load data";
+        }
+    }
+    
+    private void OnServerChanged()
+    {
+        UpdateServerSwarmStatus();
+    }
+    
+    private void UpdateServerSwarmStatus()
+    {
+        selectedServerIsSwarm = servers?.FirstOrDefault(s => s.Id == model.ServerId)?.IsSwarm ?? false;
+        if (!selectedServerIsSwarm)
+        {
+            model.Replicas = 1;
+        }
+    }
+    
+    private void AddEnvVar()
+    {
+        envVars.Add(new EnvVar());
+    }
+    
+    private void RemoveEnvVar(int index)
+    {
+        envVars.RemoveAt(index);
+    }
+    
+    private void AddNetwork()
+    {
+        networks.Add("");
+    }
+    
+    private void RemoveNetwork(int index)
+    {
+        networks.RemoveAt(index);
+    }
+    
+    private async Task Deploy()
+    {
+        errorMessage = null;
+        
+        // Validation
+        if (string.IsNullOrWhiteSpace(model.Name))
+        {
+            errorMessage = "Application name is required";
+            return;
+        }
+        
+        if (model.ServerId == 0)
+        {
+            errorMessage = "Please select a server";
+            return;
+        }
+        
+        if (model.ProjectId == 0)
+        {
+            errorMessage = "Please select a project";
+            return;
+        }
+        
+        if (string.IsNullOrWhiteSpace(model.Image))
+        {
+            errorMessage = "Docker image is required";
+            return;
+        }
+        
+        isSubmitting = true;
+        StateHasChanged();
+        
+        try
+        {
+            var request = new CreateApplicationRequest(
+                model.Name,
+                model.ServerId,
+                model.ProjectId,
+                model.Image,
+                model.Replicas,
+                envVars.Where(e => !string.IsNullOrWhiteSpace(e.Key)).ToDictionary(e => e.Key, e => e.Value),
+                networks.Where(n => !string.IsNullOrWhiteSpace(n)).ToList(),
+                model.Port
+            );
+            
+            var response = await Http.PostAsJsonAsync("api/applications", request);
+            
+            if (response.IsSuccessStatusCode)
+            {
+                Navigation.NavigateTo("/applications");
+            }
+            else
+            {
+                errorMessage = "Failed to deploy application";
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error deploying application");
+            errorMessage = $"Error: {ex.Message}";
+        }
+        finally
+        {
+            isSubmitting = false;
+            StateHasChanged();
+        }
+    }
+    
+    private void Cancel()
+    {
+        Navigation.NavigateTo("/applications");
+    }
+    
+    private class ApplicationFormModel
+    {
+        public string Name { get; set; } = "";
+        public string? Description { get; set; }
+        public int ServerId { get; set; }
+        public int ProjectId { get; set; }
+        public string Image { get; set; } = "";
+        public int? Port { get; set; }
+        public int Replicas { get; set; } = 1;
+    }
+    
+    private class EnvVar
+    {
+        public string Key { get; set; } = "";
+        public string Value { get; set; } = "";
+    }
+    
+    private record ServerDto(int Id, string Name, string Host, int Port, string User, bool IsSwarm, string Status);
+    private record ProjectDto(int Id, string Name, string? Description);
+    private record CreateApplicationRequest(string Name, int ServerId, int ProjectId, string Image, int? Replicas, Dictionary<string, string>? EnvironmentVariables, List<string>? Networks, int? Port);
+    private record ApplicationWithDeploymentsDto(int Id, string Name, string? Description, int ServerId, string ServerName, int ProjectId, string ProjectName, string? DockerImage, int? Port, int Replicas, Dictionary<string, string>? EnvironmentVariables, DeploymentStatus Status, string? ContainerId, string? ServiceId, DateTime? LastDeployedAt, DateTime CreatedAt, List<DeploymentInfo> Deployments);
+    private record DeploymentInfo(int Id, DeploymentStatus Status, string? ContainerId, string? ServiceId, DateTime StartedAt, DateTime? FinishedAt, string? ErrorMessage);
+}
