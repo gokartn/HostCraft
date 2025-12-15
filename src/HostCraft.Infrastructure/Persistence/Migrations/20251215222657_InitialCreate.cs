@@ -15,12 +15,12 @@ namespace HostCraft.Infrastructure.Migrations
                 name: "PrivateKeys",
                 columns: table => new
                 {
-                    Id = table.Column<int>(type: "INTEGER", nullable: false)
-                        .Annotation("Sqlite:Autoincrement", true),
-                    Name = table.Column<string>(type: "TEXT", maxLength: 100, nullable: false),
-                    KeyData = table.Column<string>(type: "TEXT", nullable: false),
-                    Passphrase = table.Column<string>(type: "TEXT", nullable: true),
-                    CreatedAt = table.Column<DateTime>(type: "TEXT", nullable: false, defaultValueSql: "CURRENT_TIMESTAMP")
+                    Id = table.Column<int>( nullable: false)
+                        ,
+                    Name = table.Column<string>( maxLength: 100, nullable: false),
+                    KeyData = table.Column<string>( nullable: false),
+                    Passphrase = table.Column<string>( nullable: true),
+                    CreatedAt = table.Column<DateTime>( nullable: false, defaultValueSql: "CURRENT_TIMESTAMP")
                 },
                 constraints: table =>
                 {
@@ -31,12 +31,12 @@ namespace HostCraft.Infrastructure.Migrations
                 name: "Projects",
                 columns: table => new
                 {
-                    Id = table.Column<int>(type: "INTEGER", nullable: false)
-                        .Annotation("Sqlite:Autoincrement", true),
-                    Uuid = table.Column<Guid>(type: "TEXT", nullable: false, defaultValueSql: "gen_random_uuid()"),
-                    Name = table.Column<string>(type: "TEXT", maxLength: 100, nullable: false),
-                    Description = table.Column<string>(type: "TEXT", nullable: true),
-                    CreatedAt = table.Column<DateTime>(type: "TEXT", nullable: false, defaultValueSql: "CURRENT_TIMESTAMP")
+                    Id = table.Column<int>( nullable: false)
+                        ,
+                    Uuid = table.Column<Guid>( nullable: false, defaultValueSql: "gen_random_uuid()"),
+                    Name = table.Column<string>( maxLength: 100, nullable: false),
+                    Description = table.Column<string>( nullable: true),
+                    CreatedAt = table.Column<DateTime>( nullable: false, defaultValueSql: "CURRENT_TIMESTAMP")
                 },
                 constraints: table =>
                 {
@@ -47,14 +47,14 @@ namespace HostCraft.Infrastructure.Migrations
                 name: "Regions",
                 columns: table => new
                 {
-                    Id = table.Column<int>(type: "INTEGER", nullable: false)
-                        .Annotation("Sqlite:Autoincrement", true),
-                    Name = table.Column<string>(type: "TEXT", maxLength: 100, nullable: false),
-                    Code = table.Column<string>(type: "TEXT", maxLength: 50, nullable: false),
-                    Description = table.Column<string>(type: "TEXT", nullable: true),
+                    Id = table.Column<int>( nullable: false)
+                        ,
+                    Name = table.Column<string>( maxLength: 100, nullable: false),
+                    Code = table.Column<string>( maxLength: 50, nullable: false),
+                    Description = table.Column<string>( nullable: true),
                     IsPrimary = table.Column<bool>( nullable: false),
-                    Priority = table.Column<int>(type: "INTEGER", nullable: false),
-                    CreatedAt = table.Column<DateTime>(type: "TEXT", nullable: false, defaultValueSql: "CURRENT_TIMESTAMP")
+                    Priority = table.Column<int>( nullable: false),
+                    CreatedAt = table.Column<DateTime>( nullable: false, defaultValueSql: "CURRENT_TIMESTAMP")
                 },
                 constraints: table =>
                 {
@@ -65,15 +65,15 @@ namespace HostCraft.Infrastructure.Migrations
                 name: "Users",
                 columns: table => new
                 {
-                    Id = table.Column<int>(type: "INTEGER", nullable: false)
-                        .Annotation("Sqlite:Autoincrement", true),
-                    Uuid = table.Column<Guid>(type: "TEXT", nullable: false, defaultValueSql: "gen_random_uuid()"),
-                    Email = table.Column<string>(type: "TEXT", maxLength: 255, nullable: false),
-                    PasswordHash = table.Column<string>(type: "TEXT", nullable: false),
-                    Name = table.Column<string>(type: "TEXT", nullable: true),
+                    Id = table.Column<int>( nullable: false)
+                        ,
+                    Uuid = table.Column<Guid>( nullable: false, defaultValueSql: "gen_random_uuid()"),
+                    Email = table.Column<string>( maxLength: 255, nullable: false),
+                    PasswordHash = table.Column<string>( nullable: false),
+                    Name = table.Column<string>( nullable: true),
                     IsAdmin = table.Column<bool>( nullable: false),
-                    CreatedAt = table.Column<DateTime>(type: "TEXT", nullable: false, defaultValueSql: "CURRENT_TIMESTAMP"),
-                    LastLoginAt = table.Column<DateTime>(type: "TEXT", nullable: true)
+                    CreatedAt = table.Column<DateTime>( nullable: false, defaultValueSql: "CURRENT_TIMESTAMP"),
+                    LastLoginAt = table.Column<DateTime>( nullable: true)
                 },
                 constraints: table =>
                 {
@@ -84,26 +84,26 @@ namespace HostCraft.Infrastructure.Migrations
                 name: "Servers",
                 columns: table => new
                 {
-                    Id = table.Column<int>(type: "INTEGER", nullable: false)
-                        .Annotation("Sqlite:Autoincrement", true),
-                    Name = table.Column<string>(type: "TEXT", maxLength: 100, nullable: false),
-                    Host = table.Column<string>(type: "TEXT", maxLength: 255, nullable: false),
-                    Port = table.Column<int>(type: "INTEGER", nullable: false),
-                    Username = table.Column<string>(type: "TEXT", maxLength: 50, nullable: false),
-                    PrivateKeyId = table.Column<int>(type: "INTEGER", nullable: true),
-                    Type = table.Column<int>(type: "INTEGER", nullable: false),
-                    Status = table.Column<int>(type: "INTEGER", nullable: false),
-                    ProxyType = table.Column<int>(type: "INTEGER", nullable: false),
-                    SwarmJoinToken = table.Column<string>(type: "TEXT", nullable: true),
-                    SwarmManagerAddress = table.Column<string>(type: "TEXT", nullable: true),
-                    RegionId = table.Column<int>(type: "INTEGER", nullable: true),
+                    Id = table.Column<int>( nullable: false)
+                        ,
+                    Name = table.Column<string>( maxLength: 100, nullable: false),
+                    Host = table.Column<string>( maxLength: 255, nullable: false),
+                    Port = table.Column<int>( nullable: false),
+                    Username = table.Column<string>( maxLength: 50, nullable: false),
+                    PrivateKeyId = table.Column<int>( nullable: true),
+                    Type = table.Column<int>( nullable: false),
+                    Status = table.Column<int>( nullable: false),
+                    ProxyType = table.Column<int>( nullable: false),
+                    SwarmJoinToken = table.Column<string>( nullable: true),
+                    SwarmManagerAddress = table.Column<string>( nullable: true),
+                    RegionId = table.Column<int>( nullable: true),
                     IsSwarmManager = table.Column<bool>( nullable: false),
-                    SwarmManagerCount = table.Column<int>(type: "INTEGER", nullable: true),
-                    SwarmWorkerCount = table.Column<int>(type: "INTEGER", nullable: true),
-                    CreatedAt = table.Column<DateTime>(type: "TEXT", nullable: false, defaultValueSql: "CURRENT_TIMESTAMP"),
-                    LastHealthCheck = table.Column<DateTime>(type: "TEXT", nullable: true),
-                    ConsecutiveFailures = table.Column<int>(type: "INTEGER", nullable: false),
-                    LastFailureAt = table.Column<DateTime>(type: "TEXT", nullable: true)
+                    SwarmManagerCount = table.Column<int>( nullable: true),
+                    SwarmWorkerCount = table.Column<int>( nullable: true),
+                    CreatedAt = table.Column<DateTime>( nullable: false, defaultValueSql: "CURRENT_TIMESTAMP"),
+                    LastHealthCheck = table.Column<DateTime>( nullable: true),
+                    ConsecutiveFailures = table.Column<int>( nullable: false),
+                    LastFailureAt = table.Column<DateTime>( nullable: true)
                 },
                 constraints: table =>
                 {
@@ -126,38 +126,38 @@ namespace HostCraft.Infrastructure.Migrations
                 name: "Applications",
                 columns: table => new
                 {
-                    Id = table.Column<int>(type: "INTEGER", nullable: false)
-                        .Annotation("Sqlite:Autoincrement", true),
-                    Uuid = table.Column<Guid>(type: "TEXT", nullable: false, defaultValueSql: "gen_random_uuid()"),
-                    Name = table.Column<string>(type: "TEXT", maxLength: 100, nullable: false),
-                    Description = table.Column<string>(type: "TEXT", nullable: true),
-                    ProjectId = table.Column<int>(type: "INTEGER", nullable: false),
-                    ServerId = table.Column<int>(type: "INTEGER", nullable: false),
-                    SourceType = table.Column<int>(type: "INTEGER", nullable: false),
-                    GitRepository = table.Column<string>(type: "TEXT", nullable: true),
-                    GitBranch = table.Column<string>(type: "TEXT", nullable: true),
-                    DockerImage = table.Column<string>(type: "TEXT", nullable: true),
-                    DockerComposeFile = table.Column<string>(type: "TEXT", nullable: true),
-                    Dockerfile = table.Column<string>(type: "TEXT", nullable: true),
-                    BuildContext = table.Column<string>(type: "TEXT", nullable: true),
-                    Domain = table.Column<string>(type: "TEXT", nullable: true),
-                    Port = table.Column<int>(type: "INTEGER", nullable: true),
-                    Replicas = table.Column<int>(type: "INTEGER", nullable: false),
-                    MemoryLimitBytes = table.Column<long>(type: "INTEGER", nullable: true),
-                    CpuLimit = table.Column<long>(type: "INTEGER", nullable: true),
+                    Id = table.Column<int>( nullable: false)
+                        ,
+                    Uuid = table.Column<Guid>( nullable: false, defaultValueSql: "gen_random_uuid()"),
+                    Name = table.Column<string>( maxLength: 100, nullable: false),
+                    Description = table.Column<string>( nullable: true),
+                    ProjectId = table.Column<int>( nullable: false),
+                    ServerId = table.Column<int>( nullable: false),
+                    SourceType = table.Column<int>( nullable: false),
+                    GitRepository = table.Column<string>( nullable: true),
+                    GitBranch = table.Column<string>( nullable: true),
+                    DockerImage = table.Column<string>( nullable: true),
+                    DockerComposeFile = table.Column<string>( nullable: true),
+                    Dockerfile = table.Column<string>( nullable: true),
+                    BuildContext = table.Column<string>( nullable: true),
+                    Domain = table.Column<string>( nullable: true),
+                    Port = table.Column<int>( nullable: true),
+                    Replicas = table.Column<int>( nullable: false),
+                    MemoryLimitBytes = table.Column<long>( nullable: true),
+                    CpuLimit = table.Column<long>( nullable: true),
                     AutoDeploy = table.Column<bool>( nullable: false),
-                    HealthCheckUrl = table.Column<string>(type: "TEXT", nullable: true),
-                    HealthCheckIntervalSeconds = table.Column<int>(type: "INTEGER", nullable: false),
-                    HealthCheckTimeoutSeconds = table.Column<int>(type: "INTEGER", nullable: false),
-                    MaxConsecutiveFailures = table.Column<int>(type: "INTEGER", nullable: false),
+                    HealthCheckUrl = table.Column<string>( nullable: true),
+                    HealthCheckIntervalSeconds = table.Column<int>( nullable: false),
+                    HealthCheckTimeoutSeconds = table.Column<int>( nullable: false),
+                    MaxConsecutiveFailures = table.Column<int>( nullable: false),
                     AutoRestart = table.Column<bool>( nullable: false),
                     AutoRollback = table.Column<bool>( nullable: false),
-                    BackupSchedule = table.Column<string>(type: "TEXT", nullable: true),
-                    BackupRetentionDays = table.Column<int>(type: "INTEGER", nullable: true),
-                    CreatedAt = table.Column<DateTime>(type: "TEXT", nullable: false, defaultValueSql: "CURRENT_TIMESTAMP"),
-                    LastDeployedAt = table.Column<DateTime>(type: "TEXT", nullable: true),
-                    LastHealthCheckAt = table.Column<DateTime>(type: "TEXT", nullable: true),
-                    ConsecutiveHealthCheckFailures = table.Column<int>(type: "INTEGER", nullable: false)
+                    BackupSchedule = table.Column<string>( nullable: true),
+                    BackupRetentionDays = table.Column<int>( nullable: true),
+                    CreatedAt = table.Column<DateTime>( nullable: false, defaultValueSql: "CURRENT_TIMESTAMP"),
+                    LastDeployedAt = table.Column<DateTime>( nullable: true),
+                    LastHealthCheckAt = table.Column<DateTime>( nullable: true),
+                    ConsecutiveHealthCheckFailures = table.Column<int>( nullable: false)
                 },
                 constraints: table =>
                 {
@@ -180,19 +180,19 @@ namespace HostCraft.Infrastructure.Migrations
                 name: "Deployments",
                 columns: table => new
                 {
-                    Id = table.Column<int>(type: "INTEGER", nullable: false)
-                        .Annotation("Sqlite:Autoincrement", true),
-                    Uuid = table.Column<Guid>(type: "TEXT", nullable: false, defaultValueSql: "gen_random_uuid()"),
-                    ApplicationId = table.Column<int>(type: "INTEGER", nullable: false),
-                    Status = table.Column<int>(type: "INTEGER", nullable: false),
-                    CommitHash = table.Column<string>(type: "TEXT", nullable: true),
-                    ImageTag = table.Column<string>(type: "TEXT", nullable: true),
-                    ImageDigest = table.Column<string>(type: "TEXT", nullable: true),
-                    StartedAt = table.Column<DateTime>(type: "TEXT", nullable: false, defaultValueSql: "CURRENT_TIMESTAMP"),
-                    FinishedAt = table.Column<DateTime>(type: "TEXT", nullable: true),
-                    ErrorMessage = table.Column<string>(type: "TEXT", nullable: true),
-                    ContainerId = table.Column<string>(type: "TEXT", nullable: true),
-                    ServiceId = table.Column<string>(type: "TEXT", nullable: true)
+                    Id = table.Column<int>( nullable: false)
+                        ,
+                    Uuid = table.Column<Guid>( nullable: false, defaultValueSql: "gen_random_uuid()"),
+                    ApplicationId = table.Column<int>( nullable: false),
+                    Status = table.Column<int>( nullable: false),
+                    CommitHash = table.Column<string>( nullable: true),
+                    ImageTag = table.Column<string>( nullable: true),
+                    ImageDigest = table.Column<string>( nullable: true),
+                    StartedAt = table.Column<DateTime>( nullable: false, defaultValueSql: "CURRENT_TIMESTAMP"),
+                    FinishedAt = table.Column<DateTime>( nullable: true),
+                    ErrorMessage = table.Column<string>( nullable: true),
+                    ContainerId = table.Column<string>( nullable: true),
+                    ServiceId = table.Column<string>( nullable: true)
                 },
                 constraints: table =>
                 {
@@ -209,13 +209,13 @@ namespace HostCraft.Infrastructure.Migrations
                 name: "EnvironmentVariables",
                 columns: table => new
                 {
-                    Id = table.Column<int>(type: "INTEGER", nullable: false)
-                        .Annotation("Sqlite:Autoincrement", true),
-                    ApplicationId = table.Column<int>(type: "INTEGER", nullable: false),
-                    Key = table.Column<string>(type: "TEXT", maxLength: 255, nullable: false),
-                    Value = table.Column<string>(type: "TEXT", nullable: false),
+                    Id = table.Column<int>( nullable: false)
+                        ,
+                    ApplicationId = table.Column<int>( nullable: false),
+                    Key = table.Column<string>( maxLength: 255, nullable: false),
+                    Value = table.Column<string>( nullable: false),
                     IsSecret = table.Column<bool>( nullable: false),
-                    CreatedAt = table.Column<DateTime>(type: "TEXT", nullable: false, defaultValueSql: "CURRENT_TIMESTAMP")
+                    CreatedAt = table.Column<DateTime>( nullable: false, defaultValueSql: "CURRENT_TIMESTAMP")
                 },
                 constraints: table =>
                 {
@@ -232,15 +232,15 @@ namespace HostCraft.Infrastructure.Migrations
                 name: "HealthChecks",
                 columns: table => new
                 {
-                    Id = table.Column<int>(type: "INTEGER", nullable: false)
-                        .Annotation("Sqlite:Autoincrement", true),
-                    ApplicationId = table.Column<int>(type: "INTEGER", nullable: true),
-                    ServerId = table.Column<int>(type: "INTEGER", nullable: true),
-                    Status = table.Column<int>(type: "INTEGER", nullable: false),
-                    ResponseTimeMs = table.Column<int>(type: "INTEGER", nullable: false),
-                    StatusCode = table.Column<string>(type: "TEXT", nullable: true),
-                    ErrorMessage = table.Column<string>(type: "TEXT", nullable: true),
-                    CheckedAt = table.Column<DateTime>(type: "TEXT", nullable: false, defaultValueSql: "CURRENT_TIMESTAMP")
+                    Id = table.Column<int>( nullable: false)
+                        ,
+                    ApplicationId = table.Column<int>( nullable: true),
+                    ServerId = table.Column<int>( nullable: true),
+                    Status = table.Column<int>( nullable: false),
+                    ResponseTimeMs = table.Column<int>( nullable: false),
+                    StatusCode = table.Column<string>( nullable: true),
+                    ErrorMessage = table.Column<string>( nullable: true),
+                    CheckedAt = table.Column<DateTime>( nullable: false, defaultValueSql: "CURRENT_TIMESTAMP")
                 },
                 constraints: table =>
                 {
@@ -263,18 +263,18 @@ namespace HostCraft.Infrastructure.Migrations
                 name: "Volumes",
                 columns: table => new
                 {
-                    Id = table.Column<int>(type: "INTEGER", nullable: false)
-                        .Annotation("Sqlite:Autoincrement", true),
-                    Uuid = table.Column<Guid>(type: "TEXT", nullable: false, defaultValueSql: "gen_random_uuid()"),
-                    Name = table.Column<string>(type: "TEXT", maxLength: 255, nullable: false),
-                    ApplicationId = table.Column<int>(type: "INTEGER", nullable: true),
-                    ServerId = table.Column<int>(type: "INTEGER", nullable: false),
-                    Driver = table.Column<string>(type: "TEXT", nullable: true),
-                    MountPoint = table.Column<string>(type: "TEXT", nullable: true),
-                    SizeBytes = table.Column<long>(type: "INTEGER", nullable: false),
+                    Id = table.Column<int>( nullable: false)
+                        ,
+                    Uuid = table.Column<Guid>( nullable: false, defaultValueSql: "gen_random_uuid()"),
+                    Name = table.Column<string>( maxLength: 255, nullable: false),
+                    ApplicationId = table.Column<int>( nullable: true),
+                    ServerId = table.Column<int>( nullable: false),
+                    Driver = table.Column<string>( nullable: true),
+                    MountPoint = table.Column<string>( nullable: true),
+                    SizeBytes = table.Column<long>( nullable: false),
                     IsBackedUp = table.Column<bool>( nullable: false),
-                    BackupSchedule = table.Column<string>(type: "TEXT", nullable: true),
-                    CreatedAt = table.Column<DateTime>(type: "TEXT", nullable: false, defaultValueSql: "CURRENT_TIMESTAMP")
+                    BackupSchedule = table.Column<string>( nullable: true),
+                    CreatedAt = table.Column<DateTime>( nullable: false, defaultValueSql: "CURRENT_TIMESTAMP")
                 },
                 constraints: table =>
                 {
@@ -297,12 +297,12 @@ namespace HostCraft.Infrastructure.Migrations
                 name: "DeploymentLogs",
                 columns: table => new
                 {
-                    Id = table.Column<int>(type: "INTEGER", nullable: false)
-                        .Annotation("Sqlite:Autoincrement", true),
-                    DeploymentId = table.Column<int>(type: "INTEGER", nullable: false),
-                    Message = table.Column<string>(type: "TEXT", nullable: false),
-                    Level = table.Column<string>(type: "TEXT", nullable: false),
-                    Timestamp = table.Column<DateTime>(type: "TEXT", nullable: false, defaultValueSql: "CURRENT_TIMESTAMP")
+                    Id = table.Column<int>( nullable: false)
+                        ,
+                    DeploymentId = table.Column<int>( nullable: false),
+                    Message = table.Column<string>( nullable: false),
+                    Level = table.Column<string>( nullable: false),
+                    Timestamp = table.Column<DateTime>( nullable: false, defaultValueSql: "CURRENT_TIMESTAMP")
                 },
                 constraints: table =>
                 {
@@ -319,22 +319,22 @@ namespace HostCraft.Infrastructure.Migrations
                 name: "Backups",
                 columns: table => new
                 {
-                    Id = table.Column<int>(type: "INTEGER", nullable: false)
-                        .Annotation("Sqlite:Autoincrement", true),
-                    Uuid = table.Column<Guid>(type: "TEXT", nullable: false, defaultValueSql: "gen_random_uuid()"),
-                    ApplicationId = table.Column<int>(type: "INTEGER", nullable: false),
-                    Type = table.Column<int>(type: "INTEGER", nullable: false),
-                    Status = table.Column<int>(type: "INTEGER", nullable: false),
-                    StoragePath = table.Column<string>(type: "TEXT", nullable: true),
-                    SizeBytes = table.Column<long>(type: "INTEGER", nullable: false),
-                    S3Bucket = table.Column<string>(type: "TEXT", nullable: true),
-                    S3Key = table.Column<string>(type: "TEXT", nullable: true),
-                    StartedAt = table.Column<DateTime>(type: "TEXT", nullable: false, defaultValueSql: "CURRENT_TIMESTAMP"),
-                    CompletedAt = table.Column<DateTime>(type: "TEXT", nullable: true),
-                    ErrorMessage = table.Column<string>(type: "TEXT", nullable: true),
-                    RetentionDays = table.Column<int>(type: "INTEGER", nullable: true),
-                    ExpiresAt = table.Column<DateTime>(type: "TEXT", nullable: true),
-                    VolumeId = table.Column<int>(type: "INTEGER", nullable: true)
+                    Id = table.Column<int>( nullable: false)
+                        ,
+                    Uuid = table.Column<Guid>( nullable: false, defaultValueSql: "gen_random_uuid()"),
+                    ApplicationId = table.Column<int>( nullable: false),
+                    Type = table.Column<int>( nullable: false),
+                    Status = table.Column<int>( nullable: false),
+                    StoragePath = table.Column<string>( nullable: true),
+                    SizeBytes = table.Column<long>( nullable: false),
+                    S3Bucket = table.Column<string>( nullable: true),
+                    S3Key = table.Column<string>( nullable: true),
+                    StartedAt = table.Column<DateTime>( nullable: false, defaultValueSql: "CURRENT_TIMESTAMP"),
+                    CompletedAt = table.Column<DateTime>( nullable: true),
+                    ErrorMessage = table.Column<string>( nullable: true),
+                    RetentionDays = table.Column<int>( nullable: true),
+                    ExpiresAt = table.Column<DateTime>( nullable: true),
+                    VolumeId = table.Column<int>( nullable: true)
                 },
                 constraints: table =>
                 {
@@ -547,4 +547,5 @@ namespace HostCraft.Infrastructure.Migrations
         }
     }
 }
+
 
