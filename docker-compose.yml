@@ -30,8 +30,8 @@ services:
       - ASPNETCORE_ENVIRONMENT=Production
       - ASPNETCORE_URLS=http://+:8080
       - ConnectionStrings__DefaultConnection=Host=postgres;Database=hostcraft;Username=hostcraft;Password=your_secure_password_here
-      - SKIP_LOCALHOST_SEED=${SKIP_LOCALHOST_SEED:-false}
-      - LOCALHOST_IS_SWARM_MANAGER=${LOCALHOST_IS_SWARM_MANAGER:-false}
+      - SKIP_LOCALHOST_SEED=${SKIP_LOCALHOST_SEED}
+      - LOCALHOST_IS_SWARM_MANAGER=${LOCALHOST_IS_SWARM_MANAGER}
     depends_on:
       - postgres
     restart: unless-stopped

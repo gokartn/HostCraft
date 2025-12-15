@@ -194,6 +194,8 @@ ALTER TABLE "Servers" ALTER COLUMN "CreatedAt" TYPE timestamp USING "CreatedAt":
 ALTER TABLE "Servers" ALTER COLUMN "LastHealthCheck" TYPE timestamp USING CASE WHEN "LastHealthCheck" IS NULL OR "LastHealthCheck" = '' THEN NULL ELSE "LastHealthCheck"::timestamp END;
 ALTER TABLE "Servers" ALTER COLUMN "LastFailureAt" TYPE timestamp USING CASE WHEN "LastFailureAt" IS NULL OR "LastFailureAt" = '' THEN NULL ELSE "LastFailureAt"::timestamp END;
 ALTER TABLE "Applications" ALTER COLUMN "CreatedAt" TYPE timestamp USING "CreatedAt"::timestamp;
+ALTER TABLE "Applications" ALTER COLUMN "LastDeployedAt" TYPE timestamp USING CASE WHEN "LastDeployedAt" IS NULL OR "LastDeployedAt" = '' THEN NULL ELSE "LastDeployedAt"::timestamp END;
+ALTER TABLE "Applications" ALTER COLUMN "LastHealthCheckAt" TYPE timestamp USING CASE WHEN "LastHealthCheckAt" IS NULL OR "LastHealthCheckAt" = '' THEN NULL ELSE "LastHealthCheckAt"::timestamp END;
 ALTER TABLE "Deployments" ALTER COLUMN "StartedAt" TYPE timestamp USING "StartedAt"::timestamp;
 ALTER TABLE "Deployments" ALTER COLUMN "FinishedAt" TYPE timestamp USING CASE WHEN "FinishedAt" IS NULL OR "FinishedAt" = '' THEN NULL ELSE "FinishedAt"::timestamp END;
 ALTER TABLE "DeploymentLogs" ALTER COLUMN "Timestamp" TYPE timestamp USING "Timestamp"::timestamp;

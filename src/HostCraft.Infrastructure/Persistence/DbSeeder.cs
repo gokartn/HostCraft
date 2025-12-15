@@ -58,7 +58,7 @@ public static class DbSeeder
             Status = ServerStatus.Online,
             Type = ServerType.Standalone,
             ProxyType = ProxyType.None,
-            RegionId = primaryRegion.Id,
+            RegionId = null, // No region assigned by default
             PrivateKeyId = null, // No SSH key needed for localhost
             IsSwarmManager = isSwarmManager,
             CreatedAt = DateTime.UtcNow
