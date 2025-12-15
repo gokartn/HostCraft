@@ -13,11 +13,11 @@ namespace HostCraft.Infrastructure.Docker;
 /// Handles both standalone containers and Swarm services.
 /// Uses SSH tunneling for remote Docker connections.
 /// </summary>
-public class DockerService : IDockerService
+public class DockerService : IDockerService, IDisposable
 {
     private readonly Dictionary<string, DockerClient> _clients = new();
     private readonly Dictionary<string, SshClient> _sshClients = new();
-    private readonly Dictionary<string, ForwardedPortDynamic> _sshTunnels = new();
+    private readonly Dictionary<string, Renci.SshNet.ForwardedPortLocal> _sshTunnels = new();
     private readonly Dictionary<string, int> _tunnelPorts = new();
     
     private DockerClient GetClient(Server server)
@@ -26,8 +26,8 @@ public class DockerService : IDockerService
         
         if (!_clients.ContainsKey(key))
         {
-            // For local server, use Unix socket or named pipe
-            if (server.Host == "localhost" || server.Host == "127.0.0.1")
+            // For local server, use Unix socket or named pipe directly (no SSH needed)
+            if (IsLocalhostServer(server))
             {
                 var uri = Environment.OSVersion.Platform == PlatformID.Win32NT
                     ? "npipe://./pipe/docker_engine"
@@ -37,14 +37,58 @@ public class DockerService : IDockerService
             }
             else
             {
-                // For remote servers, execute Docker commands directly via SSH
-                // This approach uses SSH.NET to run Docker CLI commands remotely
-                // We'll wrap this in a custom DockerClient that executes commands over SSH
+                // For remote servers, create SSH tunnel to Docker socket
+                // We use socat on the remote server to expose the Unix socket on a TCP port
+                // Then forward that TCP port through SSH to our local machine
                 
-                // For now, let's try to connect to Docker TCP port if exposed
-                // This requires the remote Docker daemon to listen on TCP
-                // Users should either expose Docker on TCP or we'll need to wrap all calls
-                var dockerUri = $"tcp://{server.Host}:2375";
+                var sshClient = GetSshClient(server);
+                
+                // Check if socat is installed, if not try to install it
+                var checkSocat = sshClient.CreateCommand("which socat || command -v socat");
+                var socatPath = checkSocat.Execute().Trim();
+                
+                if (string.IsNullOrEmpty(socatPath))
+                {
+                    // Try to install socat (works on Ubuntu/Debian)
+                    var installCmd = sshClient.CreateCommand("sudo apt-get update && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y socat");
+                    installCmd.Execute();
+                    
+                    // Verify installation
+                    socatPath = sshClient.CreateCommand("which socat").Execute().Trim();
+                    if (string.IsNullOrEmpty(socatPath))
+                    {
+                        throw new InvalidOperationException("socat is not installed on the remote server and automatic installation failed. Please install it manually: sudo apt-get install socat");
+                    }
+                }
+                
+                // Find an available port on the remote server for socat
+                var remotePort = 2376; // Use 2376 (Docker TLS port) as it's usually available
+                
+                // Kill any existing socat on this port
+                var killSocat = sshClient.CreateCommand($"pkill -f 'socat.*:{remotePort}'");
+                killSocat.Execute();
+                
+                // Start socat on remote server to bridge Unix socket to TCP
+                // This runs in background and will be cleaned up when SSH session ends
+                var socatCommand = $"nohup socat TCP-LISTEN:{remotePort},reuseaddr,fork UNIX-CONNECT:/var/run/docker.sock > /dev/null 2>&1 & echo $!";
+                var socatPidCmd = sshClient.CreateCommand(socatCommand);
+                var socatPid = socatPidCmd.Execute().Trim();
+                
+                // Give socat a moment to start
+                System.Threading.Thread.Sleep(1000);
+                
+                // Get an available local port for the SSH tunnel
+                var localPort = GetAvailablePort();
+                _tunnelPorts[key] = localPort;
+                
+                // Create SSH port forward from local port to remote socat port
+                var forwardedPort = new Renci.SshNet.ForwardedPortLocal("127.0.0.1", (uint)localPort, "127.0.0.1", (uint)remotePort);
+                sshClient.AddForwardedPort(forwardedPort);
+                forwardedPort.Start();
+                _sshTunnels[key] = forwardedPort;
+                
+                // Connect to Docker via the SSH tunnel
+                var dockerUri = $"tcp://127.0.0.1:{localPort}";
                 _clients[key] = new DockerClientConfiguration(new Uri(dockerUri)).CreateClient();
             }
         }
@@ -96,6 +140,46 @@ public class DockerService : IDockerService
         var port = ((System.Net.IPEndPoint)listener.LocalEndpoint).Port;
         listener.Stop();
         return port;
+    }
+    
+    private static bool IsLocalhostServer(Server server)
+    {
+        // Check common localhost identifiers
+        if (server.Host == "localhost" || 
+            server.Host == "127.0.0.1" || 
+            server.Host == "::1" ||
+            server.Host == "0.0.0.0")
+        {
+            return true;
+        }
+        
+        // Check if it matches the local machine name
+        try
+        {
+            var localHostName = System.Net.Dns.GetHostName();
+            if (string.Equals(server.Host, localHostName, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+            
+            // Check if the host resolves to a local IP
+            var hostEntry = System.Net.Dns.GetHostEntry(server.Host);
+            var localAddresses = System.Net.Dns.GetHostEntry(localHostName).AddressList;
+            
+            foreach (var addr in hostEntry.AddressList)
+            {
+                if (System.Net.IPAddress.IsLoopback(addr) || localAddresses.Any(la => la.Equals(addr)))
+                {
+                    return true;
+                }
+            }
+        }
+        catch
+        {
+            // If DNS resolution fails, just use the basic check
+        }
+        
+        return false;
     }
     
     // Container operations
@@ -177,10 +261,18 @@ public class DockerService : IDockerService
     
     public async Task<Stream> GetContainerLogsAsync(Server server, string containerId, CancellationToken cancellationToken = default)
     {
-        // TODO: Properly handle MultiplexedStream from Docker.DotNet
-        // For now, return empty stream - this needs proper implementation
-        await Task.CompletedTask;
-        return Stream.Null;
+        var client = GetClient(server);
+        
+        var logsParams = new ContainerLogsParameters
+        {
+            ShowStdout = true,
+            ShowStderr = true,
+            Follow = false,
+            Timestamps = true,
+            Tail = "500" // Get last 500 lines
+        };
+        
+        return await client.Containers.GetContainerLogsAsync(containerId, logsParams, cancellationToken);
     }
     
     // Service operations (Swarm)
@@ -297,7 +389,14 @@ public class DockerService : IDockerService
         var client = GetClient(server);
         return await client.Swarm.GetServiceLogsAsync(
             serviceId,
-            new ServiceLogsParameters { ShowStdout = true, ShowStderr = true, Follow = true },
+            new ServiceLogsParameters 
+            { 
+                ShowStdout = true, 
+                ShowStderr = true, 
+                Follow = false,
+                Timestamps = true,
+                Tail = "500" // Get last 500 lines
+            },
             cancellationToken);
     }
     
@@ -461,8 +560,8 @@ public class DockerService : IDockerService
     {
         try
         {
-            // For local servers, use Docker client
-            if (server.Host == "localhost" || server.Host == "127.0.0.1")
+            // For local servers, use Docker client directly (no SSH)
+            if (IsLocalhostServer(server))
             {
                 var client = GetClient(server);
                 await client.System.PingAsync(cancellationToken);
@@ -512,8 +611,8 @@ public class DockerService : IDockerService
     
     public async Task<SystemInfo> GetSystemInfoAsync(Server server, CancellationToken cancellationToken = default)
     {
-        // For local servers, use Docker client
-        if (server.Host == "localhost" || server.Host == "127.0.0.1")
+        // For local servers, use Docker client directly (no SSH)
+        if (IsLocalhostServer(server))
         {
             var client = GetClient(server);
             var info = await client.System.GetSystemInfoAsync(cancellationToken);
@@ -542,16 +641,21 @@ public class DockerService : IDockerService
     // Cleanup method to dispose SSH connections and tunnels
     public void Dispose()
     {
+        // Stop all SSH port forwarding tunnels
         foreach (var tunnel in _sshTunnels.Values)
         {
             try
             {
-                tunnel.Stop();
+                if (tunnel.IsStarted)
+                {
+                    tunnel.Stop();
+                }
             }
             catch { }
         }
         _sshTunnels.Clear();
         
+        // Disconnect and dispose all SSH clients
         foreach (var sshClient in _sshClients.Values)
         {
             try
@@ -566,6 +670,7 @@ public class DockerService : IDockerService
         }
         _sshClients.Clear();
         
+        // Dispose all Docker clients
         foreach (var client in _clients.Values)
         {
             try

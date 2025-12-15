@@ -15,17 +15,20 @@ public class ApplicationsController : ControllerBase
     private readonly IDockerService _dockerService;
     private readonly IProxyService _proxyService;
     private readonly ILogger<ApplicationsController> _logger;
+    private readonly IServiceScopeFactory _scopeFactory;
     
     public ApplicationsController(
         HostCraftDbContext context,
         IDockerService dockerService,
         IProxyService proxyService,
-        ILogger<ApplicationsController> _logger)
+        ILogger<ApplicationsController> logger,
+        IServiceScopeFactory scopeFactory)
     {
         _context = context;
         _dockerService = dockerService;
         _proxyService = proxyService;
-        this._logger = _logger;
+        _logger = logger;
+        _scopeFactory = scopeFactory;
     }
     
     [HttpGet]
@@ -179,6 +182,88 @@ public class ApplicationsController : ControllerBase
         });
     }
     
+    [HttpPost("{id}/deploy")]
+    public async Task<ActionResult> RedeployApplication(int id)
+    {
+        var app = await _context.Applications
+            .Include(a => a.Server)
+            .FirstOrDefaultAsync(a => a.Id == id);
+        
+        if (app == null)
+            return NotFound();
+        
+        // Create new deployment
+        var deployment = new Deployment
+        {
+            Uuid = Guid.NewGuid(),
+            ApplicationId = app.Id,
+            Status = DeploymentStatus.Queued,
+            StartedAt = DateTime.UtcNow
+        };
+        
+        _context.Deployments.Add(deployment);
+        await _context.SaveChangesAsync();
+        
+        // Redeploy in background
+        var request = new CreateApplicationRequest(
+            app.Name,
+            app.ServerId,
+            app.ProjectId,
+            app.DockerImage ?? "",
+            app.Replicas,
+            app.EnvironmentVariables?.ToDictionary(e => e.Key, e => e.Value),
+            null,
+            app.Port
+        );
+        
+        _ = Task.Run(async () => await DeployApplicationAsync(deployment.Id, request));
+        
+        return Ok(new { message = "Deployment queued", deploymentId = deployment.Id });
+    }
+    
+    [HttpGet("{id}/logs")]
+    public async Task<ActionResult> GetApplicationLogs(int id)
+    {
+        var app = await _context.Applications
+            .Include(a => a.Server)
+                .ThenInclude(s => s.PrivateKey)
+            .Include(a => a.Deployments.OrderByDescending(d => d.StartedAt))
+            .FirstOrDefaultAsync(a => a.Id == id);
+        
+        if (app == null)
+            return NotFound();
+        
+        var latestDeployment = app.Deployments.OrderByDescending(d => d.StartedAt).FirstOrDefault();
+        
+        if (latestDeployment == null)
+            return BadRequest(new { error = "No deployments found" });
+        
+        try
+        {
+            Stream logStream;
+            
+            if (!string.IsNullOrEmpty(latestDeployment.ServiceId))
+            {
+                logStream = await _dockerService.GetServiceLogsAsync(app.Server, latestDeployment.ServiceId);
+            }
+            else if (!string.IsNullOrEmpty(latestDeployment.ContainerId))
+            {
+                logStream = await _dockerService.GetContainerLogsAsync(app.Server, latestDeployment.ContainerId);
+            }
+            else
+            {
+                return BadRequest(new { error = "No container or service ID found" });
+            }
+            
+            return File(logStream, "text/plain");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting logs for application {AppId}", id);
+            return StatusCode(500, new { error = ex.Message });
+        }
+    }
+    
     [HttpDelete("{id}")]
     public async Task<IActionResult> DeleteApplication(int id)
     {
@@ -236,9 +321,16 @@ public class ApplicationsController : ControllerBase
     
     private async Task DeployApplicationAsync(int deploymentId, CreateApplicationRequest request)
     {
-        var deployment = await _context.Deployments
+        using var scope = _scopeFactory.CreateScope();
+        var context = scope.ServiceProvider.GetRequiredService<HostCraftDbContext>();
+        var dockerService = scope.ServiceProvider.GetRequiredService<IDockerService>();
+        var proxyService = scope.ServiceProvider.GetRequiredService<IProxyService>();
+        var logger = scope.ServiceProvider.GetRequiredService<ILogger<ApplicationsController>>();
+        
+        var deployment = await context.Deployments
             .Include(d => d.Application)
             .ThenInclude(a => a.Server)
+                .ThenInclude(s => s.PrivateKey)
             .FirstOrDefaultAsync(d => d.Id == deploymentId);
         
         if (deployment == null) return;
@@ -247,12 +339,12 @@ public class ApplicationsController : ControllerBase
         {
             var app = deployment.Application;
             deployment.Status = DeploymentStatus.Running;
-            await _context.SaveChangesAsync();
+            await context.SaveChangesAsync();
             
-            _logger.LogInformation("Deploying application {AppName} to server {ServerName}", app.Name, app.Server.Name);
+            logger.LogInformation("Deploying application {AppName} to server {ServerName}", app.Name, app.Server.Name);
             
             // Pull image
-            await _dockerService.PullImageAsync(app.Server, request.Image);
+            await dockerService.PullImageAsync(app.Server, request.Image);
             
             var envVars = request.EnvironmentVariables ?? new Dictionary<string, string>();
             
@@ -268,7 +360,7 @@ public class ApplicationsController : ControllerBase
                     request.Networks ?? new List<string>(),
                     request.Port);
                 
-                var serviceId = await _dockerService.CreateServiceAsync(app.Server, serviceRequest);
+                var serviceId = await dockerService.CreateServiceAsync(app.Server, serviceRequest);
                 deployment.ServiceId = serviceId;
             }
             else
@@ -286,34 +378,34 @@ public class ApplicationsController : ControllerBase
                     request.Networks ?? new List<string>(),
                     null); // Port bindings - using null for now, will implement properly later
                 
-                var containerId = await _dockerService.CreateContainerAsync(app.Server, containerRequest);
-                await _dockerService.StartContainerAsync(app.Server, containerId);
+                var containerId = await dockerService.CreateContainerAsync(app.Server, containerRequest);
+                await dockerService.StartContainerAsync(app.Server, containerId);
                 deployment.ContainerId = containerId;
             }
             
             deployment.Status = DeploymentStatus.Success;
             deployment.FinishedAt = DateTime.UtcNow;
             app.LastDeployedAt = DateTime.UtcNow;
-            await _context.SaveChangesAsync();
+            await context.SaveChangesAsync();
             
             // Configure reverse proxy if enabled
             if (app.Server?.ProxyType != ProxyType.None)
             {
-                _logger.LogInformation("Configuring {ProxyType} for application {AppName}", 
+                logger.LogInformation("Configuring {ProxyType} for application {AppName}", 
                     app.Server.ProxyType, app.Name);
-                await _proxyService.ConfigureApplicationAsync(app);
+                await proxyService.ConfigureApplicationAsync(app);
             }
             
-            _logger.LogInformation("Application {AppName} deployed successfully", app.Name);
+            logger.LogInformation("Application {AppName} deployed successfully", app.Name);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error deploying application deployment {DeploymentId}", deploymentId);
+            logger.LogError(ex, "Error deploying application deployment {DeploymentId}", deploymentId);
             
             deployment.Status = DeploymentStatus.Failed;
             deployment.ErrorMessage = ex.Message;
             deployment.FinishedAt = DateTime.UtcNow;
-            await _context.SaveChangesAsync();
+            await context.SaveChangesAsync();
         }
     }
 }

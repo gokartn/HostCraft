@@ -296,6 +296,100 @@ public class ServersController : ControllerBase
         return NoContent();
     }
     
+    [HttpPost("configure-localhost")]
+    public async Task<ActionResult<Server>> ConfigureLocalhostServer()
+    {
+        // Check if localhost server already exists
+        var existingLocalhost = await _context.Servers
+            .Include(s => s.Region)
+            .FirstOrDefaultAsync(s => s.Host == "localhost" || s.Host == "127.0.0.1");
+        
+        if (existingLocalhost != null)
+        {
+            return Ok(existingLocalhost);
+        }
+        
+        // Check if Docker is available
+        if (!IsDockerAvailable())
+        {
+            return BadRequest(new { message = "Docker is not available on this system. Please install Docker first." });
+        }
+        
+        // Get primary region or create one
+        var primaryRegion = await _context.Regions.FirstOrDefaultAsync(r => r.IsPrimary);
+        
+        if (primaryRegion == null)
+        {
+            primaryRegion = new Region
+            {
+                Name = "Local",
+                Code = "local",
+                IsPrimary = true,
+                Priority = 1,
+                CreatedAt = DateTime.UtcNow
+            };
+            _context.Regions.Add(primaryRegion);
+            await _context.SaveChangesAsync();
+        }
+        
+        // Create localhost server
+        var localhostServer = new Server
+        {
+            Name = "Local Server",
+            Host = "localhost",
+            Port = 22, // Not actually used for localhost
+            Username = Environment.UserName,
+            Status = ServerStatus.Online,
+            Type = ServerType.Standalone,
+            ProxyType = ProxyType.None,
+            RegionId = primaryRegion.Id,
+            PrivateKeyId = null,
+            CreatedAt = DateTime.UtcNow
+        };
+        
+        _context.Servers.Add(localhostServer);
+        await _context.SaveChangesAsync();
+        
+        // Reload with relationships
+        var server = await _context.Servers
+            .Include(s => s.Region)
+            .FirstOrDefaultAsync(s => s.Id == localhostServer.Id);
+        
+        return Ok(server);
+    }
+    
+    private static bool IsDockerAvailable()
+    {
+        try
+        {
+            var isWindows = System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(System.Runtime.InteropServices.OSPlatform.Windows);
+            var dockerCommand = "docker";
+            
+            var processStartInfo = new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = dockerCommand,
+                Arguments = "info",
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+            
+            using var process = System.Diagnostics.Process.Start(processStartInfo);
+            if (process == null)
+            {
+                return false;
+            }
+            
+            process.WaitForExit(5000); // 5 second timeout
+            return process.ExitCode == 0;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+    
     [HttpPost("validate")]
     public async Task<ActionResult<ServerValidationResult>> ValidateServerConnection(CreateServerRequest request)
     {

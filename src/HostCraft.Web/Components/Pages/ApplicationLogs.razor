@@ -1,0 +1,164 @@
+@page "/applications/{Id:int}/logs"
+@rendermode InteractiveServer
+@using System.Net.Http
+@using System.Text
+@using HostCraft.Core.Enums
+@inject HttpClient Http
+@inject NavigationManager Navigation
+@inject ILogger<ApplicationLogs> Logger
+
+<div class="page-container logs-page">
+    <div class="page-header">
+        <div class="header-left">
+            <button class="btn-icon" @onclick="BackToApplication">←</button>
+            <div>
+                <h1>📄 Application Logs</h1>
+                <p class="subtitle">@(applicationName ?? "Loading...")</p>
+            </div>
+        </div>
+        <div class="header-actions">
+            <button class="btn-secondary" @onclick="RefreshLogs" disabled="@isLoading">
+                <i class="icon">🔄</i> Refresh
+            </button>
+            <button class="btn-secondary" @onclick="ClearLogs">
+                <i class="icon">🗑️</i> Clear
+            </button>
+        </div>
+    </div>
+
+    @if (isLoading && string.IsNullOrEmpty(logs))
+    {
+        <div class="loading-spinner">
+            <div class="spinner"></div>
+            <p>Loading logs...</p>
+        </div>
+    }
+    else if (!string.IsNullOrEmpty(errorMessage))
+    {
+        <div class="error-state">
+            <div class="error-icon">⚠️</div>
+            <h2>Error Loading Logs</h2>
+            <p>@errorMessage</p>
+            <button class="btn-primary" @onclick="RefreshLogs">
+                Try Again
+            </button>
+        </div>
+    }
+    else
+    {
+        <div class="logs-container">
+            <div class="logs-header">
+                <span class="logs-count">@GetLogLineCount() lines</span>
+                <div class="logs-controls">
+                    <label class="checkbox-label">
+                        <input type="checkbox" @bind="autoScroll" />
+                        Auto-scroll
+                    </label>
+                    <label class="checkbox-label">
+                        <input type="checkbox" @bind="wrapLines" />
+                        Wrap lines
+                    </label>
+                </div>
+            </div>
+            <pre class="logs-content @(wrapLines ? "wrap" : "")" @ref="logsElement">@logs</pre>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter]
+    public int Id { get; set; }
+    
+    private string? logs;
+    private string? errorMessage;
+    private string? applicationName;
+    private bool isLoading = true;
+    private bool autoScroll = true;
+    private bool wrapLines = false;
+    private ElementReference logsElement;
+    
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadApplicationInfo();
+        await LoadLogs();
+    }
+    
+    private async Task LoadApplicationInfo()
+    {
+        try
+        {
+            var app = await Http.GetFromJsonAsync<ApplicationDto>($"api/applications/{Id}");
+            applicationName = app?.Name;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading application info");
+        }
+    }
+    
+    private async Task LoadLogs()
+    {
+        isLoading = true;
+        errorMessage = null;
+        StateHasChanged();
+        
+        try
+        {
+            var response = await Http.GetAsync($"api/applications/{Id}/logs");
+            
+            if (response.IsSuccessStatusCode)
+            {
+                logs = await response.Content.ReadAsStringAsync();
+                
+                // If logs are empty, show a message
+                if (string.IsNullOrWhiteSpace(logs))
+                {
+                    logs = "No logs available yet. The container may still be starting or has not produced any output.";
+                }
+            }
+            else
+            {
+                var error = await response.Content.ReadAsStringAsync();
+                errorMessage = $"Failed to load logs: {error}";
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading logs");
+            errorMessage = $"Error loading logs: {ex.Message}";
+        }
+        finally
+        {
+            isLoading = false;
+            StateHasChanged();
+        }
+    }
+    
+    private async Task RefreshLogs()
+    {
+        await LoadLogs();
+    }
+    
+    private void ClearLogs()
+    {
+        logs = "";
+    }
+    
+    private void BackToApplication()
+    {
+        Navigation.NavigateTo($"/applications/{Id}");
+    }
+    
+    private int GetLogLineCount()
+    {
+        if (string.IsNullOrEmpty(logs))
+            return 0;
+        return logs.Split('\n').Length;
+    }
+    
+    private record ApplicationDto(
+        int Id,
+        string Name,
+        string? Description
+    );
+}

@@ -55,16 +55,21 @@
                         
                         <div class="form-group">
                             <label for="project">Project *</label>
-                            <select id="project" @bind="model.ProjectId" class="form-control">
-                                <option value="0">-- Select Project --</option>
-                                @if (projects != null)
-                                {
-                                    foreach (var project in projects)
+                            <div style="display: flex; gap: 0.5rem;">
+                                <select id="project" @bind="model.ProjectId" class="form-control" style="flex: 1;">
+                                    <option value="0">-- Select Project --</option>
+                                    @if (projects != null)
                                     {
-                                        <option value="@project.Id">@project.Name</option>
+                                        foreach (var project in projects)
+                                        {
+                                            <option value="@project.Id">@project.Name</option>
+                                        }
                                     }
-                                }
-                            </select>
+                                </select>
+                                <button type="button" class="btn-secondary" @onclick="ShowCreateProject" title="Create New Project" style="white-space: nowrap;">
+                                    ➕ New
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -157,6 +162,47 @@
     </div>
 </div>
 
+@if (showCreateProjectModal)
+{
+    <div class="modal-backdrop" @onclick="HideCreateProject">
+        <div class="modal-dialog" @onclick:stopPropagation="true">
+            <div class="modal-header">
+                <h3>Create New Project</h3>
+                <button type="button" class="btn-close" @onclick="HideCreateProject">✕</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="newProjectName">Project Name *</label>
+                    <input type="text" id="newProjectName" @bind="newProjectName" class="form-control" placeholder="my-project" autofocus />
+                </div>
+                <div class="form-group">
+                    <label for="newProjectDescription">Description</label>
+                    <textarea id="newProjectDescription" @bind="newProjectDescription" class="form-control" rows="3" placeholder="What is this project for?"></textarea>
+                </div>
+                @if (!string.IsNullOrEmpty(projectErrorMessage))
+                {
+                    <div class="alert alert-danger">
+                        ⚠️ @projectErrorMessage
+                    </div>
+                }
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn-secondary" @onclick="HideCreateProject">Cancel</button>
+                <button type="button" class="btn-primary" @onclick="CreateProject" disabled="@isCreatingProject">
+                    @if (isCreatingProject)
+                    {
+                        <span>Creating...</span>
+                    }
+                    else
+                    {
+                        <span>Create Project</span>
+                    }
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
 @code {
     [Parameter]
     public int? Id { get; set; }
@@ -169,6 +215,12 @@
     
     private List<ServerDto>? servers;
     private List<ProjectDto>? projects;
+    
+    private bool showCreateProjectModal = false;
+    private bool isCreatingProject = false;
+    private string newProjectName = "";
+    private string newProjectDescription = "";
+    private string? projectErrorMessage;
     
     private ApplicationFormModel model = new();
     private List<EnvVar> envVars = new();
@@ -325,6 +377,72 @@
     private void Cancel()
     {
         Navigation.NavigateTo("/applications");
+    }
+    
+    private void ShowCreateProject()
+    {
+        newProjectName = "";
+        newProjectDescription = "";
+        projectErrorMessage = null;
+        showCreateProjectModal = true;
+    }
+    
+    private void HideCreateProject()
+    {
+        showCreateProjectModal = false;
+        newProjectName = "";
+        newProjectDescription = "";
+        projectErrorMessage = null;
+    }
+    
+    private async Task CreateProject()
+    {
+        projectErrorMessage = null;
+        
+        if (string.IsNullOrWhiteSpace(newProjectName))
+        {
+            projectErrorMessage = "Project name is required";
+            return;
+        }
+        
+        isCreatingProject = true;
+        StateHasChanged();
+        
+        try
+        {
+            var request = new { Name = newProjectName, Description = newProjectDescription };
+            var response = await Http.PostAsJsonAsync("api/projects", request);
+            
+            if (response.IsSuccessStatusCode)
+            {
+                var createdProject = await response.Content.ReadFromJsonAsync<ProjectDto>();
+                if (createdProject != null)
+                {
+                    // Reload projects list
+                    projects = await Http.GetFromJsonAsync<List<ProjectDto>>("api/applications/projects");
+                    
+                    // Auto-select the newly created project
+                    model.ProjectId = createdProject.Id;
+                    
+                    HideCreateProject();
+                }
+            }
+            else
+            {
+                var errorContent = await response.Content.ReadAsStringAsync();
+                projectErrorMessage = $"Failed to create project: {errorContent}";
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error creating project");
+            projectErrorMessage = $"Error: {ex.Message}";
+        }
+        finally
+        {
+            isCreatingProject = false;
+            StateHasChanged();
+        }
     }
     
     private class ApplicationFormModel
