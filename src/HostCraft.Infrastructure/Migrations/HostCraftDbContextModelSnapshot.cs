@@ -7,7 +7,7 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
 
-namespace HostCraft.Infrastructure.Persistence.Migrations
+namespace HostCraft.Infrastructure.Migrations
 {
     [DbContext(typeof(HostCraftDbContext))]
     partial class HostCraftDbContextModelSnapshot : ModelSnapshot
@@ -532,8 +532,7 @@ namespace HostCraft.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("Name")
-                        .IsUnique();
+                    b.HasIndex("Name");
 
                     b.HasIndex("PrivateKeyId");
 

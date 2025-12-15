@@ -1,9 +1,9 @@
-﻿using System;
+using System;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
 
-namespace HostCraft.Infrastructure.Persistence.Migrations
+namespace HostCraft.Infrastructure.Migrations
 {
     /// <inheritdoc />
     public partial class InitialCreate : Migration
@@ -52,7 +52,7 @@ namespace HostCraft.Infrastructure.Persistence.Migrations
                     Name = table.Column<string>(type: "TEXT", maxLength: 100, nullable: false),
                     Code = table.Column<string>(type: "TEXT", maxLength: 50, nullable: false),
                     Description = table.Column<string>(type: "TEXT", nullable: true),
-                    IsPrimary = table.Column<bool>(type: "INTEGER", nullable: false),
+                    IsPrimary = table.Column<bool>( nullable: false),
                     Priority = table.Column<int>(type: "INTEGER", nullable: false),
                     CreatedAt = table.Column<DateTime>(type: "TEXT", nullable: false, defaultValueSql: "CURRENT_TIMESTAMP")
                 },
@@ -71,7 +71,7 @@ namespace HostCraft.Infrastructure.Persistence.Migrations
                     Email = table.Column<string>(type: "TEXT", maxLength: 255, nullable: false),
                     PasswordHash = table.Column<string>(type: "TEXT", nullable: false),
                     Name = table.Column<string>(type: "TEXT", nullable: true),
-                    IsAdmin = table.Column<bool>(type: "INTEGER", nullable: false),
+                    IsAdmin = table.Column<bool>( nullable: false),
                     CreatedAt = table.Column<DateTime>(type: "TEXT", nullable: false, defaultValueSql: "CURRENT_TIMESTAMP"),
                     LastLoginAt = table.Column<DateTime>(type: "TEXT", nullable: true)
                 },
@@ -97,7 +97,7 @@ namespace HostCraft.Infrastructure.Persistence.Migrations
                     SwarmJoinToken = table.Column<string>(type: "TEXT", nullable: true),
                     SwarmManagerAddress = table.Column<string>(type: "TEXT", nullable: true),
                     RegionId = table.Column<int>(type: "INTEGER", nullable: true),
-                    IsSwarmManager = table.Column<bool>(type: "INTEGER", nullable: false),
+                    IsSwarmManager = table.Column<bool>( nullable: false),
                     SwarmManagerCount = table.Column<int>(type: "INTEGER", nullable: true),
                     SwarmWorkerCount = table.Column<int>(type: "INTEGER", nullable: true),
                     CreatedAt = table.Column<DateTime>(type: "TEXT", nullable: false, defaultValueSql: "CURRENT_TIMESTAMP"),
@@ -145,13 +145,13 @@ namespace HostCraft.Infrastructure.Persistence.Migrations
                     Replicas = table.Column<int>(type: "INTEGER", nullable: false),
                     MemoryLimitBytes = table.Column<long>(type: "INTEGER", nullable: true),
                     CpuLimit = table.Column<long>(type: "INTEGER", nullable: true),
-                    AutoDeploy = table.Column<bool>(type: "INTEGER", nullable: false),
+                    AutoDeploy = table.Column<bool>( nullable: false),
                     HealthCheckUrl = table.Column<string>(type: "TEXT", nullable: true),
                     HealthCheckIntervalSeconds = table.Column<int>(type: "INTEGER", nullable: false),
                     HealthCheckTimeoutSeconds = table.Column<int>(type: "INTEGER", nullable: false),
                     MaxConsecutiveFailures = table.Column<int>(type: "INTEGER", nullable: false),
-                    AutoRestart = table.Column<bool>(type: "INTEGER", nullable: false),
-                    AutoRollback = table.Column<bool>(type: "INTEGER", nullable: false),
+                    AutoRestart = table.Column<bool>( nullable: false),
+                    AutoRollback = table.Column<bool>( nullable: false),
                     BackupSchedule = table.Column<string>(type: "TEXT", nullable: true),
                     BackupRetentionDays = table.Column<int>(type: "INTEGER", nullable: true),
                     CreatedAt = table.Column<DateTime>(type: "TEXT", nullable: false, defaultValueSql: "CURRENT_TIMESTAMP"),
@@ -214,7 +214,7 @@ namespace HostCraft.Infrastructure.Persistence.Migrations
                     ApplicationId = table.Column<int>(type: "INTEGER", nullable: false),
                     Key = table.Column<string>(type: "TEXT", maxLength: 255, nullable: false),
                     Value = table.Column<string>(type: "TEXT", nullable: false),
-                    IsSecret = table.Column<bool>(type: "INTEGER", nullable: false),
+                    IsSecret = table.Column<bool>( nullable: false),
                     CreatedAt = table.Column<DateTime>(type: "TEXT", nullable: false, defaultValueSql: "CURRENT_TIMESTAMP")
                 },
                 constraints: table =>
@@ -272,7 +272,7 @@ namespace HostCraft.Infrastructure.Persistence.Migrations
                     Driver = table.Column<string>(type: "TEXT", nullable: true),
                     MountPoint = table.Column<string>(type: "TEXT", nullable: true),
                     SizeBytes = table.Column<long>(type: "INTEGER", nullable: false),
-                    IsBackedUp = table.Column<bool>(type: "INTEGER", nullable: false),
+                    IsBackedUp = table.Column<bool>( nullable: false),
                     BackupSchedule = table.Column<string>(type: "TEXT", nullable: true),
                     CreatedAt = table.Column<DateTime>(type: "TEXT", nullable: false, defaultValueSql: "CURRENT_TIMESTAMP")
                 },
@@ -464,8 +464,7 @@ namespace HostCraft.Infrastructure.Persistence.Migrations
             migrationBuilder.CreateIndex(
                 name: "IX_Servers_Name",
                 table: "Servers",
-                column: "Name",
-                unique: true);
+                column: "Name");
 
             migrationBuilder.CreateIndex(
                 name: "IX_Servers_PrivateKeyId",
@@ -548,3 +547,4 @@ namespace HostCraft.Infrastructure.Persistence.Migrations
         }
     }
 }
+
