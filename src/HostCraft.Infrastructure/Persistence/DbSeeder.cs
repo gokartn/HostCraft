@@ -91,27 +91,44 @@ public static class DbSeeder
     {
         try
         {
+            // Check if Docker socket exists (works inside Docker containers)
             var isWindows = RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
-            var dockerCommand = isWindows ? "docker" : "docker";
+            var dockerSocket = isWindows ? "//./pipe/docker_engine" : "/var/run/docker.sock";
             
-            var processStartInfo = new System.Diagnostics.ProcessStartInfo
+            if (isWindows)
             {
-                FileName = dockerCommand,
-                Arguments = "info",
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            };
-            
-            using var process = System.Diagnostics.Process.Start(processStartInfo);
-            if (process == null)
-            {
+                // On Windows, check if named pipe exists (difficult to check directly)
+                // Try to run docker command if available
+                try
+                {
+                    var processStartInfo = new System.Diagnostics.ProcessStartInfo
+                    {
+                        FileName = "docker",
+                        Arguments = "info",
+                        RedirectStandardOutput = true,
+                        RedirectStandardError = true,
+                        UseShellExecute = false,
+                        CreateNoWindow = true
+                    };
+                    
+                    using var process = System.Diagnostics.Process.Start(processStartInfo);
+                    if (process != null)
+                    {
+                        process.WaitForExit(5000);
+                        return process.ExitCode == 0;
+                    }
+                }
+                catch
+                {
+                    // Fall through to return false
+                }
                 return false;
             }
-            
-            process.WaitForExit(5000); // 5 second timeout
-            return process.ExitCode == 0;
+            else
+            {
+                // On Linux/Unix, check if Docker socket file exists
+                return File.Exists(dockerSocket);
+            }
         }
         catch
         {
