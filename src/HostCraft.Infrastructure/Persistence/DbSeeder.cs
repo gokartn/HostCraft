@@ -9,38 +9,19 @@ public static class DbSeeder
 {
     public static async Task SeedAsync(HostCraftDbContext context)
     {
-        // Check if already seeded
-        if (await context.Regions.AnyAsync() || await context.Projects.AnyAsync())
-        {
-            // Still check for localhost server even if already seeded
-            await EnsureLocalhostServerAsync(context);
-            return;
-        }
-
-        // Seed Regions
-        var regions = new[]
-        {
-            new Region { Name = "US East", Code = "us-east-1", IsPrimary = true, Priority = 1 },
-            new Region { Name = "EU West", Code = "eu-west-1", IsPrimary = false, Priority = 2 },
-        };
-        context.Regions.AddRange(regions);
-        await context.SaveChangesAsync();
-
-        // Seed sample projects
-        var project = new Project
-        {
-            Name = "Demo Project",
-            Description = "Sample project for testing"
-        };
-        context.Projects.Add(project);
-        await context.SaveChangesAsync();
-        
-        // Ensure localhost server is configured
+        // Only ensure localhost server is configured if Docker is available
         await EnsureLocalhostServerAsync(context);
     }
     
     private static async Task EnsureLocalhostServerAsync(HostCraftDbContext context)
     {
+        // Check if localhost seeding is explicitly disabled
+        var skipLocalhostSeed = Environment.GetEnvironmentVariable("SKIP_LOCALHOST_SEED");
+        if (!string.IsNullOrEmpty(skipLocalhostSeed) && skipLocalhostSeed.ToLower() == "true")
+        {
+            return;
+        }
+        
         // Check if localhost server already exists
         var localhostExists = await context.Servers.AnyAsync(s => 
             s.Host == "localhost" || s.Host == "127.0.0.1");
@@ -59,13 +40,12 @@ public static class DbSeeder
             return;
         }
         
-        // Get primary region
-        var primaryRegion = await context.Regions.FirstOrDefaultAsync(r => r.IsPrimary);
-        
-        if (primaryRegion == null)
+        // Check if localhost should be configured as swarm manager
+        var isSwarmManager = false;
+        var swarmManagerEnv = Environment.GetEnvironmentVariable("LOCALHOST_IS_SWARM_MANAGER");
+        if (!string.IsNullOrEmpty(swarmManagerEnv) && swarmManagerEnv.ToLower() == "true")
         {
-            // No region available, skip localhost configuration
-            return;
+            isSwarmManager = true;
         }
         
         // Create localhost server entry
@@ -80,6 +60,7 @@ public static class DbSeeder
             ProxyType = ProxyType.None,
             RegionId = primaryRegion.Id,
             PrivateKeyId = null, // No SSH key needed for localhost
+            IsSwarmManager = isSwarmManager,
             CreatedAt = DateTime.UtcNow
         };
         

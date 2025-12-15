@@ -7,9 +7,117 @@ echo ""
 
 # Check if Docker is installed
 if ! command -v docker &> /dev/null; then
-    echo "❌ Docker is not installed. Please install Docker first."
-    exit 1
+    echo "⚠️  Docker is not installed on this system."
+    echo ""
+    read -p "Would you like to install Docker now? (yes/no): " install_docker
+    
+    if [ "$install_docker" = "yes" ]; then
+        echo "📦 Installing Docker..."
+        
+        # Detect OS and install Docker
+        if [ -f /etc/os-release ]; then
+            . /etc/os-release
+            OS=$ID
+        else
+            echo "❌ Cannot detect OS. Please install Docker manually."
+            exit 1
+        fi
+        
+        case $OS in
+            ubuntu|debian)
+                echo "Installing Docker on Ubuntu/Debian..."
+                curl -fsSL https://get.docker.com -o get-docker.sh
+                sh get-docker.sh
+                rm get-docker.sh
+                systemctl enable docker
+                systemctl start docker
+                ;;
+            centos|rhel|fedora)
+                echo "Installing Docker on CentOS/RHEL/Fedora..."
+                curl -fsSL https://get.docker.com -o get-docker.sh
+                sh get-docker.sh
+                rm get-docker.sh
+                systemctl enable docker
+                systemctl start docker
+                ;;
+            *)
+                echo "❌ Unsupported OS: $OS"
+                echo "Please install Docker manually from: https://docs.docker.com/engine/install/"
+                exit 1
+                ;;
+        esac
+        
+        echo "✅ Docker installed successfully"
+        echo ""
+    else
+        echo "❌ Docker is required to run HostCraft."
+        echo "Please install Docker from: https://docs.docker.com/engine/install/"
+        exit 1
+    fi
 fi
+
+echo "✅ Docker is installed"
+echo ""
+
+# Ask about Docker Swarm initialization
+echo "Docker Swarm Configuration:"
+read -p "Would you like to initialize Docker Swarm? (yes/no): " init_swarm
+
+SWARM_MANAGER="false"
+if [ "$init_swarm" = "yes" ]; then
+    # Check if already part of a swarm
+    if docker info 2>/dev/null | grep -q "Swarm: active"; then
+        echo "✅ Docker Swarm is already initialized"
+        SWARM_MANAGER="true"
+    else
+        echo "🔧 Initializing Docker Swarm..."
+        docker swarm init 2>/dev/null
+        if [ $? -eq 0 ]; then
+            echo "✅ Docker Swarm initialized successfully"
+            SWARM_MANAGER="true"
+        else
+            echo "⚠️  Failed to initialize swarm (may need to specify --advertise-addr)"
+            echo "You can initialize it manually later with: docker swarm init"
+        fi
+    fi
+    echo ""
+fi
+
+# Ask about localhost server configuration
+echo "Server Configuration:"
+echo "1) Configure localhost as a Docker host (recommended if running locally)"
+echo "2) UI only (manage remote servers, no localhost auto-configuration)"
+echo ""
+read -p "Select option (1 or 2): " server_option
+
+if [ "$server_option" = "1" ]; then
+    CONFIGURE_LOCALHOST="true"
+    echo "✅ Will configure localhost server"
+    
+    # If swarm is initialized, ask if localhost should be swarm manager
+    if [ "$SWARM_MANAGER" = "true" ]; then
+        echo ""
+        read -p "Configure localhost as Swarm Manager? (yes/no): " localhost_swarm
+        if [ "$localhost_swarm" = "yes" ]; then
+            LOCALHOST_SWARM_MANAGER="true"
+            echo "✅ Localhost will be configured as Swarm Manager"
+        else
+            LOCALHOST_SWARM_MANAGER="false"
+            echo "✅ Localhost will be configured as standalone Docker host"
+        fi
+    else
+        LOCALHOST_SWARM_MANAGER="false"
+    fi
+elif [ "$server_option" = "2" ]; then
+    CONFIGURE_LOCALHOST="false"
+    LOCALHOST_SWARM_MANAGER="false"
+    echo "✅ UI only mode - no localhost auto-configuration"
+else
+    echo "Invalid option. Defaulting to localhost configuration."
+    CONFIGURE_LOCALHOST="true"
+    LOCALHOST_SWARM_MANAGER="false"
+fi
+echo ""
 
 # Check if Docker Compose is available
 if ! docker compose version &> /dev/null; then
@@ -27,7 +135,16 @@ echo ""
 
 # Start the containers
 echo "🐳 Starting Docker containers..."
-docker compose up -d
+if [ "$CONFIGURE_LOCALHOST" = "true" ]; then
+    if [ "$LOCALHOST_SWARM_MANAGER" = "true" ]; then
+        LOCALHOST_IS_SWARM_MANAGER=true docker compose up -d
+    else
+        docker compose up -d
+    fi
+else
+    # Set environment variable to skip localhost configuration
+    SKIP_LOCALHOST_SEED=true docker compose up -d
+fi
 echo ""
 
 # Wait for PostgreSQL to be ready
@@ -171,5 +288,17 @@ echo ""
 echo "📍 Access your HostCraft instance:"
 echo "   Web UI: http://$(hostname -I | awk '{print $1}'):5000"
 echo "   API:    http://$(hostname -I | awk '{print $1}'):5001"
+echo ""
+if [ "$CONFIGURE_LOCALHOST" = "true" ]; then
+    if [ "$LOCALHOST_SWARM_MANAGER" = "true" ]; then
+        echo "🖥️  Localhost server configured as Docker Swarm Manager!"
+        echo "📋 Get worker join token: docker swarm join-token worker"
+        echo "📋 Get manager join token: docker swarm join-token manager"
+    else
+        echo "🖥️  Localhost server has been auto-configured and is ready to use!"
+    fi
+else
+    echo "🖥️  UI only mode - add your servers manually through the web interface."
+fi
 echo ""
 echo "🎉 HostCraft is ready to use!"
