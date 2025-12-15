@@ -79,11 +79,11 @@
                             <span class="label">User:</span>
                             <span class="value">@server.User</span>
                         </div>
-                        @if (!string.IsNullOrEmpty(server.Region))
+                        @if (server.Region != null)
                         {
                             <div class="info-row">
                                 <span class="label">Region:</span>
-                                <span class="value">@server.Region</span>
+                                <span class="value">@server.Region.Name</span>
                             </div>
                         }
                         @if (server.IsSwarm && !string.IsNullOrEmpty(server.SwarmId))
@@ -259,13 +259,21 @@
         public string Name { get; set; } = "";
         public string Host { get; set; } = "";
         public int Port { get; set; }
-        public string User { get; set; } = "";
+        public string Username { get; set; } = "";
+        public string User => Username; // Backward compatibility
         public ServerType Type { get; set; }
         public ServerStatus Status { get; set; }
-        public string? Region { get; set; }
+        public RegionDto? Region { get; set; }
         public string? SwarmId { get; set; }
         public DateTime CreatedAt { get; set; }
         public DateTime? LastSeenAt { get; set; }
         public bool IsSwarm => Type == ServerType.SwarmManager || Type == ServerType.SwarmWorker;
+    }
+
+    public class RegionDto
+    {
+        public int Id { get; set; }
+        public string Name { get; set; } = "";
+        public string Code { get; set; } = "";
     }
 }
