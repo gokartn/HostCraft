@@ -3,6 +3,7 @@
 @using HostCraft.Core.Enums
 @inject HttpClient Http
 @inject NavigationManager Navigation
+@inject IJSRuntime JSRuntime
 
 <PageTitle>@(server?.Name ?? "Server") - HostCraft</PageTitle>
 
@@ -60,7 +61,7 @@
                     </div>
                     <div class="info-item">
                         <span class="label">User</span>
-                        <span class="value">@server.User</span>
+                        <span class="value">@(server.Username ?? "root")</span>
                     </div>
                     @if (!string.IsNullOrEmpty(server.Region))
                     {
@@ -101,7 +102,7 @@
                 <div class="terminal-container">
                     <div class="terminal-placeholder">
                         <div class="placeholder-icon">🖥️</div>
-                        <p>Full XTerm.js-powered SSH terminal available</p>
+                        <p>js-powered SSH terminal available</p>
                         <button class="btn btn-primary btn-lg" @onclick="OpenTerminal">
                             ▶️ Open Terminal
                         </button>
@@ -114,6 +115,10 @@
             <div class="actions-card">
                 <h2>Quick Actions</h2>
                 <div class="action-buttons">
+                    <button class="action-btn" @onclick="ShowPublicKey">
+                        <span class="action-icon">🔑</span>
+                        <span class="action-text">Show Public Key</span>
+                    </button>
                     <button class="action-btn" @onclick="GetDockerInfo">
                         <span class="action-icon">🐳</span>
                         <span class="action-text">Docker Info</span>
@@ -157,6 +162,8 @@
 
     private ServerDto? server;
     private bool loading = true;
+    private string? publicKeyInfo;
+    private bool showingPublicKey = false;
 
     protected override async Task OnInitializedAsync()
     {
@@ -181,6 +188,27 @@
     }
 
     private void OpenTerminal() => Navigation.NavigateTo($"/servers/{Id}/terminal");
+
+    private async Task ShowPublicKey()
+    {
+        try
+        {
+            var response = await Http.GetFromJsonAsync<PublicKeyResponse>($"api/servers/{Id}/public-key");
+            if (response != null)
+            {
+                publicKeyInfo = $"Public Key:\n{response.PublicKey}\n\n{response.Instruction}\n\nManual Commands:\n{response.ManualCommand}";
+                showingPublicKey = true;
+                StateHasChanged();
+                
+                // Show alert
+                await JSRuntime.InvokeVoidAsync("alert", publicKeyInfo);
+            }
+        }
+        catch (Exception ex)
+        {
+            await JSRuntime.InvokeVoidAsync("alert", $"Error getting public key: {ex.Message}");
+        }
+    }
 
     // Quick action methods
     private void GetDockerInfo() => OpenTerminal();
@@ -229,7 +257,7 @@
         public string Name { get; set; } = "";
         public string Host { get; set; } = "";
         public int Port { get; set; }
-        public string User { get; set; } = "";
+        public string Username { get; set; } = "";
         public ServerType Type { get; set; }
         public ServerStatus Status { get; set; }
         public string? Region { get; set; }
@@ -238,5 +266,12 @@
         public DateTime CreatedAt { get; set; }
         public DateTime? LastSeenAt { get; set; }
         public bool IsSwarm => Type == ServerType.SwarmManager || Type == ServerType.SwarmWorker;
+    }
+
+    public class PublicKeyResponse
+    {
+        public string PublicKey { get; set; } = "";
+        public string Instruction { get; set; } = "";
+        public string ManualCommand { get; set; } = "";
     }
 }

@@ -8,7 +8,7 @@ namespace HostCraft.Core.Interfaces;
 /// Service for interacting with Docker daemon (containers, services, networks).
 /// Handles both standalone Docker and Swarm mode operations.
 /// </summary>
-public interface IDockerService
+public interface IDockerService : IDisposable
 {
     // Container operations (Standalone mode)
     Task<string> CreateContainerAsync(Server server, CreateContainerRequest request, CancellationToken cancellationToken = default);

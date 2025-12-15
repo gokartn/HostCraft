@@ -255,11 +255,17 @@
                     Name = server.Name,
                     Host = server.Host,
                     Port = server.Port,
-                    User = server.User,
+                    User = server.Username ?? "root",
                     Region = server.Region,
                     Type = server.Type,
                     ProxyType = server.ProxyType
                 };
+                
+                // Show placeholder if server has a private key (don't send actual key to client for security)
+                if (server.HasPrivateKey)
+                {
+                    model.PrivateKeyContent = "*** Existing private key (hidden for security) ***\n\nLeave unchanged to keep existing key, or paste a new key to replace it.";
+                }
             }
         }
         catch (Exception ex)
@@ -277,24 +283,61 @@
         try
         {
             var response = await Http.PostAsJsonAsync("api/servers/validate", model);
-            if (response.IsSuccessStatusCode)
+            var result = await response.Content.ReadFromJsonAsync<ValidationResult>();
+            
+            if (response.IsSuccessStatusCode && result != null && result.IsValid)
             {
-                successMessage = "✅ Connection successful! Docker daemon is accessible.";
+                successMessage = $"✅ {result.Message}";
+            }
+            else if (result != null)
+            {
+                errorMessage = $"❌ {result.Message}";
             }
             else
             {
-                var error = await response.Content.ReadAsStringAsync();
-                errorMessage = $"Connection failed: {error}";
+                errorMessage = "❌ Connection validation failed";
             }
         }
         catch (Exception ex)
         {
-            errorMessage = $"Connection failed: {ex.Message}";
+            // Try to parse error response if it's JSON
+            try
+            {
+                var errorContent = ex.Message;
+                if (errorContent.Contains("isValid"))
+                {
+                    var startIndex = errorContent.IndexOf("{");
+                    if (startIndex >= 0)
+                    {
+                        var jsonPart = errorContent.Substring(startIndex);
+                        var result = System.Text.Json.JsonSerializer.Deserialize<ValidationResult>(jsonPart, new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                        errorMessage = $"❌ {result?.Message ?? "Connection failed"}";
+                    }
+                    else
+                    {
+                        errorMessage = $"❌ Connection failed: {ex.Message}";
+                    }
+                }
+                else
+                {
+                    errorMessage = $"❌ Connection failed: {ex.Message}";
+                }
+            }
+            catch
+            {
+                errorMessage = $"❌ Connection failed: {ex.Message}";
+            }
         }
         finally
         {
             testing = false;
         }
+    }
+
+    private class ValidationResult
+    {
+        public bool IsValid { get; set; }
+        public string Message { get; set; } = "";
     }
 
     private async Task HandleSubmit()
@@ -470,10 +513,11 @@
         public string Name { get; set; } = "";
         public string Host { get; set; } = "";
         public int Port { get; set; }
-        public string User { get; set; } = "";
+        public string Username { get; set; } = "";
         public string? Region { get; set; }
         public ServerType Type { get; set; }
         public ProxyType ProxyType { get; set; }
+        public bool HasPrivateKey { get; set; }
         // Note: For security, we don't return the PrivateKey from the API
         // If editing, user must re-enter the key
     }

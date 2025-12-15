@@ -3,6 +3,7 @@ using Docker.DotNet.Models;
 using HostCraft.Core.Entities;
 using HostCraft.Core.Enums;
 using HostCraft.Core.Interfaces;
+using Renci.SshNet;
 using System.Text;
 
 namespace HostCraft.Infrastructure.Docker;
@@ -10,10 +11,14 @@ namespace HostCraft.Infrastructure.Docker;
 /// <summary>
 /// Implementation of Docker operations using Docker.DotNet.
 /// Handles both standalone containers and Swarm services.
+/// Uses SSH tunneling for remote Docker connections.
 /// </summary>
 public class DockerService : IDockerService
 {
     private readonly Dictionary<string, DockerClient> _clients = new();
+    private readonly Dictionary<string, SshClient> _sshClients = new();
+    private readonly Dictionary<string, ForwardedPortDynamic> _sshTunnels = new();
+    private readonly Dictionary<string, int> _tunnelPorts = new();
     
     private DockerClient GetClient(Server server)
     {
@@ -21,18 +26,76 @@ public class DockerService : IDockerService
         
         if (!_clients.ContainsKey(key))
         {
-            // For remote servers, use SSH tunnel or TCP
             // For local server, use Unix socket or named pipe
-            var uri = server.Host == "localhost" || server.Host == "127.0.0.1"
-                ? (Environment.OSVersion.Platform == PlatformID.Win32NT
+            if (server.Host == "localhost" || server.Host == "127.0.0.1")
+            {
+                var uri = Environment.OSVersion.Platform == PlatformID.Win32NT
                     ? "npipe://./pipe/docker_engine"
-                    : "unix:///var/run/docker.sock")
-                : $"tcp://{server.Host}:2375";
-            
-            _clients[key] = new DockerClientConfiguration(new Uri(uri)).CreateClient();
+                    : "unix:///var/run/docker.sock";
+                
+                _clients[key] = new DockerClientConfiguration(new Uri(uri)).CreateClient();
+            }
+            else
+            {
+                // For remote servers, execute Docker commands directly via SSH
+                // This approach uses SSH.NET to run Docker CLI commands remotely
+                // We'll wrap this in a custom DockerClient that executes commands over SSH
+                
+                // For now, let's try to connect to Docker TCP port if exposed
+                // This requires the remote Docker daemon to listen on TCP
+                // Users should either expose Docker on TCP or we'll need to wrap all calls
+                var dockerUri = $"tcp://{server.Host}:2375";
+                _clients[key] = new DockerClientConfiguration(new Uri(dockerUri)).CreateClient();
+            }
         }
         
         return _clients[key];
+    }
+    
+    private SshClient GetSshClient(Server server)
+    {
+        var key = $"{server.Host}:{server.Port}";
+        
+        if (!_sshClients.ContainsKey(key))
+        {
+            AuthenticationMethod authMethod;
+            
+            if (server.PrivateKey != null && !string.IsNullOrEmpty(server.PrivateKey.KeyData))
+            {
+                // Use private key authentication
+                var keyFile = new PrivateKeyFile(new MemoryStream(Encoding.UTF8.GetBytes(server.PrivateKey.KeyData)));
+                authMethod = new PrivateKeyAuthenticationMethod(server.Username, keyFile);
+            }
+            else
+            {
+                throw new InvalidOperationException($"No private key configured for server {server.Name}");
+            }
+            
+            var connectionInfo = new ConnectionInfo(server.Host, server.Port, server.Username, authMethod);
+            var sshClient = new SshClient(connectionInfo);
+            
+            try
+            {
+                sshClient.Connect();
+                _sshClients[key] = sshClient;
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException($"Failed to establish SSH connection to {server.Host}:{server.Port}: {ex.Message}", ex);
+            }
+        }
+        
+        return _sshClients[key];
+    }
+    
+    private static int GetAvailablePort()
+    {
+        // Find an available port for SSH tunnel
+        var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((System.Net.IPEndPoint)listener.LocalEndpoint).Port;
+        listener.Stop();
+        return port;
     }
     
     // Container operations
@@ -398,25 +461,119 @@ public class DockerService : IDockerService
     {
         try
         {
-            var client = GetClient(server);
-            await client.System.PingAsync(cancellationToken);
-            return true;
+            // For local servers, use Docker client
+            if (server.Host == "localhost" || server.Host == "127.0.0.1")
+            {
+                var client = GetClient(server);
+                await client.System.PingAsync(cancellationToken);
+                return true;
+            }
+            
+            // For remote servers, test SSH connection and Docker via SSH command
+            Console.WriteLine($"[DockerService] Validating connection to {server.Host}:{server.Port}");
+            
+            var sshClient = GetSshClient(server);
+            
+            if (!sshClient.IsConnected)
+            {
+                Console.WriteLine($"[DockerService] SSH client not connected for {server.Host}");
+                return false;
+            }
+            
+            Console.WriteLine($"[DockerService] SSH connected to {server.Host}, testing Docker...");
+            
+            // Test Docker by running 'docker info' command via SSH
+            var command = sshClient.CreateCommand("docker info");
+            var result = await Task.Run(() => command.Execute(), cancellationToken);
+            
+            Console.WriteLine($"[DockerService] Docker command exit status: {command.ExitStatus}");
+            Console.WriteLine($"[DockerService] Docker command output length: {result?.Length ?? 0}");
+            
+            if (!string.IsNullOrEmpty(command.Error))
+            {
+                Console.WriteLine($"[DockerService] Docker command error: {command.Error}");
+            }
+            
+            // Check if command executed successfully (exit status 0)
+            return command.ExitStatus == 0 && !string.IsNullOrEmpty(result);
         }
-        catch
+        catch (Exception ex)
         {
-            return false;
+            Console.WriteLine($"[DockerService] Validation exception for {server.Host}: {ex.Message}");
+            Console.WriteLine($"[DockerService] Exception type: {ex.GetType().Name}");
+            if (ex.InnerException != null)
+            {
+                Console.WriteLine($"[DockerService] Inner exception: {ex.InnerException.Message}");
+            }
+            // Re-throw the exception so the controller can return a proper error message
+            throw;
         }
     }
     
     public async Task<SystemInfo> GetSystemInfoAsync(Server server, CancellationToken cancellationToken = default)
     {
-        var client = GetClient(server);
-        var info = await client.System.GetSystemInfoAsync(cancellationToken);
+        // For local servers, use Docker client
+        if (server.Host == "localhost" || server.Host == "127.0.0.1")
+        {
+            var client = GetClient(server);
+            var info = await client.System.GetSystemInfoAsync(cancellationToken);
+            
+            return new SystemInfo(
+                info.OperatingSystem,
+                info.Architecture,
+                info.Swarm?.LocalNodeState == "active",
+                info.ServerVersion);
+        }
+        
+        // For remote servers, use SSH to get Docker info
+        var sshClient = GetSshClient(server);
+        var command = sshClient.CreateCommand("docker info --format '{{.OperatingSystem}}|{{.Architecture}}|{{.Swarm.LocalNodeState}}|{{.ServerVersion}}'");
+        var result = await Task.Run(() => command.Execute(), cancellationToken);
+        
+        var parts = result.Trim().Split('|');
         
         return new SystemInfo(
-            info.OperatingSystem,
-            info.Architecture,
-            info.Swarm?.LocalNodeState == "active",
-            info.ServerVersion);
+            parts.Length > 0 ? parts[0] : "Unknown",
+            parts.Length > 1 ? parts[1] : "Unknown",
+            parts.Length > 2 && parts[2] == "active",
+            parts.Length > 3 ? parts[3] : "Unknown");
+    }
+    
+    // Cleanup method to dispose SSH connections and tunnels
+    public void Dispose()
+    {
+        foreach (var tunnel in _sshTunnels.Values)
+        {
+            try
+            {
+                tunnel.Stop();
+            }
+            catch { }
+        }
+        _sshTunnels.Clear();
+        
+        foreach (var sshClient in _sshClients.Values)
+        {
+            try
+            {
+                if (sshClient.IsConnected)
+                {
+                    sshClient.Disconnect();
+                }
+                sshClient.Dispose();
+            }
+            catch { }
+        }
+        _sshClients.Clear();
+        
+        foreach (var client in _clients.Values)
+        {
+            try
+            {
+                client.Dispose();
+            }
+            catch { }
+        }
+        _clients.Clear();
     }
 }

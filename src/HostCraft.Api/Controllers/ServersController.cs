@@ -15,17 +15,20 @@ public class ServersController : ControllerBase
     private readonly IDockerService _dockerService;
     private readonly IProxyService _proxyService;
     private readonly ILogger<ServersController> _logger;
+    private readonly IServiceScopeFactory _scopeFactory;
     
     public ServersController(
         HostCraftDbContext context,
         IDockerService dockerService,
         IProxyService proxyService,
-        ILogger<ServersController> logger)
+        ILogger<ServersController> logger,
+        IServiceScopeFactory scopeFactory)
     {
         _context = context;
         _dockerService = dockerService;
         _proxyService = proxyService;
         _logger = logger;
+        _scopeFactory = scopeFactory;
     }
     
     [HttpGet]
@@ -60,9 +63,10 @@ public class ServersController : ControllerBase
         PrivateKey? privateKey = null;
         if (!string.IsNullOrEmpty(request.PrivateKeyContent))
         {
+            // Make the name unique with a timestamp to avoid conflicts
             privateKey = new PrivateKey
             {
-                Name = $"{request.Name} SSH Key",
+                Name = $"{request.Name} SSH Key - {DateTime.UtcNow:yyyyMMddHHmmss}",
                 KeyData = request.PrivateKeyContent,
                 CreatedAt = DateTime.UtcNow
             };
@@ -107,24 +111,51 @@ public class ServersController : ControllerBase
         _context.Servers.Add(server);
         await _context.SaveChangesAsync();
         
-        // Validate connection and deploy proxy in background
+        var serverId = server.Id;
+        var proxyType = server.ProxyType;
+        
+        // Validate connection and deploy proxy in background with proper scope
         _ = Task.Run(async () => 
         {
-            await ValidateServerAsync(server.Id);
+            using var scope = _scopeFactory.CreateScope();
+            var scopedContext = scope.ServiceProvider.GetRequiredService<HostCraftDbContext>();
+            var scopedDockerService = scope.ServiceProvider.GetRequiredService<IDockerService>();
+            var scopedProxyService = scope.ServiceProvider.GetRequiredService<IProxyService>();
             
-            // Deploy reverse proxy if configured
-            if (server.ProxyType != ProxyType.None)
+            try
             {
-                var serverWithKey = await _context.Servers
+                await Task.Delay(1000);
+                
+                var serverToValidate = await scopedContext.Servers
                     .Include(s => s.PrivateKey)
-                    .FirstOrDefaultAsync(s => s.Id == server.Id);
-                    
-                if (serverWithKey != null && serverWithKey.Status == ServerStatus.Online)
+                    .FirstOrDefaultAsync(s => s.Id == serverId);
+                
+                if (serverToValidate == null) return;
+                
+                var isValid = await scopedDockerService.ValidateConnectionAsync(serverToValidate);
+                serverToValidate.Status = isValid ? ServerStatus.Online : ServerStatus.Offline;
+                serverToValidate.LastHealthCheck = DateTime.UtcNow;
+                
+                await scopedContext.SaveChangesAsync();
+                
+                // Deploy reverse proxy if configured and online
+                if (proxyType != ProxyType.None && serverToValidate.Status == ServerStatus.Online)
                 {
                     _logger.LogInformation("Deploying {ProxyType} on server {ServerName}", 
-                        serverWithKey.ProxyType, serverWithKey.Name);
+                        proxyType, serverToValidate.Name);
                     
-                    await _proxyService.EnsureProxyDeployedAsync(serverWithKey);
+                    await scopedProxyService.EnsureProxyDeployedAsync(serverToValidate);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Background validation failed for server {ServerId}", serverId);
+                
+                var serverToUpdate = await scopedContext.Servers.FindAsync(serverId);
+                if (serverToUpdate != null)
+                {
+                    serverToUpdate.Status = ServerStatus.Error;
+                    await scopedContext.SaveChangesAsync();
                 }
             }
         });
@@ -183,10 +214,10 @@ public class ServersController : ControllerBase
                 _context.PrivateKeys.Remove(server.PrivateKey);
             }
             
-            // Create new key
+            // Create new key with unique name
             var privateKey = new PrivateKey
             {
-                Name = $"{server.Name} SSH Key",
+                Name = $"{server.Name} SSH Key - {DateTime.UtcNow:yyyyMMddHHmmss}",
                 KeyData = request.PrivateKeyContent,
                 CreatedAt = DateTime.UtcNow
             };
@@ -200,7 +231,51 @@ public class ServersController : ControllerBase
         if (request.ProxyType.HasValue)
             server.ProxyType = request.ProxyType.Value;
         
+        // Set to validating before background check
+        server.Status = ServerStatus.Validating;
+        
         await _context.SaveChangesAsync();
+        
+        // Trigger background validation after update
+        var serverId = server.Id;
+        _ = Task.Run(async () =>
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var scopedContext = scope.ServiceProvider.GetRequiredService<HostCraftDbContext>();
+            var scopedDockerService = scope.ServiceProvider.GetRequiredService<IDockerService>();
+            
+            try
+            {
+                await Task.Delay(1000);
+                
+                var serverToValidate = await scopedContext.Servers
+                    .Include(s => s.PrivateKey)
+                    .FirstOrDefaultAsync(s => s.Id == serverId);
+                
+                if (serverToValidate == null) return;
+                
+                _logger.LogInformation("Re-validating updated server {ServerName} ({ServerId})", serverToValidate.Name, serverId);
+                
+                var isValid = await scopedDockerService.ValidateConnectionAsync(serverToValidate);
+                serverToValidate.Status = isValid ? ServerStatus.Online : ServerStatus.Offline;
+                serverToValidate.LastHealthCheck = DateTime.UtcNow;
+                
+                await scopedContext.SaveChangesAsync();
+                
+                _logger.LogInformation("Server {ServerName} validation result: {Status}", serverToValidate.Name, serverToValidate.Status);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Background re-validation failed for server {ServerId}", serverId);
+                
+                var serverToUpdate = await scopedContext.Servers.FindAsync(serverId);
+                if (serverToUpdate != null)
+                {
+                    serverToUpdate.Status = ServerStatus.Error;
+                    await scopedContext.SaveChangesAsync();
+                }
+            }
+        });
         
         return NoContent();
     }
@@ -263,29 +338,32 @@ public class ServersController : ControllerBase
             }
             else
             {
-                return new ServerValidationResult
+                return BadRequest(new ServerValidationResult
                 {
                     IsValid = false,
                     Message = "Cannot connect to Docker daemon. Check credentials and network access."
-                };
+                });
             }
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error validating server connection");
             
-            return new ServerValidationResult
+            return BadRequest(new ServerValidationResult
             {
                 IsValid = false,
                 Message = $"Connection failed: {ex.Message}"
-            };
+            });
         }
     }
     
     [HttpPost("{id}/validate")]
     public async Task<ActionResult<ServerValidationResult>> ValidateExistingServer(int id)
     {
-        var server = await _context.Servers.FindAsync(id);
+        // Load server with PrivateKey for SSH authentication
+        var server = await _context.Servers
+            .Include(s => s.PrivateKey)
+            .FirstOrDefaultAsync(s => s.Id == id);
         
         if (server == null)
         {
@@ -294,6 +372,7 @@ public class ServersController : ControllerBase
         
         try
         {
+            _logger.LogInformation("Manually validating server {ServerId} - {ServerName}", id, server.Name);
             var isValid = await _dockerService.ValidateConnectionAsync(server);
             
             if (isValid)
@@ -392,25 +471,68 @@ public class ServersController : ControllerBase
             return StatusCode(500, new { error = ex.Message });
         }
     }
-    
-    private async Task ValidateServerAsync(int serverId)
+
+    [HttpGet("{id}/public-key")]
+    public async Task<ActionResult<object>> GetPublicKey(int id)
     {
+        var server = await _context.Servers
+            .Include(s => s.PrivateKey)
+            .FirstOrDefaultAsync(s => s.Id == id);
+        
+        if (server == null)
+        {
+            return NotFound();
+        }
+        
+        if (server.PrivateKey == null)
+        {
+            return NotFound(new { error = "No private key configured for this server" });
+        }
+        
         try
         {
-            await Task.Delay(1000); // Small delay
+            // Extract public key from private key using SSH.NET
+            var keyFile = new Renci.SshNet.PrivateKeyFile(
+                new MemoryStream(System.Text.Encoding.UTF8.GetBytes(server.PrivateKey.KeyData)),
+                server.PrivateKey.Passphrase
+            );
             
-            var server = await _context.Servers.FindAsync(serverId);
-            if (server == null) return;
+            // Get the public key in OpenSSH format
+            using var publicKeyStream = new MemoryStream();
+            using var writer = new BinaryWriter(publicKeyStream);
             
-            var isValid = await _dockerService.ValidateConnectionAsync(server);
-            server.Status = isValid ? ServerStatus.Online : ServerStatus.Offline;
-            server.LastHealthCheck = DateTime.UtcNow;
+            // Write algorithm name
+            var algorithm = System.Text.Encoding.ASCII.GetBytes("ssh-rsa");
+            writer.Write(algorithm.Length);
+            writer.Write(algorithm);
             
-            await _context.SaveChangesAsync();
+            // Write exponent and modulus for RSA key
+            var key = keyFile.Key as Renci.SshNet.Security.RsaKey;
+            if (key != null)
+            {
+                var exponent = key.Exponent.ToByteArray().Reverse().SkipWhile(b => b == 0).Reverse().ToArray();
+                writer.Write(exponent.Length);
+                writer.Write(exponent);
+                
+                var modulus = key.Modulus.ToByteArray().Reverse().SkipWhile(b => b == 0).Reverse().ToArray();
+                writer.Write(modulus.Length);
+                writer.Write(modulus);
+            }
+            
+            var publicKeyBytes = publicKeyStream.ToArray();
+            var publicKey = $"ssh-rsa {Convert.ToBase64String(publicKeyBytes)} HostCraft-{server.Name}";
+            
+            return Ok(new 
+            { 
+                publicKey,
+                instruction = $"Copy this public key and add it to ~/.ssh/authorized_keys on {server.Host}",
+                manualCommand = $"ssh {server.Username}@{server.Host} -p {server.Port}\nmkdir -p ~/.ssh\necho '{publicKey}' >> ~/.ssh/authorized_keys\nchmod 600 ~/.ssh/authorized_keys\nchmod 700 ~/.ssh"
+            });
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Background validation failed for server {ServerId}", serverId);
+            _logger.LogError(ex, "Error extracting public key for server {ServerId}", id);
+            return StatusCode(500, new { error = ex.Message });
         }
     }
 }

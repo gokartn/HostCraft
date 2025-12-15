@@ -49,7 +49,8 @@ public class HostCraftDbContext : DbContext
             entity.Property(e => e.Username).IsRequired().HasMaxLength(50);
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
             
-            entity.HasIndex(e => e.Name).IsUnique();
+            // Removed unique constraint - allow duplicate server names
+            entity.HasIndex(e => e.Name);
             
             entity.HasOne(e => e.PrivateKey)
                 .WithMany(e => e.Servers)

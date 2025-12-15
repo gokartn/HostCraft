@@ -46,22 +46,14 @@
             {
                 <div class="server-item @GetStatusClass(server.Status)">
                     <div class="server-header">
-                        <div class="server-title">
-                            <h3>@server.Name</h3>
+                        <h3>@server.Name</h3>
+                        <div style="display: flex; align-items: center; gap: 0.5rem;">
                             <span class="server-type-badge @GetTypeBadgeClass(server.Type)">
                                 @GetTypeIcon(server.Type) @server.Type
                             </span>
-                        </div>
-                        <div class="server-actions">
-                            <button class="btn-icon" @onclick="() => NavigateToEdit(server.Id)" title="Edit">
-                                ✏️
-                            </button>
-                            <button class="btn-icon" @onclick="() => NavigateToDetails(server.Id)" title="Details">
-                                🔍
-                            </button>
-                            <button class="btn-icon btn-danger" @onclick="() => DeleteServer(server.Id)" title="Delete">
-                                🗑️
-                            </button>
+                            <span class="status-badge @GetStatusClass(server.Status)">
+                                @GetStatusIcon(server.Status) @server.Status
+                            </span>
                         </div>
                     </div>
 
@@ -81,33 +73,25 @@
                                 <span class="value">@server.Region</span>
                             </div>
                         }
-                        <div class="info-row">
-                            <span class="label">Status:</span>
-                            <span class="status-badge @GetStatusClass(server.Status)">
-                                @GetStatusIcon(server.Status) @server.Status
-                            </span>
-                        </div>
+                        @if (server.IsSwarm && !string.IsNullOrEmpty(server.SwarmId))
+                        {
+                            <div class="info-row">
+                                <span class="label">Swarm:</span>
+                                <span class="value">@server.SwarmId.Substring(0, 12)</span>
+                            </div>
+                        }
                     </div>
 
-                    @if (server.IsSwarm)
-                    {
-                        <div class="swarm-info">
-                            <div class="swarm-badge">🐝 Swarm Cluster Member</div>
-                            @if (!string.IsNullOrEmpty(server.SwarmId))
-                            {
-                                <div class="swarm-detail">Cluster: <code>@server.SwarmId.Substring(0, 12)</code></div>
-                            }
-                        </div>
-                    }
-
-                    <div class="server-footer">
-                        <small class="text-muted">
-                            Added @server.CreatedAt.ToString("MMM dd, yyyy")
-                            @if (server.LastSeenAt.HasValue)
-                            {
-                                <span> • Last seen @GetTimeSince(server.LastSeenAt.Value)</span>
-                            }
-                        </small>
+                    <div class="server-actions">
+                        <button class="btn-icon" @onclick="() => NavigateToDetails(server.Id)" title="Details">
+                            🔍
+                        </button>
+                        <button class="btn-icon" @onclick="() => NavigateToEdit(server.Id)" title="Edit">
+                            ✏️
+                        </button>
+                        <button class="btn-icon btn-danger" @onclick="() => DeleteServer(server.Id)" title="Delete">
+                            🗑️
+                        </button>
                     </div>
                 </div>
             }
