@@ -31,7 +31,9 @@ else
 {
     // PostgreSQL for production
     builder.Services.AddDbContext<HostCraftDbContext>(options =>
-        options.UseNpgsql(connectionString));
+        options.UseNpgsql(connectionString)
+            .ConfigureWarnings(warnings => 
+                warnings.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.PendingModelChangesWarning)));
 }
 
 // Services
