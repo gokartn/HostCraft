@@ -54,10 +54,15 @@ builder.Services.AddCors(options =>
 
 var app = builder.Build();
 
-// Seed database
+// Auto-migrate database and seed
 using (var scope = app.Services.CreateScope())
 {
     var context = scope.ServiceProvider.GetRequiredService<HostCraftDbContext>();
+    
+    // Automatically apply pending migrations (creates database if needed)
+    await context.Database.MigrateAsync();
+    
+    // Seed initial data
     await HostCraft.Infrastructure.Persistence.DbSeeder.SeedAsync(context);
 }
 
