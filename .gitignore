@@ -412,3 +412,6 @@ FodyWeavers.xsd
 *.sqlite
 *.sqlite3
 hostcraft.db
+
+# Cleanup tools
+bfg.jar
