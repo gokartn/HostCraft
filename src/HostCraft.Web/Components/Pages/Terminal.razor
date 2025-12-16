@@ -163,7 +163,11 @@
             {
                 connected = false;
                 connecting = false;
-                error = $"Connection failed: {errorMsg}";
+                error = errorMsg;
+                if (terminal != null)
+                {
+                    await terminal.WriteOutput($"\r\n\x1b[31mError: {errorMsg}\x1b[0m\r\n");
+                }
                 await InvokeAsync(StateHasChanged);
             });
 

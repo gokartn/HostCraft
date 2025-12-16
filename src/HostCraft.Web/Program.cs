@@ -11,11 +11,23 @@ builder.Services.AddRazorComponents()
 builder.Services.AddSignalR();
 
 // Add HttpClient for API calls
-var apiPort = builder.Configuration["API_PORT"] ?? "5100";
-var apiUrl = builder.Configuration["ApiUrl"] ?? $"http://localhost:{apiPort}";
+// Priority: Environment variable > appsettings.json > default
+var apiUrl = Environment.GetEnvironmentVariable("ApiUrl") 
+    ?? builder.Configuration["ApiUrl"] 
+    ?? "http://localhost:5100";
+
+// Ensure URL ends properly
+if (!apiUrl.EndsWith("/"))
+{
+    apiUrl = apiUrl + "/";
+}
+
+Console.WriteLine($"[HostCraft.Web] Configured API URL: {apiUrl}");
+
 builder.Services.AddHttpClient("HostCraftAPI", client =>
 {
     client.BaseAddress = new Uri(apiUrl);
+    client.Timeout = TimeSpan.FromSeconds(30);
 });
 builder.Services.AddScoped(sp => sp.GetRequiredService<IHttpClientFactory>().CreateClient("HostCraftAPI"));
 
