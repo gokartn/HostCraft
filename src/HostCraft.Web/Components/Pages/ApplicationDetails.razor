@@ -147,7 +147,7 @@
                 <div class="card actions-card">
                     <h3>Actions</h3>
                     <div class="action-buttons">
-                        <button class="btn-primary btn-block" @onclick="Redeploy" disabled="@isRedeploying">
+                        <button class="btn btn-primary" @onclick="Redeploy" disabled="@isRedeploying">
                             @if (isRedeploying)
                             {
                                 <span>🔄 Deploying...</span>
@@ -157,13 +157,13 @@
                                 <span>🚀 Redeploy</span>
                             }
                         </button>
-                        <button class="btn-secondary btn-block" @onclick="ViewLogs" disabled="@(!CanViewLogs())">
+                        <button class="btn btn-secondary" @onclick="ViewLogs" disabled="@(!CanViewLogs())">
                             📄 View Logs
                         </button>
-                        <button class="btn-secondary btn-block" @onclick="EditApplication">
+                        <button class="btn btn-secondary" @onclick="EditApplication">
                             ✏️ Edit
                         </button>
-                        <button class="btn-danger btn-block" @onclick="DeleteApplication" disabled="@isDeleting">
+                        <button class="btn btn-danger" @onclick="DeleteApplication" disabled="@isDeleting">
                             @if (isDeleting)
                             {
                                 <span>🗑️ Deleting...</span>
