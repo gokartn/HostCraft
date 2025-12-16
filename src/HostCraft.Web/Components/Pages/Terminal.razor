@@ -148,9 +148,29 @@
                 }
             });
 
+            hubConnection.On("ConnectionEstablished", async () =>
+            {
+                connected = true;
+                connecting = false;
+                if (terminal != null)
+                {
+                    await terminal.Focus();
+                }
+                await InvokeAsync(StateHasChanged);
+            });
+
+            hubConnection.On<string>("ConnectionFailed", async (errorMsg) =>
+            {
+                connected = false;
+                connecting = false;
+                error = $"Connection failed: {errorMsg}";
+                await InvokeAsync(StateHasChanged);
+            });
+
             hubConnection.Closed += async (error) =>
             {
                 connected = false;
+                connecting = false;
                 if (terminal != null)
                 {
                     await terminal.WriteOutput("\r\n\x1b[33m[Connection closed]\x1b[0m\r\n");
@@ -161,13 +181,7 @@
             await hubConnection.StartAsync();
             await hubConnection.SendAsync("ConnectToServer", ServerId);
             
-            connected = true;
-
-            if (terminal != null)
-            {
-                await terminal.WriteOutput($"\x1b[32mConnected to {server?.Name} ({server?.Host})\x1b[0m\r\n");
-                await terminal.Focus();
-            }
+            // Don't set connected = true here! Wait for ConnectionEstablished callback
         }
         catch (Exception ex)
         {

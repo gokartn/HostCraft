@@ -63,7 +63,9 @@ public class TerminalHub : Hub
             // Start reading output
             _ = Task.Run(async () => await ReadShellOutput(Context.ConnectionId));
 
-            await Clients.Caller.SendAsync("ReceiveOutput", $"Connected to server {serverId}\n");
+            // Notify client of successful connection
+            await Clients.Caller.SendAsync("ConnectionEstablished");
+            await Clients.Caller.SendAsync("ReceiveOutput", $"\x1b[32mConnected to {server.Host}\x1b[0m\r\n");
             
             // Get initial prompt
             var initialOutput = await ReadInitialPrompt(shell);
@@ -75,7 +77,8 @@ public class TerminalHub : Hub
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to connect to server {ServerId}", serverId);
-            await Clients.Caller.SendAsync("ReceiveError", $"Connection failed: {ex.Message}\n");
+            await Clients.Caller.SendAsync("ConnectionFailed", ex.Message);
+            await Clients.Caller.SendAsync("ReceiveError", $"\x1b[31mConnection failed: {ex.Message}\x1b[0m\r\n");
         }
     }
 

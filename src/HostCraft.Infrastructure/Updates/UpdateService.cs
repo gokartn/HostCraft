@@ -28,7 +28,7 @@ public class UpdateService : IUpdateService
     {
         var assembly = Assembly.GetExecutingAssembly();
         var version = assembly.GetName().Version;
-        return version?.ToString(3) ?? "1.0.0";
+        return version?.ToString(3) ?? "0.0.1";
     }
     
     public async Task<UpdateInfo> CheckForUpdatesAsync(CancellationToken cancellationToken = default)

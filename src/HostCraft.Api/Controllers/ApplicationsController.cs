@@ -319,6 +319,225 @@ public class ApplicationsController : ControllerBase
         }
     }
     
+    [HttpGet("{id}/status")]
+    public async Task<ActionResult<ApplicationStatusDto>> GetApplicationStatus(int id)
+    {
+        var app = await _context.Applications
+            .Include(a => a.Server)
+                .ThenInclude(s => s.PrivateKey)
+            .Include(a => a.Deployments.OrderByDescending(d => d.StartedAt))
+            .FirstOrDefaultAsync(a => a.Id == id);
+        
+        if (app == null)
+            return NotFound();
+        
+        var latestDeployment = app.Deployments.OrderByDescending(d => d.StartedAt).FirstOrDefault();
+        
+        if (latestDeployment == null)
+        {
+            return new ApplicationStatusDto
+            {
+                ApplicationId = app.Id,
+                Status = "not-deployed",
+                IsRunning = false
+            };
+        }
+        
+        try
+        {
+            bool isRunning = false;
+            string? actualState = null;
+            
+            if (!string.IsNullOrEmpty(latestDeployment.ServiceId))
+            {
+                var serviceInfo = await _dockerService.InspectServiceAsync(app.Server, latestDeployment.ServiceId);
+                isRunning = serviceInfo != null;
+                actualState = isRunning ? "running" : "not-found";
+            }
+            else if (!string.IsNullOrEmpty(latestDeployment.ContainerId))
+            {
+                var containerInfo = await _dockerService.InspectContainerAsync(app.Server, latestDeployment.ContainerId);
+                isRunning = containerInfo?.State?.ToLower() == "running";
+                actualState = containerInfo?.State ?? "not-found";
+            }
+            
+            return new ApplicationStatusDto
+            {
+                ApplicationId = app.Id,
+                Status = latestDeployment.Status.ToString().ToLower(),
+                IsRunning = isRunning,
+                ActualState = actualState,
+                ContainerId = latestDeployment.ContainerId,
+                ServiceId = latestDeployment.ServiceId
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting status for application {AppId}", id);
+            return new ApplicationStatusDto
+            {
+                ApplicationId = app.Id,
+                Status = "error",
+                IsRunning = false,
+                ActualState = "error: " + ex.Message
+            };
+        }
+    }
+    
+    [HttpGet("orphans")]
+    public async Task<ActionResult<OrphanedResourcesDto>> GetOrphanedResources([FromQuery] int? serverId = null)
+    {
+        try
+        {
+            var servers = serverId.HasValue
+                ? await _context.Servers.Include(s => s.PrivateKey).Where(s => s.Id == serverId.Value).ToListAsync()
+                : await _context.Servers.Include(s => s.PrivateKey).ToListAsync();
+            
+            var orphanedContainers = new List<OrphanedContainerDto>();
+            var orphanedServices = new List<OrphanedServiceDto>();
+            
+            foreach (var server in servers)
+            {
+                try
+                {
+                    // Check containers
+                    var containers = await _dockerService.ListContainersAsync(server, true);
+                    foreach (var container in containers)
+                    {
+                        var inspect = await _dockerService.InspectContainerAsync(server, container.Id);
+                        if (inspect != null)
+                        {
+                            // Check if container has HostCraft labels
+                            var isManaged = inspect.Labels.TryGetValue("hostcraft.managed", out var managed) && managed == "true";
+                            
+                            if (isManaged)
+                            {
+                                // Check if application exists in database
+                                inspect.Labels.TryGetValue("hostcraft.application.id", out var appIdStr);
+                                if (int.TryParse(appIdStr, out var appId))
+                                {
+                                    var appExists = await _context.Applications.AnyAsync(a => a.Id == appId);
+                                    if (!appExists)
+                                    {
+                                        orphanedContainers.Add(new OrphanedContainerDto
+                                        {
+                                            ContainerId = container.Id,
+                                            ContainerName = container.Name,
+                                            Image = container.Image,
+                                            State = container.State,
+                                            ServerId = server.Id,
+                                            ServerName = server.Name,
+                                            ApplicationId = appId,
+                                            Labels = inspect.Labels
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Check services if Swarm
+                    if (server.IsSwarm)
+                    {
+                        var services = await _dockerService.ListServicesAsync(server);
+                        foreach (var service in services)
+                        {
+                            var inspect = await _dockerService.InspectServiceAsync(server, service.Id);
+                            if (inspect != null)
+                            {
+                                // Check if service has HostCraft labels
+                                var isManaged = inspect.Labels.TryGetValue("hostcraft.managed", out var managed) && managed == "true";
+                                
+                                if (isManaged)
+                                {
+                                    // Check if application exists in database
+                                    inspect.Labels.TryGetValue("hostcraft.application.id", out var appIdStr);
+                                    if (int.TryParse(appIdStr, out var appId))
+                                    {
+                                        var appExists = await _context.Applications.AnyAsync(a => a.Id == appId);
+                                        if (!appExists)
+                                        {
+                                            orphanedServices.Add(new OrphanedServiceDto
+                                            {
+                                                ServiceId = service.Id,
+                                                ServiceName = service.Name,
+                                                Image = service.Image,
+                                                Replicas = service.Replicas,
+                                                ServerId = server.Id,
+                                                ServerName = server.Name,
+                                                ApplicationId = appId,
+                                                Labels = inspect.Labels
+                                            });
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Error checking orphans on server {ServerId}", server.Id);
+                }
+            }
+            
+            return new OrphanedResourcesDto
+            {
+                OrphanedContainers = orphanedContainers,
+                OrphanedServices = orphanedServices
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting orphaned resources");
+            return StatusCode(500, new { error = ex.Message });
+        }
+    }
+    
+    [HttpPost("orphans/{containerId}/cleanup")]
+    public async Task<IActionResult> CleanupOrphanedContainer(string containerId, [FromQuery] int serverId)
+    {
+        var server = await _context.Servers
+            .Include(s => s.PrivateKey)
+            .FirstOrDefaultAsync(s => s.Id == serverId);
+        
+        if (server == null)
+            return NotFound(new { error = "Server not found" });
+        
+        try
+        {
+            await _dockerService.RemoveContainerAsync(server, containerId);
+            return Ok(new { message = "Orphaned container removed" });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error removing orphaned container {ContainerId}", containerId);
+            return StatusCode(500, new { error = ex.Message });
+        }
+    }
+    
+    [HttpPost("orphans/services/{serviceId}/cleanup")]
+    public async Task<IActionResult> CleanupOrphanedService(string serviceId, [FromQuery] int serverId)
+    {
+        var server = await _context.Servers
+            .Include(s => s.PrivateKey)
+            .FirstOrDefaultAsync(s => s.Id == serverId);
+        
+        if (server == null)
+            return NotFound(new { error = "Server not found" });
+        
+        try
+        {
+            await _dockerService.RemoveServiceAsync(server, serviceId);
+            return Ok(new { message = "Orphaned service removed" });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error removing orphaned service {ServiceId}", serviceId);
+            return StatusCode(500, new { error = ex.Message });
+        }
+    }
+    
     private async Task DeployApplicationAsync(int deploymentId, CreateApplicationRequest request)
     {
         using var scope = _scopeFactory.CreateScope();
@@ -348,6 +567,18 @@ public class ApplicationsController : ControllerBase
             
             var envVars = request.EnvironmentVariables ?? new Dictionary<string, string>();
             
+            // Add labels to track this application in Docker
+            var labels = new Dictionary<string, string>
+            {
+                { "hostcraft.managed", "true" },
+                { "hostcraft.application.id", app.Id.ToString() },
+                { "hostcraft.application.uuid", app.Uuid.ToString() },
+                { "hostcraft.application.name", app.Name },
+                { "hostcraft.project.id", app.ProjectId.ToString() },
+                { "hostcraft.deployment.id", deployment.Id.ToString() },
+                { "hostcraft.server.id", app.ServerId.ToString() }
+            };
+            
             if (app.Server.IsSwarm)
             {
                 // Deploy as Swarm service
@@ -356,7 +587,7 @@ public class ApplicationsController : ControllerBase
                     request.Image,
                     request.Replicas ?? 1,
                     envVars,
-                    new Dictionary<string, string>(), // Labels
+                    labels,
                     request.Networks ?? new List<string>(),
                     request.Port);
                 
@@ -367,16 +598,16 @@ public class ApplicationsController : ControllerBase
             {
                 // Deploy as container
                 var portBindings = request.Port.HasValue
-                    ? new Dictionary<string, string> { { request.Port.Value.ToString(), request.Port.Value.ToString() } }
+                    ? new Dictionary<int, int> { { request.Port.Value, request.Port.Value } }
                     : null;
                 
                 var containerRequest = new CreateContainerRequest(
                     app.Name.ToLowerInvariant().Replace(" ", "-"),
                     request.Image,
                     envVars,
-                    null, // Labels
+                    labels,
                     request.Networks ?? new List<string>(),
-                    null); // Port bindings - using null for now, will implement properly later
+                    portBindings);
                 
                 var containerId = await dockerService.CreateContainerAsync(app.Server, containerRequest);
                 await dockerService.StartContainerAsync(app.Server, containerId);
@@ -471,3 +702,43 @@ public record DeploymentDto
 
 public record ServerResponseDto(int Id, string Name, string Host, int Port, string User, bool IsSwarm, string Status);
 public record ProjectDto(int Id, string Name, string? Description);
+
+public record ApplicationStatusDto
+{
+    public int ApplicationId { get; init; }
+    public string Status { get; init; } = string.Empty;
+    public bool IsRunning { get; init; }
+    public string? ActualState { get; init; }
+    public string? ContainerId { get; init; }
+    public string? ServiceId { get; init; }
+}
+
+public record OrphanedResourcesDto
+{
+    public List<OrphanedContainerDto> OrphanedContainers { get; init; } = new();
+    public List<OrphanedServiceDto> OrphanedServices { get; init; } = new();
+}
+
+public record OrphanedContainerDto
+{
+    public string ContainerId { get; init; } = string.Empty;
+    public string ContainerName { get; init; } = string.Empty;
+    public string Image { get; init; } = string.Empty;
+    public string State { get; init; } = string.Empty;
+    public int ServerId { get; init; }
+    public string ServerName { get; init; } = string.Empty;
+    public int ApplicationId { get; init; }
+    public Dictionary<string, string> Labels { get; init; } = new();
+}
+
+public record OrphanedServiceDto
+{
+    public string ServiceId { get; init; } = string.Empty;
+    public string ServiceName { get; init; } = string.Empty;
+    public string Image { get; init; } = string.Empty;
+    public int Replicas { get; init; }
+    public int ServerId { get; init; }
+    public string ServerName { get; init; } = string.Empty;
+    public int ApplicationId { get; init; }
+    public Dictionary<string, string> Labels { get; init; } = new();
+}

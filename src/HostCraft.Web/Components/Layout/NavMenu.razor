@@ -26,6 +26,11 @@
         <span class="nav-text">Deployments</span>
     </NavLink>
 
+    <NavLink class="nav-link" href="orphans">
+        <span class="nav-icon">🧹</span>
+        <span class="nav-text">Orphans</span>
+    </NavLink>
+
     <div class="nav-divider"></div>
 
     <NavLink class="nav-link" href="settings">
@@ -49,7 +54,7 @@
 </div>
 
 @code {
-    private string currentVersion = "1.0.0";
+    private string currentVersion = "0.0.1-alpha";
     private bool updateAvailable = false;
     private System.Threading.Timer? updateCheckTimer;
 
