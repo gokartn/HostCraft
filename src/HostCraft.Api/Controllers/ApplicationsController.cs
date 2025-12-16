@@ -550,6 +550,8 @@ public class ApplicationsController : ControllerBase
             .Include(d => d.Application)
             .ThenInclude(a => a.Server)
                 .ThenInclude(s => s.PrivateKey)
+            .Include(d => d.Application)
+            .ThenInclude(a => a.Deployments)
             .FirstOrDefaultAsync(d => d.Id == deploymentId);
         
         if (deployment == null) return;
@@ -561,6 +563,71 @@ public class ApplicationsController : ControllerBase
             await context.SaveChangesAsync();
             
             logger.LogInformation("Deploying application {AppName} to server {ServerName}", app.Name, app.Server.Name);
+            
+            // Get the container/service name (consistent naming)
+            var containerName = app.Name.ToLowerInvariant().Replace(" ", "-");
+            
+            // IMPORTANT: Stop and remove any existing container/service with the same name
+            // This handles redeployments properly
+            var previousDeployment = app.Deployments
+                .Where(d => d.Id != deployment.Id)
+                .OrderByDescending(d => d.StartedAt)
+                .FirstOrDefault();
+            
+            if (previousDeployment != null)
+            {
+                logger.LogInformation("Found previous deployment, cleaning up old resources");
+                
+                if (!string.IsNullOrEmpty(previousDeployment.ServiceId))
+                {
+                    try
+                    {
+                        logger.LogInformation("Removing old service {ServiceId}", previousDeployment.ServiceId);
+                        await dockerService.RemoveServiceAsync(app.Server, previousDeployment.ServiceId);
+                    }
+                    catch (Exception ex)
+                    {
+                        logger.LogWarning(ex, "Failed to remove old service {ServiceId}, continuing", previousDeployment.ServiceId);
+                    }
+                }
+                
+                if (!string.IsNullOrEmpty(previousDeployment.ContainerId))
+                {
+                    try
+                    {
+                        logger.LogInformation("Stopping and removing old container {ContainerId}", previousDeployment.ContainerId);
+                        await dockerService.StopContainerAsync(app.Server, previousDeployment.ContainerId);
+                        await dockerService.RemoveContainerAsync(app.Server, previousDeployment.ContainerId);
+                    }
+                    catch (Exception ex)
+                    {
+                        logger.LogWarning(ex, "Failed to remove old container {ContainerId}, continuing", previousDeployment.ContainerId);
+                    }
+                }
+            }
+            
+            // Also try to remove by name in case there's an orphaned container with the same name
+            try
+            {
+                var existingContainers = await dockerService.ListContainersAsync(app.Server, true);
+                var existingContainer = existingContainers.FirstOrDefault(c => 
+                    c.Name.TrimStart('/').Equals(containerName, StringComparison.OrdinalIgnoreCase));
+                
+                if (existingContainer != null)
+                {
+                    logger.LogInformation("Found existing container with name {ContainerName}, removing it", containerName);
+                    try
+                    {
+                        await dockerService.StopContainerAsync(app.Server, existingContainer.Id);
+                    }
+                    catch { /* May already be stopped */ }
+                    await dockerService.RemoveContainerAsync(app.Server, existingContainer.Id);
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Error checking for existing containers, continuing with deployment");
+            }
             
             // Pull image
             await dockerService.PullImageAsync(app.Server, request.Image);
@@ -581,18 +648,39 @@ public class ApplicationsController : ControllerBase
             
             if (app.Server.IsSwarm)
             {
-                // Deploy as Swarm service
-                var serviceRequest = new CreateServiceRequest(
-                    app.Name.ToLowerInvariant().Replace(" ", "-"),
-                    request.Image,
-                    request.Replicas ?? 1,
-                    envVars,
-                    labels,
-                    request.Networks ?? new List<string>(),
-                    request.Port);
+                // For Swarm, check if service exists and update it instead of creating new
+                var existingServices = await dockerService.ListServicesAsync(app.Server);
+                var existingService = existingServices.FirstOrDefault(s => 
+                    s.Name.Equals(containerName, StringComparison.OrdinalIgnoreCase));
                 
-                var serviceId = await dockerService.CreateServiceAsync(app.Server, serviceRequest);
-                deployment.ServiceId = serviceId;
+                if (existingService != null)
+                {
+                    // Update existing service
+                    logger.LogInformation("Updating existing service {ServiceName}", containerName);
+                    var updateRequest = new UpdateServiceRequest(
+                        Image: request.Image,
+                        Replicas: request.Replicas,
+                        EnvironmentVariables: envVars,
+                        Labels: labels);
+                    
+                    await dockerService.UpdateServiceAsync(app.Server, existingService.Id, updateRequest);
+                    deployment.ServiceId = existingService.Id;
+                }
+                else
+                {
+                    // Deploy as new Swarm service
+                    var serviceRequest = new CreateServiceRequest(
+                        containerName,
+                        request.Image,
+                        request.Replicas ?? 1,
+                        envVars,
+                        labels,
+                        request.Networks ?? new List<string>(),
+                        request.Port);
+                    
+                    var serviceId = await dockerService.CreateServiceAsync(app.Server, serviceRequest);
+                    deployment.ServiceId = serviceId;
+                }
             }
             else
             {
@@ -602,7 +690,7 @@ public class ApplicationsController : ControllerBase
                     : null;
                 
                 var containerRequest = new CreateContainerRequest(
-                    app.Name.ToLowerInvariant().Replace(" ", "-"),
+                    containerName,
                     request.Image,
                     envVars,
                     labels,
