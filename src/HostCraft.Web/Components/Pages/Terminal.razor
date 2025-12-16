@@ -123,6 +123,7 @@
 
         connecting = true;
         error = null;
+        StateHasChanged();
 
         try
         {
@@ -152,6 +153,7 @@
             {
                 connected = true;
                 connecting = false;
+                error = null;
                 if (terminal != null)
                 {
                     await terminal.Focus();
@@ -164,14 +166,10 @@
                 connected = false;
                 connecting = false;
                 error = errorMsg;
-                if (terminal != null)
-                {
-                    await terminal.WriteOutput($"\r\n\x1b[31mError: {errorMsg}\x1b[0m\r\n");
-                }
                 await InvokeAsync(StateHasChanged);
             });
 
-            hubConnection.Closed += async (error) =>
+            hubConnection.Closed += async (closedError) =>
             {
                 connected = false;
                 connecting = false;
@@ -185,17 +183,19 @@
             await hubConnection.StartAsync();
             await hubConnection.SendAsync("ConnectToServer", ServerId);
             
-            // Don't set connected = true here! Wait for ConnectionEstablished callback
+            // IMPORTANT: Do NOT set connecting=false here!
+            // The callbacks (ConnectionEstablished or ConnectionFailed) will set the final state.
+            // SendAsync returns immediately - it doesn't wait for the server to process.
         }
         catch (Exception ex)
         {
+            // Only catch exceptions from hubConnection.StartAsync() or network errors
             error = $"Connection failed: {ex.Message}";
             connected = false;
-        }
-        finally
-        {
             connecting = false;
+            StateHasChanged();
         }
+        // NO finally block - state is managed by callbacks
     }
 
     private async Task Disconnect()
