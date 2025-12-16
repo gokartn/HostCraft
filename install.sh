@@ -80,6 +80,10 @@ while true; do
         *) echo "❌ Invalid input. Please enter 'yes' or 'no'.";;
     esac
 done
+
+SWARM_MANAGER="false"
+if [ "$init_swarm" = "yes" ]; then
+    # Check if already part of a swarm
     if docker info 2>/dev/null | grep -q "Swarm: active"; then
         echo "✅ Docker Swarm is already initialized"
         SWARM_MANAGER="true"
@@ -95,6 +99,13 @@ done
         fi
     fi
     echo ""
+fi
+
+# Ask about localhost server configuration
+echo "Server Configuration:"
+echo "1) Configure localhost as a Docker host (recommended if running locally)"
+echo "2) UI only (manage remote servers, no localhost auto-configuration)"
+echo ""
 while true; do
     read -p "Select option (1 or 2): " server_option
     case $server_option in
@@ -103,20 +114,6 @@ while true; do
     esac
 done
 
-# Ask about localhost server configuration
-echo "Sewhile true; do
-            read -p "Configure localhost as Swarm Manager? (yes/no): " localhost_swarm
-            case $localhost_swarm in
-                yes|y|Y|YES) localhost_swarm="yes"; break;;
-                no|n|N|NO) localhost_swarm="no"; break;;
-                *) echo "❌ Invalid input. Please enter 'yes' or 'no'.";;
-            esac
-        done
-echo "1) Configure localhost as a Docker host (recommended if running locally)"
-echo "2) UI only (manage remote servers, no localhost auto-configuration)"
-echo ""
-read -p "Select option (1 or 2): " server_option
-
 if [ "$server_option" = "1" ]; then
     CONFIGURE_LOCALHOST="true"
     echo "✅ Will configure localhost server"
@@ -124,7 +121,14 @@ if [ "$server_option" = "1" ]; then
     # If swarm is initialized, ask if localhost should be swarm manager
     if [ "$SWARM_MANAGER" = "true" ]; then
         echo ""
-        read -p "Configure localhost as Swarm Manager? (yes/no): " localhost_swarm
+        while true; do
+            read -p "Configure localhost as Swarm Manager? (yes/no): " localhost_swarm
+            case $localhost_swarm in
+                yes|y|Y|YES) localhost_swarm="yes"; break;;
+                no|n|N|NO) localhost_swarm="no"; break;;
+                *) echo "❌ Invalid input. Please enter 'yes' or 'no'.";;
+            esac
+        done
         if [ "$localhost_swarm" = "yes" ]; then
             LOCALHOST_SWARM_MANAGER="true"
             echo "✅ Localhost will be configured as Swarm Manager"

@@ -9,12 +9,17 @@ echo "  - All containers"
 echo "  - All volumes (database, backups, etc.)"
 echo "  - All networks"
 echo ""
-read -p "Are you sure you want to continue? (yes/no): " confirm
-
-if [ "$confirm" != "yes" ]; then
-    echo "Cancelled."
-    exit 0
-fi
+while true; do
+    read -p "Are you sure you want to continue? (yes/no): " confirm
+    case $confirm in
+        yes|y|Y|YES) break;;
+        no|n|N|NO) 
+            echo "Cancelled."
+            exit 0
+            ;;
+        *) echo "❌ Invalid input. Please enter 'yes' or 'no'.";;
+    esac
+done
 
 echo ""
 echo "🗑️  Removing all containers, volumes, and networks..."
