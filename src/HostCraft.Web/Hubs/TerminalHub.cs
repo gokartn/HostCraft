@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.SignalR;
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using Renci.SshNet;
 using System.Text;
 
@@ -7,7 +8,7 @@ namespace HostCraft.Web.Hubs;
 
 public class TerminalHub : Hub
 {
-    private static readonly ConcurrentDictionary<string, SshTerminalSession> _sessions = new();
+    private static readonly ConcurrentDictionary<string, ITerminalSession> _sessions = new();
     private readonly ILogger<TerminalHub> _logger;
     private readonly IHttpClientFactory _httpClientFactory;
 
@@ -23,7 +24,7 @@ public class TerminalHub : Hub
         {
             _logger.LogInformation("Connecting to server {ServerId}", serverId);
             
-            // Get server details from API (using configured named HttpClient)
+            // Get server details from API
             var httpClient = _httpClientFactory.CreateClient("HostCraftAPI");
             _logger.LogInformation("Using API URL: {BaseAddress}", httpClient.BaseAddress);
             
@@ -34,85 +35,122 @@ public class TerminalHub : Hub
             }
             
             var server = await response.Content.ReadFromJsonAsync<ServerDto>();
-            if (server == null || server.PrivateKey == null)
+            if (server == null)
             {
-                throw new Exception("Server or private key not found");
+                throw new Exception("Server not found");
             }
-            
-            var host = server.Host;
-            var port = server.Port;
-            var username = server.Username;
-            var privateKeyData = server.PrivateKey.KeyData;
 
-            var connectionInfo = new Renci.SshNet.ConnectionInfo(
-                host,
-                port,
-                username,
-                new PrivateKeyAuthenticationMethod(username, new PrivateKeyFile(new MemoryStream(Encoding.UTF8.GetBytes(privateKeyData))))
-            );
-
-            var client = new SshClient(connectionInfo);
-            await Task.Run(() => client.Connect());
-
-            var shell = client.CreateShellStream("xterm", 80, 24, 800, 600, 1024);
-            
-            var session = new SshTerminalSession
+            // Check if this is localhost - use local shell instead of SSH
+            if (IsLocalhost(server.Host))
             {
-                Client = client,
-                Shell = shell,
-                ServerId = serverId
-            };
-
-            _sessions[Context.ConnectionId] = session;
-
-            // Start reading output
-            _ = Task.Run(async () => await ReadShellOutput(Context.ConnectionId));
-
-            // Notify client of successful connection
-            await Clients.Caller.SendAsync("ConnectionEstablished");
-            await Clients.Caller.SendAsync("ReceiveOutput", $"\x1b[32mConnected to {server.Host}\x1b[0m\r\n");
-            
-            // Get initial prompt
-            var initialOutput = await ReadInitialPrompt(shell);
-            if (!string.IsNullOrEmpty(initialOutput))
+                await ConnectLocalTerminal(server);
+            }
+            else
             {
-                await Clients.Caller.SendAsync("UpdatePrompt", ExtractPrompt(initialOutput));
+                // Remote server - requires SSH with private key
+                if (server.PrivateKey == null || string.IsNullOrEmpty(server.PrivateKey.KeyData))
+                {
+                    throw new Exception("Private key is required for remote server connections. Please configure an SSH key for this server.");
+                }
+                await ConnectSshTerminal(server);
             }
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to connect to server {ServerId}", serverId);
             await Clients.Caller.SendAsync("ConnectionFailed", ex.Message);
-            await Clients.Caller.SendAsync("ReceiveError", $"\x1b[31mConnection failed: {ex.Message}\x1b[0m\r\n");
         }
     }
 
-    public async Task ExecuteCommand(string command)
+    private bool IsLocalhost(string host)
     {
-        if (!_sessions.TryGetValue(Context.ConnectionId, out var session))
-        {
-            await Clients.Caller.SendAsync("ReceiveError", "Not connected to any server\n");
-            return;
-        }
+        return host.Equals("localhost", StringComparison.OrdinalIgnoreCase) ||
+               host.Equals("127.0.0.1", StringComparison.Ordinal) ||
+               host.Equals("::1", StringComparison.Ordinal);
+    }
 
-        try
-        {
-            if (session.Shell == null || !session.Shell.CanWrite)
-            {
-                await Clients.Caller.SendAsync("ReceiveError", "Terminal session is not active\n");
-                return;
-            }
+    private async Task ConnectLocalTerminal(ServerDto server)
+    {
+        _logger.LogInformation("Connecting to localhost terminal");
 
-            // Write command to shell
-            var writer = new StreamWriter(session.Shell, Encoding.UTF8) { AutoFlush = true };
-            await writer.WriteLineAsync(command);
-            
-            // Output is read by the background task
-        }
-        catch (Exception ex)
+        // Determine the shell to use
+        var isWindows = OperatingSystem.IsWindows();
+        var shell = isWindows ? "powershell.exe" : "/bin/bash";
+        var shellArgs = isWindows ? "-NoLogo -NoExit" : "-i";
+
+        var processStartInfo = new ProcessStartInfo
         {
-            _logger.LogError(ex, "Failed to execute command: {Command}", command);
-            await Clients.Caller.SendAsync("ReceiveError", $"Command execution failed: {ex.Message}\n");
+            FileName = shell,
+            Arguments = shellArgs,
+            UseShellExecute = false,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true,
+            WorkingDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
+        };
+
+        // Set environment for proper terminal behavior
+        processStartInfo.Environment["TERM"] = "xterm-256color";
+
+        var process = new Process { StartInfo = processStartInfo };
+        process.Start();
+
+        var session = new LocalTerminalSession
+        {
+            Process = process,
+            ServerId = server.Id
+        };
+
+        _sessions[Context.ConnectionId] = session;
+
+        // Start reading output
+        _ = Task.Run(async () => await ReadLocalOutput(Context.ConnectionId, process.StandardOutput));
+        _ = Task.Run(async () => await ReadLocalError(Context.ConnectionId, process.StandardError));
+
+        // Notify client of successful connection
+        await Clients.Caller.SendAsync("ConnectionEstablished");
+        await Clients.Caller.SendAsync("ReceiveOutput", $"\x1b[32mConnected to {server.Host} (local terminal)\x1b[0m\r\n");
+    }
+
+    private async Task ConnectSshTerminal(ServerDto server)
+    {
+        _logger.LogInformation("Connecting via SSH to {Host}:{Port}", server.Host, server.Port);
+
+        var connectionInfo = new Renci.SshNet.ConnectionInfo(
+            server.Host,
+            server.Port,
+            server.Username,
+            new PrivateKeyAuthenticationMethod(server.Username, 
+                new PrivateKeyFile(new MemoryStream(Encoding.UTF8.GetBytes(server.PrivateKey!.KeyData))))
+        );
+
+        var client = new SshClient(connectionInfo);
+        await Task.Run(() => client.Connect());
+
+        var shell = client.CreateShellStream("xterm", 80, 24, 800, 600, 1024);
+        
+        var session = new SshTerminalSession
+        {
+            Client = client,
+            Shell = shell,
+            ServerId = server.Id
+        };
+
+        _sessions[Context.ConnectionId] = session;
+
+        // Start reading output
+        _ = Task.Run(async () => await ReadSshOutput(Context.ConnectionId));
+
+        // Notify client of successful connection
+        await Clients.Caller.SendAsync("ConnectionEstablished");
+        await Clients.Caller.SendAsync("ReceiveOutput", $"\x1b[32mConnected to {server.Host}\x1b[0m\r\n");
+        
+        // Get initial prompt
+        var initialOutput = await ReadInitialPrompt(shell);
+        if (!string.IsNullOrEmpty(initialOutput))
+        {
+            await Clients.Caller.SendAsync("UpdatePrompt", ExtractPrompt(initialOutput));
         }
     }
 
@@ -126,16 +164,27 @@ public class TerminalHub : Hub
 
         try
         {
-            if (session.Shell == null || !session.Shell.CanWrite)
+            if (session is LocalTerminalSession localSession)
             {
-                await Clients.Caller.SendAsync("ReceiveError", "Terminal session is not active\n");
-                return;
+                if (localSession.Process == null || localSession.Process.HasExited)
+                {
+                    await Clients.Caller.SendAsync("ReceiveError", "Terminal session is not active\n");
+                    return;
+                }
+                await localSession.Process.StandardInput.WriteAsync(input);
+                await localSession.Process.StandardInput.FlushAsync();
             }
-
-            // Write raw input to shell (for XTerm.js integration)
-            var bytes = Encoding.UTF8.GetBytes(input);
-            await session.Shell.WriteAsync(bytes, 0, bytes.Length);
-            await session.Shell.FlushAsync();
+            else if (session is SshTerminalSession sshSession)
+            {
+                if (sshSession.Shell == null || !sshSession.Shell.CanWrite)
+                {
+                    await Clients.Caller.SendAsync("ReceiveError", "Terminal session is not active\n");
+                    return;
+                }
+                var bytes = Encoding.UTF8.GetBytes(input);
+                await sshSession.Shell.WriteAsync(bytes, 0, bytes.Length);
+                await sshSession.Shell.FlushAsync();
+            }
         }
         catch (Exception ex)
         {
@@ -144,22 +193,110 @@ public class TerminalHub : Hub
         }
     }
 
+    public async Task ExecuteCommand(string command)
+    {
+        if (!_sessions.TryGetValue(Context.ConnectionId, out var session))
+        {
+            await Clients.Caller.SendAsync("ReceiveError", "Not connected to any server\n");
+            return;
+        }
+
+        try
+        {
+            if (session is LocalTerminalSession localSession)
+            {
+                if (localSession.Process == null || localSession.Process.HasExited)
+                {
+                    await Clients.Caller.SendAsync("ReceiveError", "Terminal session is not active\n");
+                    return;
+                }
+                await localSession.Process.StandardInput.WriteLineAsync(command);
+            }
+            else if (session is SshTerminalSession sshSession)
+            {
+                if (sshSession.Shell == null || !sshSession.Shell.CanWrite)
+                {
+                    await Clients.Caller.SendAsync("ReceiveError", "Terminal session is not active\n");
+                    return;
+                }
+                var writer = new StreamWriter(sshSession.Shell, Encoding.UTF8) { AutoFlush = true };
+                await writer.WriteLineAsync(command);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to execute command: {Command}", command);
+            await Clients.Caller.SendAsync("ReceiveError", $"Command execution failed: {ex.Message}\n");
+        }
+    }
+
     public override async Task OnDisconnectedAsync(Exception? exception)
     {
         if (_sessions.TryRemove(Context.ConnectionId, out var session))
         {
-            session.Shell?.Dispose();
-            session.Client?.Disconnect();
-            session.Client?.Dispose();
+            session.Dispose();
             _logger.LogInformation("Terminal session closed for server {ServerId}", session.ServerId);
         }
 
         await base.OnDisconnectedAsync(exception);
     }
 
-    private async Task ReadShellOutput(string connectionId)
+    private async Task ReadLocalOutput(string connectionId, StreamReader reader)
     {
-        if (!_sessions.TryGetValue(connectionId, out var session) || session.Shell == null)
+        var buffer = new char[4096];
+        
+        try
+        {
+            while (_sessions.ContainsKey(connectionId))
+            {
+                var bytesRead = await reader.ReadAsync(buffer, 0, buffer.Length);
+                if (bytesRead > 0)
+                {
+                    var output = new string(buffer, 0, bytesRead);
+                    await Clients.Client(connectionId).SendAsync("ReceiveOutput", output);
+                }
+                else if (bytesRead == 0)
+                {
+                    await Task.Delay(10);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error reading local output for connection {ConnectionId}", connectionId);
+            await Clients.Client(connectionId).SendAsync("ReceiveError", "Connection lost\n");
+        }
+    }
+
+    private async Task ReadLocalError(string connectionId, StreamReader reader)
+    {
+        var buffer = new char[4096];
+        
+        try
+        {
+            while (_sessions.ContainsKey(connectionId))
+            {
+                var bytesRead = await reader.ReadAsync(buffer, 0, buffer.Length);
+                if (bytesRead > 0)
+                {
+                    var output = new string(buffer, 0, bytesRead);
+                    await Clients.Client(connectionId).SendAsync("ReceiveOutput", $"\x1b[31m{output}\x1b[0m");
+                }
+                else if (bytesRead == 0)
+                {
+                    await Task.Delay(10);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Error reading local stderr for connection {ConnectionId}", connectionId);
+        }
+    }
+
+    private async Task ReadSshOutput(string connectionId)
+    {
+        if (!_sessions.TryGetValue(connectionId, out var baseSession) || baseSession is not SshTerminalSession session || session.Shell == null)
             return;
 
         var buffer = new byte[4096];
@@ -172,17 +309,15 @@ public class TerminalHub : Hub
                 if (bytesRead > 0)
                 {
                     var output = Encoding.UTF8.GetString(buffer, 0, bytesRead);
-                    
-                    // Send raw output with ANSI codes (XTerm.js will handle them)
                     await Clients.Client(connectionId).SendAsync("ReceiveOutput", output);
                 }
                 
-                await Task.Delay(10); // Small delay to prevent CPU spinning
+                await Task.Delay(10);
             }
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error reading shell output for connection {ConnectionId}", connectionId);
+            _logger.LogError(ex, "Error reading SSH output for connection {ConnectionId}", connectionId);
             await Clients.Client(connectionId).SendAsync("ReceiveError", "Connection lost\n");
         }
     }
@@ -219,27 +354,56 @@ public class TerminalHub : Hub
 
     private string ExtractPrompt(string output)
     {
-        // Extract prompt from output (usually ends with $ or #)
         var lines = output.Split('\n', StringSplitOptions.RemoveEmptyEntries);
         var lastLine = lines.LastOrDefault() ?? "user@server:~$";
-        
-        // Clean and return prompt
         return CleanAnsiCodes(lastLine.Trim());
     }
 
     private string CleanAnsiCodes(string input)
     {
-        // Remove ANSI escape sequences for simplified terminal display
-        // In a production app, you'd want to properly handle these for colors/formatting
         return System.Text.RegularExpressions.Regex.Replace(input, @"\x1B\[[^@-~]*[@-~]", "");
     }
 }
 
-public class SshTerminalSession
+// Interface for terminal sessions
+public interface ITerminalSession : IDisposable
+{
+    int ServerId { get; }
+}
+
+// Local terminal session using Process
+public class LocalTerminalSession : ITerminalSession
+{
+    public Process? Process { get; set; }
+    public int ServerId { get; set; }
+
+    public void Dispose()
+    {
+        if (Process != null && !Process.HasExited)
+        {
+            try
+            {
+                Process.Kill();
+            }
+            catch { /* Ignore */ }
+        }
+        Process?.Dispose();
+    }
+}
+
+// SSH terminal session
+public class SshTerminalSession : ITerminalSession
 {
     public SshClient? Client { get; set; }
     public ShellStream? Shell { get; set; }
     public int ServerId { get; set; }
+
+    public void Dispose()
+    {
+        Shell?.Dispose();
+        Client?.Disconnect();
+        Client?.Dispose();
+    }
 }
 
 public class ServerDto
