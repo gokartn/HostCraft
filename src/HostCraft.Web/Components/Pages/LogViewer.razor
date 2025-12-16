@@ -13,13 +13,13 @@
             <p class="subtitle">@(ContainerId != null ? $"Container: {ContainerId.Substring(0, 12)}" : $"Service: {ServiceId}")</p>
         </div>
         <div class="header-actions">
-            <button class="btn-secondary" @onclick="RefreshLogs">
+            <button class="btn btn-secondary" @onclick="RefreshLogs">
                 🔄 Refresh
             </button>
-            <button class="btn-secondary" @onclick="DownloadLogs">
+            <button class="btn btn-secondary" @onclick="DownloadLogs">
                 💾 Download
             </button>
-            <button class="btn-secondary" @onclick="GoBack">
+            <button class="btn btn-secondary" @onclick="GoBack">
                 ← Back
             </button>
         </div>

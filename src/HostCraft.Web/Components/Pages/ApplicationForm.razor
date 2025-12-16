@@ -66,7 +66,7 @@
                                         }
                                     }
                                 </select>
-                                <button type="button" class="btn-secondary" @onclick="ShowCreateProject" title="Create New Project" style="white-space: nowrap;">
+                                <button type="button" class="btn btn-secondary" @onclick="ShowCreateProject" title="Create New Project" style="white-space: nowrap;">
                                     ➕ New
                                 </button>
                             </div>
@@ -115,8 +115,8 @@
                         </div>
                     }
                     
-                    <button type="button" class="btn-secondary" @onclick="AddEnvVar">
-                        <i class="icon">➕</i> Add Variable
+                    <button type="button" class="btn btn-secondary" @onclick="AddEnvVar">
+                        ➕ Add Variable
                     </button>
                 </div>
                 
@@ -132,14 +132,14 @@
                         </div>
                     }
                     
-                    <button type="button" class="btn-secondary" @onclick="AddNetwork">
-                        <i class="icon">➕</i> Add Network
+                    <button type="button" class="btn btn-secondary" @onclick="AddNetwork">
+                        ➕ Add Network
                     </button>
                 </div>
                 
                 <div class="form-actions">
-                    <button type="button" class="btn-secondary" @onclick="Cancel">Cancel</button>
-                    <button type="button" class="btn-primary" @onclick="Deploy" disabled="@isSubmitting">
+                    <button type="button" class="btn btn-secondary" @onclick="Cancel">Cancel</button>
+                    <button type="button" class="btn btn-primary" @onclick="Deploy" disabled="@isSubmitting">
                         @if (isSubmitting)
                         {
                             <span>🔄 Deploying...</span>
@@ -187,8 +187,8 @@
                 }
             </div>
             <div class="modal-footer">
-                <button type="button" class="btn-secondary" @onclick="HideCreateProject">Cancel</button>
-                <button type="button" class="btn-primary" @onclick="CreateProject" disabled="@isCreatingProject">
+                <button type="button" class="btn btn-secondary" @onclick="HideCreateProject">Cancel</button>
+                <button type="button" class="btn btn-primary" @onclick="CreateProject" disabled="@isCreatingProject">
                     @if (isCreatingProject)
                     {
                         <span>Creating...</span>

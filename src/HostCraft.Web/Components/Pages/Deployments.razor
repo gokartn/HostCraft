@@ -13,8 +13,8 @@
             <p class="subtitle">Track deployment history and status</p>
         </div>
         <div class="header-actions">
-            <button class="btn-secondary" @onclick="RefreshDeployments">
-                <i class="icon">🔄</i> Refresh
+            <button class="btn btn-secondary" @onclick="RefreshDeployments">
+                🔄 Refresh
             </button>
         </div>
     </div>
@@ -32,8 +32,8 @@
             <div class="empty-icon">📋</div>
             <h2>No Deployments</h2>
             <p>Deploy an application to see deployment history</p>
-            <button class="btn-primary" @onclick="NavigateToApplications">
-                <i class="icon">🚀</i> View Applications
+            <button class="btn btn-primary" @onclick="NavigateToApplications">
+                🚀 View Applications
             </button>
         </div>
     }
@@ -136,7 +136,7 @@
                 <pre class="error-text">@currentError</pre>
             </div>
             <div class="modal-footer">
-                <button class="btn-secondary" @onclick="HideError">Close</button>
+                <button class="btn btn-secondary" @onclick="HideError">Close</button>
             </div>
         </div>
     </div>

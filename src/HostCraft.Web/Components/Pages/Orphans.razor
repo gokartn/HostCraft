@@ -14,13 +14,13 @@
             <p class="subtitle">Containers and services without linked applications</p>
         </div>
         <div class="header-actions">
-            <button class="btn-secondary" @onclick="RefreshOrphans">
-                <i class="icon">🔄</i> Refresh
+            <button class="btn btn-secondary" @onclick="RefreshOrphans">
+                🔄 Refresh
             </button>
             @if (orphans != null && (orphans.OrphanedContainers.Any() || orphans.OrphanedServices.Any()))
             {
-                <button class="btn-danger" @onclick="CleanupAllOrphans">
-                    <i class="icon">🧹</i> Cleanup All
+                <button class="btn btn-danger" @onclick="CleanupAllOrphans">
+                    🧹 Cleanup All
                 </button>
             }
         </div>

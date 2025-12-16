@@ -14,11 +14,11 @@
             <p class="subtitle">@(server?.Name ?? "Loading...")</p>
         </div>
         <div class="header-actions">
-            <button class="btn-secondary" @onclick="RefreshContainers">
-                <i class="icon">🔄</i> Refresh
+            <button class="btn btn-secondary" @onclick="RefreshContainers">
+                🔄 Refresh
             </button>
-            <button class="btn-primary" @onclick="ShowCreateDialog">
-                <i class="icon">➕</i> Create Container
+            <button class="btn btn-primary" @onclick="ShowCreateDialog">
+                ➕ Create Container
             </button>
         </div>
     </div>
@@ -36,8 +36,8 @@
             <div class="empty-icon">📦</div>
             <h2>No Containers</h2>
             <p>Create your first container to get started</p>
-            <button class="btn-primary" @onclick="ShowCreateDialog">
-                <i class="icon">➕</i> Create Container
+            <button class="btn btn-primary" @onclick="ShowCreateDialog">
+                ➕ Create Container
             </button>
         </div>
     }
