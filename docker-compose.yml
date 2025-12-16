@@ -1,17 +1,23 @@
 version: '3.8'
 
+# Centralized configuration
+x-common-variables: &common-variables
+  WEB_PORT: 5000
+  API_PORT: 5100
+
 services:
   hostcraft-web:
     build:
       context: .
       dockerfile: src/HostCraft.Web/Dockerfile
     ports:
-      - "5000:8080"
+      - "${WEB_PORT:-5000}:8080"
     environment:
-      - ASPNETCORE_ENVIRONMENT=Production
-      - ASPNETCORE_URLS=http://+:8080
-      - ApiUrl=http://hostcraft-api:8080
-      - ConnectionStrings__DefaultConnection=Host=postgres;Database=hostcraft;Username=hostcraft;Password=your_secure_password_here
+      <<: *common-variables
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:8080
+      ApiUrl: http://hostcraft-api:8080
+      ConnectionStrings__DefaultConnection: Host=postgres;Database=hostcraft;Username=hostcraft;Password=your_secure_password_here
     depends_on:
       - hostcraft-api
       - postgres
@@ -25,13 +31,14 @@ services:
       context: .
       dockerfile: src/HostCraft.Api/Dockerfile
     ports:
-      - "5001:8080"
+      - "${API_PORT:-5100}:8080"
     environment:
-      - ASPNETCORE_ENVIRONMENT=Production
-      - ASPNETCORE_URLS=http://+:8080
-      - ConnectionStrings__DefaultConnection=Host=postgres;Database=hostcraft;Username=hostcraft;Password=your_secure_password_here
-      - SKIP_LOCALHOST_SEED=${SKIP_LOCALHOST_SEED}
-      - LOCALHOST_IS_SWARM_MANAGER=${LOCALHOST_IS_SWARM_MANAGER}
+      <<: *common-variables
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__DefaultConnection: Host=postgres;Database=hostcraft;Username=hostcraft;Password=your_secure_password_here
+      SKIP_LOCALHOST_SEED: ${SKIP_LOCALHOST_SEED}
+      LOCALHOST_IS_SWARM_MANAGER: ${LOCALHOST_IS_SWARM_MANAGER}
     depends_on:
       - postgres
     restart: unless-stopped

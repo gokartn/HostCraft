@@ -21,8 +21,10 @@ public class TerminalHub : Hub
     {
         try
         {
-            // Get server details from API
-            var response = await _httpClient.GetAsync($"http://localhost:5100/api/servers/{serverId}");
+            _logger.LogInformation("Connecting to server {ServerId}", serverId);
+            
+            // Get server details from API (using configured base address)
+            var response = await _httpClient.GetAsync($"api/servers/{serverId}");
             if (!response.IsSuccessStatusCode)
             {
                 throw new Exception($"Failed to fetch server details: {response.ReasonPhrase}");

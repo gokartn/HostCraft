@@ -2,6 +2,104 @@
 
 HostCraft is a self-hosted Platform-as-a-Service (PaaS) built in C#/.NET 8, designed to properly handle Docker Swarm deployments with correct network management.
 
+## 📦 Installation
+
+Get HostCraft up and running in minutes with Docker Compose:
+
+### Prerequisites
+- Docker Engine installed and running
+- Docker Compose v2.0+
+- Git
+
+### Quick Start
+
+1. **Clone the repository:**
+   ```bash
+   git clone https://github.com/gokartn/hostcraft.git
+   cd HostCraft
+   ```
+
+2. **Make the install script executable:**
+   ```bash
+   chmod +x install.sh
+   ```
+
+3. **Run the installation:**
+   ```bash
+   ./install.sh
+   ```
+   
+   Or run directly with bash:
+   ```bash
+   bash install.sh
+   ```
+
+4. **Access HostCraft:**
+   - Web UI: http://localhost:5000
+   - API: http://localhost:5100
+
+The installation script will:
+- Build the Docker images
+- Set up the database
+- Start all services in the background
+- Display the status of running containers
+
+### Manual Installation
+
+If you prefer to install manually:
+
+```bash
+# Build and start services
+docker-compose up -d --build
+
+# Check status
+docker-compose ps
+
+# View logs
+docker-compose logs -f
+```
+
+## 🗑️ Uninstallation
+
+To completely remove HostCraft from your system:
+
+### Using the uninstall script:
+
+1. **Make the script executable:**
+   ```bash
+   chmod +x uninstall.sh
+   ```
+
+2. **Run the uninstaller:**
+   ```bash
+   ./uninstall.sh
+   ```
+   
+   Or run directly with bash:
+   ```bash
+   bash uninstall.sh
+   ```
+
+This will:
+- Stop all running containers
+- Remove containers, networks, and images
+- Clean up volumes (optional, you'll be prompted)
+
+### Manual Uninstallation
+
+```bash
+# Stop and remove all services
+docker-compose down
+
+# Remove with volumes (⚠️ deletes all data)
+docker-compose down -v
+
+# Remove images
+docker-compose down --rmi all
+```
+
+---
+
 ## 🎯 Project Status
 
 **Phase 1 - Foundation** ✅ **COMPLETED**
@@ -105,7 +203,7 @@ dotnet build HostCraft.sln
 # Run the API (uses SQLite by default)
 dotnet run --project src/HostCraft.Api
 
-# API will be available at https://localhost:5001
+# API will be available at http://localhost:5100
 ```
 
 ## 📋 Database

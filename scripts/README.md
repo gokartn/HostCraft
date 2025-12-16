@@ -100,7 +100,7 @@ docker compose up -d
 
 Access:
 - Web UI: http://localhost:5000
-- API: http://localhost:5001
+- API: http://localhost:5100
 
 ### Option 2: Docker Stack (Swarm)
 Coming soon - stack deployment for multi-node setup
