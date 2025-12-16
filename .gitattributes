@@ -1,2 +1,8 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Force Unix line endings for shell scripts
+*.sh text eol=lf
+install.sh text eol=lf
+uninstall.sh text eol=lf
+scripts/*.sh text eol=lf
