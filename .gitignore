@@ -415,3 +415,6 @@ hostcraft.db
 
 # Cleanup tools
 bfg.jar
+
+# Project context files
+DEPLOYARR_PROJECT_CONTEXT.md
