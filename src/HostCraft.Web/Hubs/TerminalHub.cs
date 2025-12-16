@@ -71,30 +71,52 @@ public class TerminalHub : Hub
 
     private async Task ConnectLocalTerminal(ServerDto server)
     {
-        _logger.LogInformation("Connecting to localhost terminal");
+        _logger.LogInformation("Connecting to localhost terminal via docker exec");
 
-        // Determine the shell to use
-        var isWindows = OperatingSystem.IsWindows();
-        var shell = isWindows ? "powershell.exe" : "/bin/bash";
-        var shellArgs = isWindows ? "-NoLogo -NoExit" : "-i";
-
+        // For localhost in Docker environment, we use docker exec to get a shell
+        // in the API container which has Docker socket access
         var processStartInfo = new ProcessStartInfo
         {
-            FileName = shell,
-            Arguments = shellArgs,
+            FileName = "docker",
+            Arguments = "exec -i hostcraft-hostcraft-api-1 /bin/bash",
             UseShellExecute = false,
             RedirectStandardInput = true,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
-            CreateNoWindow = true,
-            WorkingDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
+            CreateNoWindow = true
         };
 
         // Set environment for proper terminal behavior
         processStartInfo.Environment["TERM"] = "xterm-256color";
 
         var process = new Process { StartInfo = processStartInfo };
-        process.Start();
+        
+        try
+        {
+            process.Start();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to start docker exec, falling back to local shell");
+            
+            // Fallback: try local shell (for non-Docker environments)
+            var isWindows = OperatingSystem.IsWindows();
+            processStartInfo = new ProcessStartInfo
+            {
+                FileName = isWindows ? "powershell.exe" : "/bin/bash",
+                Arguments = isWindows ? "-NoLogo -NoProfile" : "",
+                UseShellExecute = false,
+                RedirectStandardInput = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true,
+                WorkingDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
+            };
+            processStartInfo.Environment["TERM"] = "xterm-256color";
+            
+            process = new Process { StartInfo = processStartInfo };
+            process.Start();
+        }
 
         var session = new LocalTerminalSession
         {
@@ -110,7 +132,11 @@ public class TerminalHub : Hub
 
         // Notify client of successful connection
         await Clients.Caller.SendAsync("ConnectionEstablished");
-        await Clients.Caller.SendAsync("ReceiveOutput", $"\x1b[32mConnected to {server.Host} (local terminal)\x1b[0m\r\n");
+        await Clients.Caller.SendAsync("ReceiveOutput", $"\x1b[32mConnected to localhost (container shell)\x1b[0m\r\n");
+        
+        // Send initial newline to trigger prompt
+        await Task.Delay(100);
+        await process.StandardInput.WriteLineAsync("");
     }
 
     private async Task ConnectSshTerminal(ServerDto server)
