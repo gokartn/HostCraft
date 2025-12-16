@@ -1,5 +1,3 @@
-version: '3.8'
-
 # Centralized configuration
 x-common-variables: &common-variables
   WEB_PORT: 5000

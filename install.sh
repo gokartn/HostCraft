@@ -289,7 +289,7 @@ echo "✅ Installation completed successfully!"
 echo ""
 echo "📍 Access your HostCraft instance:"
 echo "   Web UI: http://$(hostname -I | awk '{print $1}'):5000"
-echo "   API:    http://$(hostname -I | awk '{print $1}'):5001"
+echo "   API:    http://$(hostname -I | awk '{print $1}'):5100"
 echo ""
 if [ "$CONFIGURE_LOCALHOST" = "true" ]; then
     if [ "$LOCALHOST_SWARM_MANAGER" = "true" ]; then

@@ -9,12 +9,12 @@ public class TerminalHub : Hub
 {
     private static readonly ConcurrentDictionary<string, SshTerminalSession> _sessions = new();
     private readonly ILogger<TerminalHub> _logger;
-    private readonly HttpClient _httpClient;
+    private readonly IHttpClientFactory _httpClientFactory;
 
-    public TerminalHub(ILogger<TerminalHub> logger, HttpClient httpClient)
+    public TerminalHub(ILogger<TerminalHub> logger, IHttpClientFactory httpClientFactory)
     {
         _logger = logger;
-        _httpClient = httpClient;
+        _httpClientFactory = httpClientFactory;
     }
 
     public async Task ConnectToServer(int serverId)
@@ -23,8 +23,11 @@ public class TerminalHub : Hub
         {
             _logger.LogInformation("Connecting to server {ServerId}", serverId);
             
-            // Get server details from API (using configured base address)
-            var response = await _httpClient.GetAsync($"api/servers/{serverId}");
+            // Get server details from API (using configured named HttpClient)
+            var httpClient = _httpClientFactory.CreateClient("HostCraftAPI");
+            _logger.LogInformation("Using API URL: {BaseAddress}", httpClient.BaseAddress);
+            
+            var response = await httpClient.GetAsync($"api/servers/{serverId}");
             if (!response.IsSuccessStatusCode)
             {
                 throw new Exception($"Failed to fetch server details: {response.ReasonPhrase}");
