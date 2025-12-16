@@ -9,9 +9,20 @@ echo ""
 if ! command -v docker &> /dev/null; then
     echo "⚠️  Docker is not installed on this system."
     echo ""
-    read -p "Would you like to install Docker now? (yes/no): " install_docker
+    while true; do
+        read -p "Would you like to install Docker now? (yes/no): " install_docker
+        case $install_docker in
+            yes|y|Y|YES) break;;
+            no|n|N|NO) 
+                echo "❌ Docker is required to run HostCraft."
+                echo "Please install Docker from: https://docs.docker.com/engine/install/"
+                exit 1
+                ;;
+            *) echo "❌ Invalid input. Please enter 'yes' or 'no'.";;
+        esac
+    done
     
-    if [ "$install_docker" = "yes" ]; then
+    if true; then
         echo "📦 Installing Docker..."
         
         # Detect OS and install Docker
@@ -49,10 +60,6 @@ if ! command -v docker &> /dev/null; then
         
         echo "✅ Docker installed successfully"
         echo ""
-    else
-        echo "❌ Docker is required to run HostCraft."
-        echo "Please install Docker from: https://docs.docker.com/engine/install/"
-        exit 1
     fi
 fi
 
@@ -65,7 +72,14 @@ read -p "Would you like to initialize Docker Swarm? (yes/no): " init_swarm
 
 SWARM_MANAGER="false"
 if [ "$init_swarm" = "yes" ]; then
-    # Check if already part of a swarm
+while true; do
+    read -p "Would you like to initialize Docker Swarm? (yes/no): " init_swarm
+    case $init_swarm in
+        yes|y|Y|YES) init_swarm="yes"; break;;
+        no|n|N|NO) init_swarm="no"; break;;
+        *) echo "❌ Invalid input. Please enter 'yes' or 'no'.";;
+    esac
+done
     if docker info 2>/dev/null | grep -q "Swarm: active"; then
         echo "✅ Docker Swarm is already initialized"
         SWARM_MANAGER="true"
@@ -81,10 +95,23 @@ if [ "$init_swarm" = "yes" ]; then
         fi
     fi
     echo ""
-fi
+while true; do
+    read -p "Select option (1 or 2): " server_option
+    case $server_option in
+        1|2) break;;
+        *) echo "❌ Invalid input. Please enter '1' or '2'.";;
+    esac
+done
 
 # Ask about localhost server configuration
-echo "Server Configuration:"
+echo "Sewhile true; do
+            read -p "Configure localhost as Swarm Manager? (yes/no): " localhost_swarm
+            case $localhost_swarm in
+                yes|y|Y|YES) localhost_swarm="yes"; break;;
+                no|n|N|NO) localhost_swarm="no"; break;;
+                *) echo "❌ Invalid input. Please enter 'yes' or 'no'.";;
+            esac
+        done
 echo "1) Configure localhost as a Docker host (recommended if running locally)"
 echo "2) UI only (manage remote servers, no localhost auto-configuration)"
 echo ""
