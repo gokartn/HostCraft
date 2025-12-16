@@ -68,10 +68,6 @@ echo ""
 
 # Ask about Docker Swarm initialization
 echo "Docker Swarm Configuration:"
-read -p "Would you like to initialize Docker Swarm? (yes/no): " init_swarm
-
-SWARM_MANAGER="false"
-if [ "$init_swarm" = "yes" ]; then
 while true; do
     read -p "Would you like to initialize Docker Swarm? (yes/no): " init_swarm
     case $init_swarm in
@@ -143,10 +139,6 @@ elif [ "$server_option" = "2" ]; then
     CONFIGURE_LOCALHOST="false"
     LOCALHOST_SWARM_MANAGER="false"
     echo "✅ UI only mode - no localhost auto-configuration"
-else
-    echo "Invalid option. Defaulting to localhost configuration."
-    CONFIGURE_LOCALHOST="true"
-    LOCALHOST_SWARM_MANAGER="false"
 fi
 echo ""
 
