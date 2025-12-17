@@ -58,4 +58,15 @@ public class Server
     public bool CanDeployApplications => Type != ServerType.SwarmWorker;
     
     public bool CanManageSwarm => Type == ServerType.SwarmManager;
+    
+    /// <summary>
+    /// Whether this server can deploy applications as Swarm services.
+    /// </summary>
+    public bool CanDeployAsService => Type == ServerType.SwarmManager;
+    
+    /// <summary>
+    /// Whether this server can deploy applications as standalone containers.
+    /// Swarm workers cannot deploy standalone containers (only services assigned by managers).
+    /// </summary>
+    public bool CanDeployAsContainer => Type == ServerType.Standalone || Type == ServerType.SwarmManager;
 }

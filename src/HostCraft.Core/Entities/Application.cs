@@ -41,6 +41,8 @@ public class Application
     
     public int Replicas { get; set; } = 1;
     
+    public DeploymentMode DeploymentMode { get; set; } = DeploymentMode.Container;
+    
     public long? MemoryLimitBytes { get; set; }
     
     public long? CpuLimit { get; set; }
@@ -88,4 +90,14 @@ public class Application
     
     // Computed properties
     public bool IsSwarmMode => Server.IsSwarm;
+    
+    /// <summary>
+    /// Whether this application should be deployed as a Swarm service.
+    /// </summary>
+    public bool DeployAsService => DeploymentMode == DeploymentMode.Service && Server.Type == ServerType.SwarmManager;
+    
+    /// <summary>
+    /// Whether replicas/scaling is supported for this deployment.
+    /// </summary>
+    public bool SupportsScaling => DeployAsService;
 }
