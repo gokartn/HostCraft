@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Http;
 using HostCraft.Core.Entities;
 using HostCraft.Core.Enums;
 using HostCraft.Core.Interfaces;
