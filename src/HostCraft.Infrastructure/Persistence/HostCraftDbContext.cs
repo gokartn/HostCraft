@@ -21,6 +21,8 @@ public class HostCraftDbContext : DbContext
     public DbSet<Backup> Backups => Set<Backup>();
     public DbSet<HealthCheck> HealthChecks => Set<HealthCheck>();
     public DbSet<Volume> Volumes => Set<Volume>();
+    public DbSet<GitProvider> GitProviders => Set<GitProvider>();
+    public DbSet<Certificate> Certificates => Set<Certificate>();
     
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
