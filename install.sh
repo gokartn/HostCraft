@@ -156,7 +156,11 @@ echo "🧹 Cleaning up existing containers..."
 docker compose down 2>/dev/null || true
 echo ""
 
-# Start the containers
+# Rebuild and start the containers
+echo "🔨 Building Docker images..."
+docker compose build --no-cache
+echo ""
+
 echo "🐳 Starting Docker containers..."
 if [ "$CONFIGURE_LOCALHOST" = "true" ]; then
     if [ "$LOCALHOST_SWARM_MANAGER" = "true" ]; then
