@@ -164,9 +164,11 @@ public class ProxyService : IProxyService
                 "--providers.docker.exposedbydefault=false",
                 "--entrypoints.web.address=:80",
                 "--entrypoints.websecure.address=:443",
-                "--certificatesresolvers.letsencrypt.acme.tlschallenge=true",
-                "--certificatesresolvers.letsencrypt.acme.email=admin@hostcraft.local",
-                "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
+                "--certificatesresolvers.letsencrypt.acme.httpchallenge=true",
+                "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web",
+                $"--certificatesresolvers.letsencrypt.acme.email={server.DefaultLetsEncryptEmail ?? "admin@hostcraft.local"}",
+                "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json",
+                "--certificatesresolvers.letsencrypt.acme.caserver=https://acme-v02.api.letsencrypt.org/directory"
             },
             HostConfig = new HostConfig
             {

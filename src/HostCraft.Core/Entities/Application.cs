@@ -49,6 +49,31 @@ public class Application
     // Deployment configuration
     public string? Domain { get; set; }
     
+    /// <summary>
+    /// Additional domains (aliases) for this application
+    /// </summary>
+    public string? AdditionalDomains { get; set; } // Comma-separated
+    
+    /// <summary>
+    /// Enable HTTPS with automatic SSL certificate provisioning
+    /// </summary>
+    public bool EnableHttps { get; set; } = true;
+    
+    /// <summary>
+    /// Force redirect HTTP to HTTPS
+    /// </summary>
+    public bool ForceHttps { get; set; } = true;
+    
+    /// <summary>
+    /// Let's Encrypt email for certificate notifications
+    /// </summary>
+    public string? LetsEncryptEmail { get; set; }
+    
+    /// <summary>
+    /// Path for HTTP-01 challenge (used by cert providers)
+    /// </summary>
+    public string? CertificateChallengePath { get; set; }
+    
     public int? Port { get; set; }
     
     public int Replicas { get; set; } = 1;
@@ -101,6 +126,8 @@ public class Application
     public ICollection<Backup> Backups { get; set; } = new List<Backup>();
     
     public ICollection<HealthCheck> HealthChecks { get; set; } = new List<HealthCheck>();
+    
+    public ICollection<Certificate> Certificates { get; set; } = new List<Certificate>();
     
     // Computed properties
     public bool IsSwarmMode => Server.IsSwarm;

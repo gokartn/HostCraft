@@ -25,6 +25,21 @@ public class Server
     
     public ProxyType ProxyType { get; set; } = ProxyType.None;
     
+    /// <summary>
+    /// Default Let's Encrypt email for all applications on this server
+    /// </summary>
+    public string? DefaultLetsEncryptEmail { get; set; }
+    
+    /// <summary>
+    /// Proxy/web server version (e.g., "v3.2.1" for Traefik)
+    /// </summary>
+    public string? ProxyVersion { get; set; }
+    
+    /// <summary>
+    /// When the proxy was last deployed/updated
+    /// </summary>
+    public DateTime? ProxyDeployedAt { get; set; }
+    
     public string? SwarmJoinToken { get; set; }
     
     public string? SwarmManagerAddress { get; set; }
