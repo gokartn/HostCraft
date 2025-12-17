@@ -181,34 +181,36 @@
                     </div>
                 </div>
                 
-                @if (!string.IsNullO compact-card">
+                @if (!string.IsNullOrEmpty(app.ContainerId) || !string.IsNullOrEmpty(app.ServiceId))
+                {
+                    <div class="card compact-card">
                         <div class="card-header">
                             <h3>Runtime</h3>
-                        </div
-                    <div class="card">
-                        <h3>Runtime Info</h3>
-                        @if (!string.IsNullOrEmpty(app.ServiceId))
-                        {
-                            <div class="info-row">
-                                <span class="label">Type:</span>
-                                <span class="value">🐝 Swarm Service</span>
-                            </div>
-                            <div class="info-row">
-                                <span class="label">Service ID:</span>
-                                <span class="value code">@app.ServiceId</span>
-                            </div>
-                        }
-                        @if (!string.IsNullOrEmpty(app.ContainerId))
-                        {
-                            <div class="info-row">
-                                <span class="label">Type:</span>
-                                <span class="value">🐳 Container</span>
-                            </div>
-                            <div class="info-row">
-                                <span class="label">Container ID:</span>
-                                <span class="value code">@app.ContainerId.Substring(0, 12)</span>
-                            </div>
-                        }
+                        </div>
+                        <div class="info-grid compact">
+                            @if (!string.IsNullOrEmpty(app.ServiceId))
+                            {
+                                <div class="info-item">
+                                    <span class="label">Type</span>
+                                    <span class="value">🐝 Swarm Service</span>
+                                </div>
+                                <div class="info-item">
+                                    <span class="label">Service ID</span>
+                                    <span class="value">@app.ServiceId</span>
+                                </div>
+                            }
+                            @if (!string.IsNullOrEmpty(app.ContainerId))
+                            {
+                                <div class="info-item">
+                                    <span class="label">Type</span>
+                                    <span class="value">🐳 Container</span>
+                                </div>
+                                <div class="info-item">
+                                    <span class="label">Container ID</span>
+                                    <span class="value">@app.ContainerId.Substring(0, 12)</span>
+                                </div>
+                            }
+                        </div>
                     </div>
                 }
             </div>
