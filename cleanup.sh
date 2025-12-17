@@ -25,10 +25,16 @@ while true; do
 done
 
 echo ""
-echo "🗑️  Step 1: Stopping and removing Docker stack..."
+echo "🗑️  Step 1: Stopping and removing Docker stacks..."
 if docker stack ls | grep -q hostcraft; then
     docker stack rm hostcraft
-    echo "Waiting for stack removal to complete..."
+    echo "Waiting for HostCraft stack removal to complete..."
+    sleep 10
+fi
+
+if docker stack ls | grep -q traefik; then
+    docker stack rm traefik
+    echo "Waiting for Traefik stack removal to complete..."
     sleep 10
 fi
 
@@ -47,8 +53,14 @@ echo "🗑️  Step 4: Removing all HostCraft volumes..."
 docker volume ls --filter "name=hostcraft" --format "{{.Name}}" | xargs -r docker volume rm 2>/dev/null || true
 
 echo ""
-echo "🗑️  Step 5: Removing all HostCraft networks..."
+echo "🗑️  Step 5: Removing Traefik resources..."
+docker ps -a --filter "name=traefik" --format "{{.ID}}" | xargs -r docker rm -f 2>/dev/null || true
+docker volume ls --filter "name=traefik" --format "{{.Name}}" | xargs -r docker volume rm 2>/dev/null || true
+
+echo ""7
+echo "🗑️  Step 6: Removing all HostCraft networks..."
 docker network ls --filter "name=hostcraft" --format "{{.Name}}" | xargs -r docker network rm 2>/dev/null || true
+docker network ls --filter "name=traefik-public" --format "{{.Name}}" | xargs -r docker network rm 2>/dev/null || true
 
 echo ""
 echo "🗑️  Step 6: Removing application data directories..."
@@ -59,21 +71,22 @@ sudo rm -rf /var/hostcraft 2>/dev/null || true
 sudo rm -rf ~/hostcraft-data 2>/dev/null || true
 
 echo ""
-echo "🗑️  Step 7: Removing configuration files..."
+echo "🗑️  Step 8: Removing configuration files..."
 sudo rm -rf /etc/hostcraft 2>/dev/null || true
 sudo rm -f /etc/systemd/system/hostcraft.service 2>/dev/null || true
 sudo systemctl daemon-reload 2>/dev/null || true
 
 echo ""
-echo "🗑️  Step 8: Removing log files..."
+echo "🗑️  Step 9: Removing log files..."
 sudo rm -rf /var/log/hostcraft 2>/dev/null || true
 
 echo ""
-echo "🗑️  Step 9: Cleaning up images (optional)..."
+echo "🗑️  Step 10: Cleaning up images (optional)..."
 read -p "Do you want to remove HostCraft Docker images? (yes/no): " remove_images
 case $remove_images in
     yes|y|Y|YES)
         docker images --filter "reference=hostcraft*" --format "{{.ID}}" | xargs -r docker rmi -f 2>/dev/null || true
+        docker images --filter "reference=traefik*" --format "{{.ID}}" | xargs -r docker rmi -f 2>/dev/null || true
         echo "✅ Images removed"
         ;;
     *)
@@ -81,7 +94,7 @@ case $remove_images in
         ;;
 esac
 
-echo ""
+echo ""1
 echo "🗑️  Step 10: Removing installation directory..."
 read -p "Remove the HostCraft installation directory ($(pwd))? (yes/no): " remove_dir
 case $remove_dir in
@@ -96,7 +109,7 @@ case $remove_dir in
         ;;
 esac
 
-echo ""
+echo ""and Traefik have
 echo "✅ HostCraft has been completely removed from the system!"
 echo ""
 echo "All containers, volumes, networks, and data have been deleted."
