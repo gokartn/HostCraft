@@ -418,3 +418,8 @@ bfg.jar
 
 # Project context files
 HOSTCRAFT_PROJECT_CONTEXT.md
+
+# Environment files (contains sensitive data)
+.env
+.env.local
+.env.production

@@ -285,7 +285,7 @@
             var settings = await Http.GetFromJsonAsync<SystemSettingsDto>("api/systemsettings");
             if (settings != null)
             {
-                hostcraftDomain = settings.HostCraftDomain ?? "91.99.81.132:5000";
+                hostcraftDomain = settings.HostCraftDomain ?? "localhost:5000";
                 hostcraftEnableHttps = settings.HostCraftEnableHttps;
                 hostcraftLetsEncryptEmail = settings.HostCraftLetsEncryptEmail;
             }
@@ -294,7 +294,7 @@
         {
             domainError = $"Failed to load domain configuration: {ex.Message}";
             // Set defaults
-            hostcraftDomain = "91.99.81.132:5000";
+            hostcraftDomain = "localhost:5000";
             hostcraftEnableHttps = false;
         }
     }
@@ -336,7 +336,7 @@
                 var result = await response.Content.ReadFromJsonAsync<ConfigureHostCraftResponse>();
                 if (result?.Success == true)
                 {
-                    domainSuccess = result.Message + " Note: You may need to restart the web service for changes to take full effect.";
+                    domainSuccess = result.Message;
                 }
                 else
                 {

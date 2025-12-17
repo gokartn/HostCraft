@@ -95,6 +95,34 @@ if [ "$init_swarm" = "yes" ]; then
         fi
     fi
     echo ""
+    
+    # Ask about Traefik setup if swarm is enabled
+    echo "Traefik Reverse Proxy Configuration:"
+    echo "Traefik provides automatic SSL certificates (Let's Encrypt) and domain routing."
+    echo ""
+    while true; do
+        read -p "Would you like to set up Traefik reverse proxy? (yes/no): " setup_traefik
+        case $setup_traefik in
+            yes|y|Y|YES) setup_traefik="yes"; break;;
+            no|n|N|NO) setup_traefik="no"; break;;
+            *) echo "❌ Invalid input. Please enter 'yes' or 'no'.";;
+        esac
+    done
+    
+    if [ "$setup_traefik" = "yes" ]; then
+        echo ""
+        read -p "📧 Enter your email for Let's Encrypt notifications: " TRAEFIK_EMAIL
+        
+        if [ -z "$TRAEFIK_EMAIL" ]; then
+            echo "⚠️  No email provided. Skipping Traefik setup."
+            setup_traefik="no"
+        else
+            echo ""
+            read -p "🌐 Enter domain for Traefik dashboard (optional, press Enter to skip): " TRAEFIK_DASHBOARD_DOMAIN
+            echo ""
+        fi
+    fi
+    echo ""
 fi
 
 # Ask about localhost server configuration
@@ -381,6 +409,130 @@ fi
 sleep 3
 echo ""
 
+# Setup Traefik if requested
+if [ "$setup_traefik" = "yes" ] && [ -n "$TRAEFIK_EMAIL" ]; then
+    echo "🌐 Setting up Traefik reverse proxy..."
+    echo ""
+    
+    # Create Traefik network
+    echo "📦 Creating traefik-public network..."
+    docker network create --driver=overlay traefik-public 2>/dev/null || echo "   Network already exists"
+    
+    # Create Traefik compose file
+    TRAEFIK_COMPOSE="/tmp/traefik-compose.yml"
+    
+    cat > "$TRAEFIK_COMPOSE" <<EOF
+version: '3.8'
+
+services:
+  traefik:
+if [ "$setup_traefik" = "yes" ]; then
+    echo "   Web UI: Configure domain via Settings → HostCraft Domain & SSL"
+    echo "   Direct:  http://$(hostname -I | awk '{print $1}'):5000"
+    echo "   API:     http://$(hostname -I | awk '{print $1}'):5100"
+else
+    echo "   Web UI: http://$(hostname -I | awk '{print $1}'):5000"
+    echo "   API:    http://$(hostname -I | awk '{print $1}'):5100"
+fi
+      # Docker provider
+      - --providers.docker=true
+      - --providers.docker.swarmMode=true
+      - --providers.docker.exposedByDefault=false
+      - --providers.docker.network=traefik-public
+      
+      # Entrypoints
+      - --entrypoints.web.address=:80
+      - --entrypoints.websecure.address=:443
+      
+      # HTTP to HTTPS redirect
+      - --entrypoints.web.http.redirections.entrypoint.to=websecure
+      - --entrypoints.web.http.redirections.entrypoint.scheme=https
+      
+      # API (dashboard)
+      - --api.dashboard=true
+      
+      # Let's Encrypt
+      - --certificatesresolvers.letsencrypt.acme.email=${TRAEFIK_EMAIL}
+      - --certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json
+      - --certificatesresolvers.letsencrypt.acme.httpchallenge=true
+      - --certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web
+      
+      # Logging
+      - --log.level=INFO
+      - --accesslog=true
+    
+    ports:
+      - "80:80"
+      - "443:443"
+    
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - traefik-certificates:/letsencrypt
+    
+    networks:
+      - traefik-public
+    
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: any
+        delay: 5s
+        max_attempts: 3
+      labels:
+        - "traefik.enable=true"
+EOF
+
+    # Add dashboard configuration if domain provided
+    if [ -n "$TRAEFIK_DASHBOARD_DOMAIN" ]; then
+        cat >> "$TRAEFIK_COMPOSE" <<EOF
+        - "traefik.http.routers.traefik-dashboard.rule=Host(\`${TRAEFIK_DASHBOARD_DOMAIN}\`)"
+        - "traefik.http.routers.traefik-dashboard.entrypoints=websecure"
+        - "traefik.http.routers.traefik-dashboard.tls.certresolver=letsencrypt"
+        - "traefik.http.routers.traefik-dashboard.service=api@internal"
+        - "traefik.http.services.traefik-dashboard.loadbalancer.server.port=8080"
+EOF
+    fi
+
+    # Complete the compose file
+    cat >> "$TRAEFIK_COMPOSE" <<EOF
+
+volumes:
+  traefik-certificates:
+    driver: local
+
+networks:
+  traefik-public:
+    external: true
+EOF
+
+    echo "🚀 Deploying Traefik..."
+    docker stack deploy -c "$TRAEFIK_COMPOSE" traefik
+    
+    echo ""
+    echo "⏳ Waiting for Traefik to start..."
+    sleep 5
+    
+    # Check if Traefik is running
+    if docker service ls | grep -q "traefik_traefik"; then
+        echo "✅ Traefik deployed successfully!"
+        
+        # Connect HostCraft services to Traefik network
+        echo "🔗 Connecting HostCraft services to Traefik network..."
+        docker service update --network-add traefik-public hostcraft_hostcraft-web 2>/dev/null || true
+        echo "✅ HostCraft web service connected to Traefik"
+        echo ""
+    else
+        echo "⚠️  Traefik deployment may have issues. Check logs: docker service logs traefik_traefik"
+    fi
+    
+    # Cleanup
+    rm -f "$TRAEFIK_COMPOSE"
+fi
+
 # Check if everything is running
 echo "📊 Deployment Status:"
 if [ "$SWARM_ACTIVE" = "true" ]; then
@@ -414,6 +566,25 @@ if [ "$SWARM_ACTIVE" = "true" ]; then
             echo "🖥️  Localhost server configured as Docker Swarm Manager!"
             echo "📋 Get worker join token: docker swarm join-token worker"
             echo "📋 Get manager join token: docker swarm join-token manager"
+    echo ""
+    
+    if [ "$setup_traefik" = "yes" ]; then
+        echo "🌐 Traefik Reverse Proxy:"
+        echo "   ✅ Traefik is running and ready for domain configuration"
+        echo "   📧 Let's Encrypt Email: $TRAEFIK_EMAIL"
+        if [ -n "$TRAEFIK_DASHBOARD_DOMAIN" ]; then
+            echo "   📊 Dashboard: https://${TRAEFIK_DASHBOARD_DOMAIN}/dashboard/"
+            echo "      (SSL certificate will be provisioned automatically)"
+        fi
+        echo ""
+        echo "   Next steps:"
+        echo "   1. Ensure your domain DNS points to this server"
+        echo "   2. Go to Settings → HostCraft Domain & SSL"
+        echo "   3. Enter your domain and enable HTTPS"
+        echo "   4. HostCraft will automatically configure and restart"
+        echo ""
+        echo "   📝 Traefik logs: docker service logs traefik_traefik -f"
+    fi
         else
             echo "🖥️  Localhost server has been auto-configured and is ready to use!"
         fi
