@@ -99,7 +99,8 @@
                         </div>
                     </div>
                 }
-                 compact-card">
+                
+                <div class="card compact-card">
                     <div class="card-header">
                         <h3>Deployment History</h3>
                     </div>
@@ -132,8 +133,7 @@
                                     </div>
                                     @if (deployment.Status == DeploymentStatus.Failed && !string.IsNullOrEmpty(deployment.ErrorMessage))
                                     {
-                                        <div class="deployment-error">@deployment.ErrorMessage    <strong>Error:</strong> @deployment.ErrorMessage
-                                        </div>
+                                        <div class="deployment-error">@deployment.ErrorMessage</div>
                                     }
                                 </div>
                             }
