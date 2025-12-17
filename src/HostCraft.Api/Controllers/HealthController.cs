@@ -12,15 +12,18 @@ public class HealthController : ControllerBase
 {
     private readonly HostCraftDbContext _context;
     private readonly IDockerService _dockerService;
+    private readonly ISshService _sshService;
     private readonly ILogger<HealthController> _logger;
     
     public HealthController(
         HostCraftDbContext context,
         IDockerService dockerService,
+        ISshService sshService,
         ILogger<HealthController> logger)
     {
         _context = context;
         _dockerService = dockerService;
+        _sshService = sshService;
         _logger = logger;
     }
     
@@ -120,17 +123,34 @@ public class HealthController : ControllerBase
                 return metrics;
             }
             
-            // TODO: Update to use SSH-based Docker commands instead of TCP
-            // For now, return simulated metrics to avoid TCP connection errors
-            var random = new Random(serverId); // Use serverId as seed for consistency
+            // Get actual system metrics
+            var systemInfo = await _dockerService.GetSystemInfoAsync(server);
             
-            metrics.ContainerCount = random.Next(0, 5);
-            metrics.RunningContainers = random.Next(0, metrics.ContainerCount + 1);
-            metrics.CpuUsagePercent = random.Next(5, 60);
-            metrics.MemoryUsagePercent = random.Next(20, 80);
-            metrics.DiskUsagePercent = random.Next(30, 70);
-            metrics.TotalMemoryMB = 8192; // 8GB
-            metrics.UsedMemoryMB = (long)(metrics.TotalMemoryMB * metrics.MemoryUsagePercent / 100);
+            // Get container counts
+            var containers = await _dockerService.ListContainersAsync(server, showAll: true);
+            metrics.ContainerCount = containers.Count;
+            metrics.RunningContainers = containers.Count(c => c.State == "running");
+            
+            // Get CPU and Memory usage from the server
+            try
+            {
+                var cpuMemory = await GetServerResourceUsageAsync(server);
+                metrics.CpuUsagePercent = cpuMemory.CpuUsage;
+                metrics.MemoryUsagePercent = cpuMemory.MemoryUsage;
+                metrics.TotalMemoryMB = cpuMemory.TotalMemoryMB;
+                metrics.UsedMemoryMB = cpuMemory.UsedMemoryMB;
+                metrics.DiskUsagePercent = cpuMemory.DiskUsage;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to get resource usage for server {ServerId}, using defaults", serverId);
+                metrics.CpuUsagePercent = 0;
+                metrics.MemoryUsagePercent = 0;
+                metrics.DiskUsagePercent = 0;
+                metrics.TotalMemoryMB = 0;
+                metrics.UsedMemoryMB = 0;
+            }
+            
             metrics.Status = ServerStatus.Online;
         }
         catch (Exception ex)
@@ -143,32 +163,36 @@ public class HealthController : ControllerBase
         return metrics;
     }
 
-    private double CalculateCpuUsage(object systemInfo)
+    private async Task<(double CpuUsage, double MemoryUsage, double DiskUsage, long TotalMemoryMB, long UsedMemoryMB)> 
+        GetServerResourceUsageAsync(HostCraft.Core.Entities.Server server)
     {
-        // In a real implementation, you'd get actual CPU stats from Docker
-        // For now, return a simulated value
-        var random = new Random();
-        return random.Next(5, 60); // 5-60% CPU usage
-    }
-
-    private double CalculateMemoryUsage(object systemInfo)
-    {
-        // In a real implementation, you'd calculate from Docker stats
-        var random = new Random();
-        return random.Next(30, 80); // 30-80% memory usage
-    }
-
-    private double CalculateDiskUsage(object systemInfo)
-    {
-        // In a real implementation, you'd get disk stats
-        var random = new Random();
-        return random.Next(20, 70); // 20-70% disk usage
-    }
-
-    private long GetTotalMemory(object systemInfo)
-    {
-        // In a real implementation, extract from Docker system info
-        return 16384; // Default 16GB for simulation
+        try
+        {
+            // Get CPU usage (1 second average)
+            var cpuCommand = "top -bn1 | grep 'Cpu(s)' | sed 's/.*, *\\([0-9.]*\\)%* id.*/\\1/' | awk '{print 100 - $1}'";
+            var cpuResult = await _sshService.ExecuteCommandAsync(server, cpuCommand);
+            var cpuUsage = cpuResult.ExitCode == 0 && double.TryParse(cpuResult.Output.Trim(), out var cpu) ? cpu : 0;
+            
+            // Get memory usage
+            var memCommand = "free -m | awk 'NR==2{printf \"%s %s\", $2,$3}'";
+            var memResult = await _sshService.ExecuteCommandAsync(server, memCommand);
+            var memParts = memResult.Output.Trim().Split(' ');
+            var totalMemory = memParts.Length > 0 && long.TryParse(memParts[0], out var total) ? total : 0;
+            var usedMemory = memParts.Length > 1 && long.TryParse(memParts[1], out var used) ? used : 0;
+            var memoryUsage = totalMemory > 0 ? (double)usedMemory / totalMemory * 100 : 0;
+            
+            // Get disk usage
+            var diskCommand = "df -h / | awk 'NR==2{print $5}' | sed 's/%//'";
+            var diskResult = await _sshService.ExecuteCommandAsync(server, diskCommand);
+            var diskUsage = diskResult.ExitCode == 0 && double.TryParse(diskResult.Output.Trim(), out var disk) ? disk : 0;
+            
+            return (cpuUsage, memoryUsage, diskUsage, totalMemory, usedMemory);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to get resource usage for server {ServerId}", server.Id);
+            return (0, 0, 0, 0, 0);
+        }
     }
 }
 
