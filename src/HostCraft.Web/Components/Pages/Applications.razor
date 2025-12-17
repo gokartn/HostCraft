@@ -42,7 +42,7 @@
     }
     else
     {
-        <div class="container-grid">
+        <div class="apps-grid">
             @foreach (var app in applications)
             {
                 <div class="app-card @GetStatusClass(app.Status)">
@@ -51,32 +51,28 @@
                             <h3>@app.Name</h3>
                             @if (!string.IsNullOrEmpty(app.Description))
                             {
-                                <p class="app-description">@app.Description</p>
+                                <span class="app-description">@app.Description</span>
                             }
                         </div>
                         <span class="status-badge @GetStatusClass(app.Status)">
-                            @GetStatusIcon(app.Status) @app.Status
+                            @GetStatusIcon(app.Status)
                         </span>
                     </div>
                     
                     <div class="app-info">
-                        <div class="info-row">
-                            <span class="label">Server:</span>
-                            <span class="value">@app.ServerName</span>
-                        </div>
-                        <div class="info-row">
-                            <span class="label">Project:</span>
-                            <span class="value">@app.ProjectName</span>
-                        </div>
-                        <div class="info-row">
-                            <span class="label">Image:</span>
+                        <div class="info-item">
+                            <span class="label">Image</span>
                             <span class="value">@app.DockerImage</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="label">Server</span>
+                            <span class="value">@app.ServerName</span>
                         </div>
                         @if (app.LastDeployedAt.HasValue)
                         {
-                            <div class="info-row">
-                                <span class="label">Last Deployed:</span>
-                                <span class="value">@app.LastDeployedAt.Value.ToString("g")</span>
+                            <div class="info-item">
+                                <span class="label">Deployed</span>
+                                <span class="value">@app.LastDeployedAt.Value.ToString("MM/dd HH:mm")</span>
                             </div>
                         }
                     </div>
