@@ -30,7 +30,7 @@ public class SystemSettingsController : ControllerBase
     [HttpGet]
     public async Task<ActionResult<SystemSettingsDto>> GetSettings()
     {
-        var settings = await _context.SystemSettings.FirstOrDefaultAsync();
+        var settings = await _context.SystemSettings.FindAsync(1);
         
         if (settings == null)
         {
@@ -83,12 +83,13 @@ public class SystemSettingsController : ControllerBase
                 });
             }
 
-            // Get or create settings
-            var settings = await _context.SystemSettings.FirstOrDefaultAsync();
+            // Get or create settings (singleton with Id = 1)
+            var settings = await _context.SystemSettings.FindAsync(1);
             if (settings == null)
             {
                 settings = new SystemSettings
                 {
+                    Id = 1,
                     CreatedAt = DateTime.UtcNow
                 };
                 _context.SystemSettings.Add(settings);

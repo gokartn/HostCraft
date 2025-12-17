@@ -40,6 +40,7 @@ public class HostCraftDbContext : DbContext
         ConfigureEnvironmentVariable(modelBuilder);
         ConfigurePrivateKey(modelBuilder);
         ConfigureUser(modelBuilder);
+        ConfigureSystemSettings(modelBuilder);
     }
     
     private void ConfigureServer(ModelBuilder modelBuilder)
@@ -269,6 +270,20 @@ public class HostCraftDbContext : DbContext
                 .WithMany()
                 .HasForeignKey(e => e.ServerId)
                 .OnDelete(DeleteBehavior.Restrict);
+        });
+    }
+    
+    private void ConfigureSystemSettings(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<SystemSettings>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedNever(); // We'll use Id = 1 always (singleton)
+            entity.Property(e => e.HostCraftDomain).HasMaxLength(255);
+            entity.Property(e => e.HostCraftLetsEncryptEmail).HasMaxLength(255);
+            entity.Property(e => e.CertificateStatus).HasMaxLength(100);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
         });
     }
 }
