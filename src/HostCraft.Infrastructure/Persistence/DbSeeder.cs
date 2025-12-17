@@ -56,7 +56,7 @@ public static class DbSeeder
             Port = 22, // Not actually used for localhost
             Username = Environment.UserName,
             Status = ServerStatus.Online,
-            Type = ServerType.Standalone,
+            Type = isSwarmManager ? ServerType.SwarmManager : ServerType.Standalone,
             ProxyType = ProxyType.None,
             RegionId = null, // No region assigned by default
             PrivateKeyId = null, // No SSH key needed for localhost
