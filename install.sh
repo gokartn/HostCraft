@@ -580,20 +580,26 @@ EOF
                     fi
                     
                     # Wait for API to be ready (health check)
-                    echo "⏳ Waiting for HostCraft API to be ready..."
-                    max_attempts=30
+                    echo "⏳ Waiting for HostCraft API to be ready (this may take 30-60 seconds)..."
+                    max_attempts=60
                     attempt=0
                     api_ready=false
+                    success_count=0
                     
                     while [ $attempt -lt $max_attempts ]; do
-                        # Try external port first (5100), then try service name with internal port
-                        if curl -sf "http://localhost:5100/health" > /dev/null 2>&1 || \
-                           curl -sf "http://hostcraft-api:8080/health" > /dev/null 2>&1; then
-                            api_ready=true
-                            break
+                        # Check if health endpoint responds (need 3 successful checks in a row)
+                        if curl -sf --max-time 2 "http://localhost:5100/health" > /dev/null 2>&1; then
+                            success_count=$((success_count + 1))
+                            if [ $success_count -ge 3 ]; then
+                                api_ready=true
+                                break
+                            fi
+                            echo -n "✓"
+                        else
+                            success_count=0
+                            echo -n "."
                         fi
                         attempt=$((attempt + 1))
-                        echo -n "."
                         sleep 2
                     done
                     echo ""
