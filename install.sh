@@ -586,7 +586,9 @@ EOF
                     api_ready=false
                     
                     while [ $attempt -lt $max_attempts ]; do
-                        if curl -sf "http://localhost:5100/health" > /dev/null 2>&1; then
+                        # Try external port first (5100), then try service name with internal port
+                        if curl -sf "http://localhost:5100/health" > /dev/null 2>&1 || \
+                           curl -sf "http://hostcraft-api:8080/health" > /dev/null 2>&1; then
                             api_ready=true
                             break
                         fi
@@ -602,7 +604,14 @@ EOF
                         # Save domain configuration to database via API
                         echo "💾 Saving domain configuration to database..."
                         
-                        api_response=$(curl -s -X POST "http://localhost:5100/api/systemsettings" \
+                        # Try localhost:5100 first, fallback to service name
+                        api_url="http://localhost:5100/api/systemsettings"
+                        if ! curl -sf "http://localhost:5100/health" > /dev/null 2>&1; then
+                            # Use Docker service name with internal port
+                            api_url="http://hostcraft-api:8080/api/systemsettings"
+                        fi
+                        
+                        api_response=$(curl -s -X POST "$api_url" \
                             -H "Content-Type: application/json" \
                             -d "{\"domain\":\"$hostcraft_domain\",\"enableHttps\":$([ "$enable_https" = "yes" ] && echo "true" || echo "false"),\"letsEncryptEmail\":\"$letsencrypt_email\"}" \
                             -w "\n%{http_code}" -o /tmp/hostcraft_api_response.txt)
