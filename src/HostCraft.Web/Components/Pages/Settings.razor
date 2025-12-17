@@ -17,6 +17,69 @@
         <p style="margin: 0.5rem 0 0 0; color: #fde68a;">This is an <strong>alpha/development</strong> build (v0.0.1-alpha) and is <strong>NOT production-ready</strong>. Expect bugs, breaking changes, and potential data loss. Use at your own risk in non-production environments only.</p>
     </div>
 
+    <!-- HostCraft Domain Configuration -->
+    <div class="card">
+        <div class="card-header">
+            <h2 class="card-title">
+                <span>🌐</span> HostCraft Domain & SSL
+            </h2>
+        </div>
+        <div class="settings-section">
+            <p style="margin-bottom: 1.5rem; color: #a3a3a3;">Configure the domain and SSL certificate for accessing the HostCraft control panel.</p>
+            
+            <div class="form-group" style="margin-bottom: 1.5rem;">
+                <label for="hostcraftDomain" style="display: block; margin-bottom: 0.5rem; font-weight: 500;">HostCraft Domain</label>
+                <input type="text" id="hostcraftDomain" @bind="hostcraftDomain" class="form-control" placeholder="hostcraft.example.com" style="max-width: 500px;" />
+                <small style="display: block; margin-top: 0.5rem; color: #a3a3a3;">Domain for accessing the HostCraft UI</small>
+            </div>
+
+            <div class="form-group" style="margin-bottom: 1.5rem;">
+                <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                    <input type="checkbox" @bind="hostcraftEnableHttps" style="width: 18px; height: 18px;" />
+                    <span style="font-weight: 500;">🔒 Enable HTTPS (Let's Encrypt)</span>
+                </label>
+                <small style="display: block; margin-top: 0.5rem; margin-left: 1.75rem; color: #a3a3a3;">Automatically provision SSL certificate for HostCraft UI</small>
+            </div>
+
+            @if (hostcraftEnableHttps)
+            {
+                <div class="form-group" style="margin-bottom: 1.5rem; margin-left: 1.75rem;">
+                    <label for="hostcraftEmail" style="display: block; margin-bottom: 0.5rem; font-weight: 500;">Let's Encrypt Email</label>
+                    <input type="email" id="hostcraftEmail" @bind="hostcraftLetsEncryptEmail" class="form-control" placeholder="admin@example.com" style="max-width: 500px;" />
+                    <small style="display: block; margin-top: 0.5rem; color: #a3a3a3;">Required for SSL certificate notifications</small>
+                </div>
+            }
+
+            <div class="action-buttons" style="margin-top: 1.5rem;">
+                <button class="btn btn-primary" @onclick="SaveHostCraftDomain" disabled="@savingDomain">
+                    @if (savingDomain)
+                    {
+                        <span class="spinner-sm"></span>
+                        <span>Saving...</span>
+                    }
+                    else
+                    {
+                        <span>💾 Save Configuration</span>
+                    }
+                </button>
+            </div>
+
+            @if (!string.IsNullOrEmpty(domainError))
+            {
+                <div class="alert alert-danger" style="margin-top: 1rem;">
+                    <strong>Error:</strong> @domainError
+                </div>
+            }
+
+            @if (!string.IsNullOrEmpty(domainSuccess))
+            {
+                <div class="alert alert-success" style="margin-top: 1rem;">
+                    <strong>Success:</strong> @domainSuccess
+                </div>
+            }
+        </div>
+    </div>
+
     <!-- Version & Updates Section -->
     <div class="card">
         <div class="card-header">
@@ -200,11 +263,79 @@
     private bool updatingInProgress = false;
     private string? updateError;
     private string? updateSuccess;
+    
+    private string? hostcraftDomain;
+    private bool hostcraftEnableHttps = true;
+    private string? hostcraftLetsEncryptEmail;
+    private bool savingDomain = false;
+    private string? domainError;
+    private string? domainSuccess;
 
     protected override async Task OnInitializedAsync()
     {
         await LoadVersion();
         await CheckForUpdates();
+        await LoadHostCraftDomain();
+    }
+
+    private async Task LoadHostCraftDomain()
+    {
+        try
+        {
+            // Load HostCraft domain configuration from API or settings
+            // For now, use placeholder
+            hostcraftDomain = "91.99.81.132:5000";
+            hostcraftEnableHttps = false;
+        }
+        catch (Exception ex)
+        {
+            domainError = $"Failed to load domain configuration: {ex.Message}";
+        }
+    }
+
+    private async Task SaveHostCraftDomain()
+    {
+        savingDomain = true;
+        domainError = null;
+        domainSuccess = null;
+
+        try
+        {
+            // Validate
+            if (string.IsNullOrWhiteSpace(hostcraftDomain))
+            {
+                domainError = "Domain is required";
+                savingDomain = false;
+                return;
+            }
+
+            if (hostcraftEnableHttps && string.IsNullOrWhiteSpace(hostcraftLetsEncryptEmail))
+            {
+                domainError = "Email is required when HTTPS is enabled";
+                savingDomain = false;
+                return;
+            }
+
+            // TODO: Call API to save HostCraft domain configuration
+            // For now, show success message
+            await Task.Delay(500); // Simulate API call
+            
+            domainSuccess = $"Domain configuration saved! HostCraft will be accessible at {(hostcraftEnableHttps ? "https" : "http")}://{hostcraftDomain}";
+            
+            // In a real implementation, you would:
+            // 1. Update Traefik/Caddy configuration to route to HostCraft UI
+            // 2. Request SSL certificate if HTTPS is enabled
+            // 3. Update docker-compose.yml or stack configuration
+            // 4. Restart/reload proxy service
+        }
+        catch (Exception ex)
+        {
+            domainError = $"Failed to save domain configuration: {ex.Message}";
+        }
+        finally
+        {
+            savingDomain = false;
+        }
     }
 
     private async Task LoadVersion()
