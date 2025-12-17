@@ -151,37 +151,99 @@ fi
 echo "✅ Docker and Docker Compose are installed"
 echo ""
 
-# Stop and remove existing containers (keeps data volumes)
-echo "🧹 Cleaning up existing containers..."
-docker compose down 2>/dev/null || true
+# Check if Swarm is active for deployment decision
+SWARM_ACTIVE="false"
+if docker info 2>/dev/null | grep -q "Swarm: active"; then
+    SWARM_ACTIVE="true"
+    echo "✅ Docker Swarm detected - will deploy as stack"
+else
+    echo "✅ Standalone Docker detected - will use compose"
+fi
 echo ""
 
-# Rebuild and start the containers
+# Stop and remove existing deployment (keeps data volumes)
+if [ "$SWARM_ACTIVE" = "true" ]; then
+    echo "🧹 Cleaning up existing stack..."
+    docker stack rm hostcraft 2>/dev/null || true
+    # Wait for stack removal to complete
+    echo "   Waiting for services to stop..."
+    sleep 10
+else
+    echo "🧹 Cleaning up existing containers..."
+    docker compose down 2>/dev/null || true
+fi
+echo ""
+
+# Rebuild and start the deployment
 echo "🔨 Building Docker images..."
 docker compose build --no-cache
 echo ""
 
-echo "🐳 Starting Docker containers..."
-if [ "$CONFIGURE_LOCALHOST" = "true" ]; then
-    if [ "$LOCALHOST_SWARM_MANAGER" = "true" ]; then
-        LOCALHOST_IS_SWARM_MANAGER=true docker compose up -d
+echo "🐳 Starting HostCraft..."
+if [ "$SWARM_ACTIVE" = "true" ]; then
+    # Deploy as Docker Swarm stack
+    echo "   Deploying as Docker Swarm stack..."
+    if [ "$CONFIGURE_LOCALHOST" = "true" ]; then
+        if [ "$LOCALHOST_SWARM_MANAGER" = "true" ]; then
+            LOCALHOST_IS_SWARM_MANAGER=true docker stack deploy -c docker-compose.yml hostcraft
+        else
+            docker stack deploy -c docker-compose.yml hostcraft
+        fi
     else
-        docker compose up -d
+        SKIP_LOCALHOST_SEED=true docker stack deploy -c docker-compose.yml hostcraft
     fi
+    echo "   ✅ Stack deployed successfully"
+    echo "   📊 Check status: docker stack ps hostcraft"
+    echo "   📋 View services: docker service ls"
 else
-    # Set environment variable to skip localhost configuration
-    SKIP_LOCALHOST_SEED=true docker compose up -d
+    # Deploy with Docker Compose
+    echo "   Deploying with Docker Compose..."
+    if [ "$CONFIGURE_LOCALHOST" = "true" ]; then
+        if [ "$LOCALHOST_SWARM_MANAGER" = "true" ]; then
+            LOCALHOST_IS_SWARM_MANAGER=true docker compose up -d
+        else
+            docker compose up -d
+        fi
+    else
+        SKIP_LOCALHOST_SEED=true docker compose up -d
+    fi
+    echo "   ✅ Containers started successfully"
 fi
 echo ""
 
 # Wait for PostgreSQL to be ready
 echo "⏳ Waiting for PostgreSQL to be ready..."
-sleep 5
-until docker exec hostcraft-postgres-1 pg_isready -U hostcraft &>/dev/null; do
-    echo "   PostgreSQL is not ready yet, waiting..."
-    sleep 2
-done
-echo "✅ PostgreSQL is ready"
+sleep 10
+
+if [ "$SWARM_ACTIVE" = "true" ]; then
+    # In swarm mode, find the postgres container dynamically
+    POSTGRES_CONTAINER=""
+    for i in {1..30}; do
+        POSTGRES_CONTAINER=$(docker ps --filter "label=com.docker.swarm.service.name=hostcraft_postgres" --format "{{.ID}}" | head -n 1)
+        if [ -n "$POSTGRES_CONTAINER" ]; then
+            break
+        fi
+        echo "   Waiting for postgres service to start... (attempt $i/30)"
+        sleep 2
+    done
+    
+    if [ -z "$POSTGRES_CONTAINER" ]; then
+        echo "⚠️  Warning: Could not find postgres container"
+    else
+        until docker exec "$POSTGRES_CONTAINER" pg_isready -U hostcraft &>/dev/null; do
+            echo "   PostgreSQL is not ready yet, waiting..."
+            sleep 2
+        done
+        echo "✅ PostgreSQL is ready"
+    fi
+else
+    # In compose mode, use the traditional container name
+    until docker exec hostcraft-postgres-1 pg_isready -U hostcraft &>/dev/null; do
+        echo "   PostgreSQL is not ready yet, waiting..."
+        sleep 2
+    done
+    echo "✅ PostgreSQL is ready"
+fi
 echo ""
 
 # Wait for migrations to complete
@@ -189,6 +251,13 @@ echo "⏳ Waiting for database migrations..."
 sleep 5
 echo "✅ Migrations completed"
 echo ""
+
+# Determine the postgres container name/id for both modes
+if [ "$SWARM_ACTIVE" = "true" ]; then
+    POSTGRES_TARGET=$(docker ps --filter "label=com.docker.swarm.service.name=hostcraft_postgres" --format "{{.ID}}" | head -n 1)
+else
+    POSTGRES_TARGET="hostcraft-postgres-1"
+fi
 
 # Apply PostgreSQL type fixes
 echo "🔧 Applying PostgreSQL type fixes..."
@@ -295,21 +364,35 @@ SELECT setval('"Volumes_Id_seq"', COALESCE((SELECT MAX("Id") FROM "Volumes"), 0)
 ALTER SEQUENCE "Volumes_Id_seq" OWNED BY "Volumes"."Id";
 SQL
 
-docker exec -i hostcraft-postgres-1 psql -U hostcraft -d hostcraft < /tmp/fix_postgres_types.sql > /dev/null 2>&1
+docker exec -i "$POSTGRES_TARGET" psql -U hostcraft -d hostcraft < /tmp/fix_postgres_types.sql > /dev/null 2>&1
 rm /tmp/fix_postgres_types.sql
 echo "✅ PostgreSQL type fixes applied"
 echo ""
 
 # Restart API to ensure everything is picked up
-echo "🔄 Restarting API container..."
-docker restart hostcraft-hostcraft-api-1 > /dev/null
+echo "🔄 Restarting API..."
+if [ "$SWARM_ACTIVE" = "true" ]; then
+    docker service update --force hostcraft_hostcraft-api > /dev/null 2>&1
+    echo "   ✅ API service restarted"
+else
+    docker restart hostcraft-hostcraft-api-1 > /dev/null
+    echo "   ✅ API container restarted"
+fi
 sleep 3
-echo "✅ API restarted"
 echo ""
 
 # Check if everything is running
-echo "📊 Container Status:"
-docker compose ps
+echo "📊 Deployment Status:"
+if [ "$SWARM_ACTIVE" = "true" ]; then
+    echo ""
+    echo "Services:"
+    docker service ls --filter label=hostcraft.managed=true
+    echo ""
+    echo "Tasks:"
+    docker stack ps hostcraft --no-trunc
+else
+    docker compose ps
+fi
 echo ""
 
 echo "✅ Installation completed successfully!"
@@ -318,16 +401,38 @@ echo "📍 Access your HostCraft instance:"
 echo "   Web UI: http://$(hostname -I | awk '{print $1}'):5000"
 echo "   API:    http://$(hostname -I | awk '{print $1}'):5100"
 echo ""
-if [ "$CONFIGURE_LOCALHOST" = "true" ]; then
-    if [ "$LOCALHOST_SWARM_MANAGER" = "true" ]; then
-        echo "🖥️  Localhost server configured as Docker Swarm Manager!"
-        echo "📋 Get worker join token: docker swarm join-token worker"
-        echo "📋 Get manager join token: docker swarm join-token manager"
-    else
-        echo "🖥️  Localhost server has been auto-configured and is ready to use!"
+
+if [ "$SWARM_ACTIVE" = "true" ]; then
+    echo "🐝 Deployment Mode: Docker Swarm Stack"
+    echo "   📊 Monitor services: docker service ls"
+    echo "   📋 View tasks: docker stack ps hostcraft"
+    echo "   📝 Service logs: docker service logs hostcraft_hostcraft-web"
+    echo "   🔄 Update service: docker service update hostcraft_hostcraft-web"
+    echo ""
+    if [ "$CONFIGURE_LOCALHOST" = "true" ]; then
+        if [ "$LOCALHOST_SWARM_MANAGER" = "true" ]; then
+            echo "🖥️  Localhost server configured as Docker Swarm Manager!"
+            echo "📋 Get worker join token: docker swarm join-token worker"
+            echo "📋 Get manager join token: docker swarm join-token manager"
+        else
+            echo "🖥️  Localhost server has been auto-configured and is ready to use!"
+        fi
     fi
+    echo ""
+    echo "✨ Services will automatically restart after reboot!"
 else
-    echo "🖥️  UI only mode - add your servers manually through the web interface."
+    echo "🐳 Deployment Mode: Docker Compose (Standalone)"
+    echo "   📊 Monitor containers: docker compose ps"
+    echo "   📝 View logs: docker compose logs -f"
+    echo "   🔄 Restart: docker compose restart"
+    echo ""
+    if [ "$CONFIGURE_LOCALHOST" = "true" ]; then
+        echo "🖥️  Localhost server has been auto-configured and is ready to use!"
+    else
+        echo "🖥️  UI only mode - add your servers manually through the web interface."
+    fi
+    echo ""
+    echo "✨ Containers will automatically restart after reboot (restart: unless-stopped)!"
 fi
 echo ""
 echo "🎉 HostCraft is ready to use!"
