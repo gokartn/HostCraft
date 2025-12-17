@@ -40,40 +40,42 @@
         
         <div class="details-grid">
             <div class="details-main">
-                <div class="card">
-                    <h2>Configuration</h2>
-                    <div class="info-grid">
-                        <div class="info-row">
-                            <span class="label">Docker Image:</span>
+                <div class="card compact-card">
+                    <div class="card-header">
+                        <h3>Configuration</h3>
+                    </div>
+                    <div class="info-grid compact">
+                        <div class="info-item">
+                            <span class="label">Docker Image</span>
                             <span class="value">@app.DockerImage</span>
                         </div>
-                        <div class="info-row">
-                            <span class="label">Server:</span>
+                        <div class="info-item">
+                            <span class="label">Server</span>
                             <span class="value">@app.ServerName</span>
                         </div>
-                        <div class="info-row">
-                            <span class="label">Project:</span>
+                        <div class="info-item">
+                            <span class="label">Project</span>
                             <span class="value">@app.ProjectName</span>
                         </div>
                         @if (app.Port.HasValue)
                         {
-                            <div class="info-row">
-                                <span class="label">Port:</span>
+                            <div class="info-item">
+                                <span class="label">Port</span>
                                 <span class="value">@app.Port</span>
                             </div>
                         }
-                        <div class="info-row">
-                            <span class="label">Replicas:</span>
+                        <div class="info-item">
+                            <span class="label">Replicas</span>
                             <span class="value">@app.Replicas</span>
                         </div>
-                        <div class="info-row">
-                            <span class="label">Created:</span>
+                        <div class="info-item">
+                            <span class="label">Created</span>
                             <span class="value">@app.CreatedAt.ToString("g")</span>
                         </div>
                         @if (app.LastDeployedAt.HasValue)
                         {
-                            <div class="info-row">
-                                <span class="label">Last Deployed:</span>
+                            <div class="info-item">
+                                <span class="label">Last Deployed</span>
                                 <span class="value">@app.LastDeployedAt.Value.ToString("g")</span>
                             </div>
                         }
@@ -82,54 +84,55 @@
                 
                 @if (app.EnvironmentVariables != null && app.EnvironmentVariables.Any())
                 {
-                    <div class="card">
-                        <h2>Environment Variables</h2>
-                        <div class="env-vars">
+                    <div class="card compact-card">
+                        <div class="card-header">
+                            <h3>Environment Variables</h3>
+                        </div>
+                        <div class="env-vars compact">
                             @foreach (var env in app.EnvironmentVariables)
                             {
                                 <div class="env-var">
                                     <span class="env-key">@env.Key</span>
-                                    <span class="env-separator">=</span>
-                                    <span class="env-value">@(string.IsNullOrWhiteSpace(env.Value) ? "(empty)" : new string('*', env.Value.Length))</span>
+                                    <span class="env-value">@(string.IsNullOrWhiteSpace(env.Value) ? "(empty)" : "••••••")</span>
                                 </div>
                             }
                         </div>
                     </div>
                 }
-                
-                <div class="card">
-                    <h2>Deployment History</h2>
+                 compact-card">
+                    <div class="card-header">
+                        <h3>Deployment History</h3>
+                    </div>
                     @if (app.Deployments != null && app.Deployments.Any())
                     {
-                        <div class="deployments-list">
+                        <div class="deployments-list compact">
                             @foreach (var deployment in app.Deployments)
                             {
                                 <div class="deployment-item @GetStatusClass(deployment.Status)">
-                                    <div class="deployment-header">
-                                        <span class="status-badge @GetStatusClass(deployment.Status)">
-                                            @GetStatusIcon(deployment.Status) @deployment.Status
-                                        </span>
-                                        <span class="deployment-time">@deployment.StartedAt.ToString("g")</span>
-                                    </div>
-                                    <div class="deployment-details">
-                                        @if (!string.IsNullOrEmpty(deployment.ContainerId))
-                                        {
-                                            <span class="deployment-id">Container: @deployment.ContainerId.Substring(0, 12)</span>
-                                        }
-                                        @if (!string.IsNullOrEmpty(deployment.ServiceId))
-                                        {
-                                            <span class="deployment-id">Service: @deployment.ServiceId</span>
-                                        }
-                                        @if (deployment.FinishedAt.HasValue)
-                                        {
-                                            var duration = deployment.FinishedAt.Value - deployment.StartedAt;
-                                            <span class="deployment-duration">Duration: @FormatDuration(duration)</span>
-                                        }
+                                    <div class="deployment-row">
+                                        <div class="deployment-status">
+                                            <span class="status-icon @GetStatusClass(deployment.Status)">@GetStatusIcon(deployment.Status)</span>
+                                            <span class="deployment-time">@deployment.StartedAt.ToString("MM/dd HH:mm")</span>
+                                        </div>
+                                        <div class="deployment-info">
+                                            @if (!string.IsNullOrEmpty(deployment.ContainerId))
+                                            {
+                                                <span class="deployment-id">@deployment.ContainerId.Substring(0, 12)</span>
+                                            }
+                                            @if (!string.IsNullOrEmpty(deployment.ServiceId))
+                                            {
+                                                <span class="deployment-id">@deployment.ServiceId</span>
+                                            }
+                                            @if (deployment.FinishedAt.HasValue)
+                                            {
+                                                var duration = deployment.FinishedAt.Value - deployment.StartedAt;
+                                                <span class="deployment-duration">@FormatDuration(duration)</span>
+                                            }
+                                        </div>
                                     </div>
                                     @if (deployment.Status == DeploymentStatus.Failed && !string.IsNullOrEmpty(deployment.ErrorMessage))
                                     {
-                                        <div class="deployment-error">
-                                            <strong>Error:</strong> @deployment.ErrorMessage
+                                        <div class="deployment-error">@deployment.ErrorMessage    <strong>Error:</strong> @deployment.ErrorMessage
                                         </div>
                                     }
                                 </div>
@@ -144,8 +147,10 @@
             </div>
             
             <div class="details-sidebar">
-                <div class="card actions-card">
-                    <h3>Actions</h3>
+                <div class="card compact-card actions-card">
+                    <div class="card-header">
+                        <h3>Actions</h3>
+                    </div>
                     <div class="action-buttons">
                         <button class="btn btn-primary" @onclick="Redeploy" disabled="@isRedeploying">
                             @if (isRedeploying)
@@ -176,8 +181,10 @@
                     </div>
                 </div>
                 
-                @if (!string.IsNullOrEmpty(app.ContainerId) || !string.IsNullOrEmpty(app.ServiceId))
-                {
+                @if (!string.IsNullO compact-card">
+                        <div class="card-header">
+                            <h3>Runtime</h3>
+                        </div
                     <div class="card">
                         <h3>Runtime Info</h3>
                         @if (!string.IsNullOrEmpty(app.ServiceId))
