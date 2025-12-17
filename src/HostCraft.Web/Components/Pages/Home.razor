@@ -11,6 +11,15 @@
         <p class="page-subtitle">Self-Hosted Docker PaaS Platform</p>
     </div>
 
+    @if (!string.IsNullOrEmpty(errorMessage))
+    {
+        <div class="card" style="border-left: 4px solid #ef4444;">
+            <h3 style="color: #ef4444;">⚠️ Error Loading Dashboard</h3>
+            <p>@errorMessage</p>
+            <button @onclick="LoadData" class="btn btn-primary">🔄 Retry</button>
+        </div>
+    }
+
     @if (servers == null)
     {
         <div class="card loading-state">
@@ -253,6 +262,7 @@
 @code {
     private List<ServerDto>? servers;
     private DashboardHealth? healthData;
+    private string? errorMessage;
     private List<ServerDto> swarmServers => servers?.Where(s => s.IsSwarm).ToList() ?? new();
     private List<ServerDto> standaloneServers => servers?.Where(s => !s.IsSwarm).ToList() ?? new();
     private List<ServerDto> kubernetesServers => new(); // Placeholder for future K8s support
@@ -274,11 +284,31 @@
     {
         try
         {
+            errorMessage = null;
+            Console.WriteLine($"[Dashboard] Calling API at: {Http.BaseAddress}api/servers");
+            
             servers = await Http.GetFromJsonAsync<List<ServerDto>>("api/servers");
             healthData = await Http.GetFromJsonAsync<DashboardHealth>("api/health/dashboard");
+            
+            Console.WriteLine($"[Dashboard] Loaded {servers?.Count ?? 0} servers from API");
+            
+            if (servers == null)
+            {
+                servers = new List<ServerDto>();
+                errorMessage = "API returned null for servers list";
+            }
+        }
+        catch (HttpRequestException ex)
+        {
+            errorMessage = $"Failed to connect to API: {ex.Message}. API URL: {Http.BaseAddress}";
+            Console.WriteLine($"[Dashboard] HTTP Error: {ex.Message}");
+            servers = new List<ServerDto>();
+            healthData = null;
         }
         catch (Exception ex)
         {
+            errorMessage = $"Error loading dashboard: {ex.Message}";
+            Console.WriteLine($"[Dashboard] Error: {ex.Message}");
             servers = new List<ServerDto>();
             healthData = null;
         }
