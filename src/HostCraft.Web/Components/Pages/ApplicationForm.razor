@@ -121,6 +121,53 @@
                 </div>
                 
                 <div class="form-section">
+                    <h2>🌐 Domain & SSL Configuration</h2>
+                    <p class="form-hint">Configure custom domain and automatic HTTPS with Let's Encrypt</p>
+                    
+                    <div class="form-group">
+                        <label for="domain">Primary Domain</label>
+                        <input type="text" id="domain" @bind="model.Domain" class="form-control" placeholder="example.com or app.example.com" />
+                        <small class="form-hint">Your application's public domain name</small>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="additionalDomains">Additional Domains</label>
+                        <input type="text" id="additionalDomains" @bind="model.AdditionalDomains" class="form-control" placeholder="www.example.com, app2.example.com" />
+                        <small class="form-hint">Comma-separated list of additional domain aliases</small>
+                    </div>
+                    
+                    <div class="form-row">
+                        <div class="form-group" style="flex: 1;">
+                            <label class="checkbox-label">
+                                <input type="checkbox" @bind="model.EnableHttps" class="form-checkbox" />
+                                <span>🔒 Enable HTTPS (Let's Encrypt)</span>
+                            </label>
+                            <small class="form-hint">Automatically provision and renew SSL certificates</small>
+                        </div>
+                        
+                        @if (model.EnableHttps)
+                        {
+                            <div class="form-group" style="flex: 1;">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" @bind="model.ForceHttps" class="form-checkbox" />
+                                    <span>Force HTTPS Redirect</span>
+                                </label>
+                                <small class="form-hint">Redirect all HTTP traffic to HTTPS</small>
+                            </div>
+                        }
+                    </div>
+                    
+                    @if (model.EnableHttps)
+                    {
+                        <div class="form-group">
+                            <label for="letsencryptEmail">Let's Encrypt Email *</label>
+                            <input type="email" id="letsencryptEmail" @bind="model.LetsEncryptEmail" class="form-control" placeholder="admin@example.com" />
+                            <small class="form-hint">Required for SSL certificate notifications and renewals</small>
+                        </div>
+                    }
+                </div>
+                
+                <div class="form-section">
                     <h2>Network Configuration</h2>
                     <p class="form-hint">Docker networks to connect (optional)</p>
                     
@@ -253,7 +300,12 @@
                         ProjectId = app.ProjectId,
                         Image = app.DockerImage ?? "",
                         Port = app.Port,
-                        Replicas = app.Replicas
+                        Replicas = app.Replicas,
+                        Domain = app.Domain,
+                        AdditionalDomains = app.AdditionalDomains,
+                        EnableHttps = app.EnableHttps,
+                        ForceHttps = app.ForceHttps,
+                        LetsEncryptEmail = app.LetsEncryptEmail
                     };
                     
                     if (app.EnvironmentVariables != null)
@@ -340,6 +392,14 @@
         
         try
         {
+            // Validate HTTPS email if HTTPS is enabled
+            if (model.EnableHttps && !string.IsNullOrWhiteSpace(model.Domain) && string.IsNullOrWhiteSpace(model.LetsEncryptEmail))
+            {
+                errorMessage = "Let's Encrypt email is required when HTTPS is enabled";
+                isSubmitting = false;
+                return;
+            }
+            
             var request = new CreateApplicationRequest(
                 model.Name,
                 model.ServerId,
@@ -348,7 +408,12 @@
                 model.Replicas,
                 envVars.Where(e => !string.IsNullOrWhiteSpace(e.Key)).ToDictionary(e => e.Key, e => e.Value),
                 networks.Where(n => !string.IsNullOrWhiteSpace(n)).ToList(),
-                model.Port
+                model.Port,
+                model.Domain,
+                model.AdditionalDomains,
+                model.EnableHttps,
+                model.ForceHttps,
+                model.LetsEncryptEmail
             );
             
             var response = await Http.PostAsJsonAsync("api/applications", request);
@@ -454,6 +519,11 @@
         public string Image { get; set; } = "";
         public int? Port { get; set; }
         public int Replicas { get; set; } = 1;
+        public string? Domain { get; set; }
+        public string? AdditionalDomains { get; set; }
+        public bool EnableHttps { get; set; } = true;
+        public bool ForceHttps { get; set; } = true;
+        public string? LetsEncryptEmail { get; set; }
     }
     
     private class EnvVar
@@ -464,7 +534,42 @@
     
     private record ServerDto(int Id, string Name, string Host, int Port, string User, bool IsSwarm, string Status);
     private record ProjectDto(int Id, string Name, string? Description);
-    private record CreateApplicationRequest(string Name, int ServerId, int ProjectId, string Image, int? Replicas, Dictionary<string, string>? EnvironmentVariables, List<string>? Networks, int? Port);
-    private record ApplicationWithDeploymentsDto(int Id, string Name, string? Description, int ServerId, string ServerName, int ProjectId, string ProjectName, string? DockerImage, int? Port, int Replicas, Dictionary<string, string>? EnvironmentVariables, DeploymentStatus Status, string? ContainerId, string? ServiceId, DateTime? LastDeployedAt, DateTime CreatedAt, List<DeploymentInfo> Deployments);
+    private record CreateApplicationRequest(
+        string Name,
+        int ServerId,
+        int ProjectId,
+        string Image,
+        int? Replicas,
+        Dictionary<string, string>? EnvironmentVariables,
+        List<string>? Networks,
+        int? Port,
+        string? Domain = null,
+        string? AdditionalDomains = null,
+        bool EnableHttps = true,
+        bool ForceHttps = true,
+        string? LetsEncryptEmail = null);
+    private record ApplicationWithDeploymentsDto(
+        int Id,
+        string Name,
+        string? Description,
+        int ServerId,
+        string ServerName,
+        int ProjectId,
+        string ProjectName,
+        string? DockerImage,
+        int? Port,
+        int Replicas,
+        Dictionary<string, string>? EnvironmentVariables,
+        string? Domain,
+        string? AdditionalDomains,
+        bool EnableHttps,
+        bool ForceHttps,
+        string? LetsEncryptEmail,
+        DeploymentStatus Status,
+        string? ContainerId,
+        string? ServiceId,
+        DateTime? LastDeployedAt,
+        DateTime CreatedAt,
+        List<DeploymentInfo> Deployments);
     private record DeploymentInfo(int Id, DeploymentStatus Status, string? ContainerId, string? ServiceId, DateTime StartedAt, DateTime? FinishedAt, string? ErrorMessage);
 }

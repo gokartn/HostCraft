@@ -93,6 +93,11 @@ public class ApplicationsController : ControllerBase
             Port = app.Port,
             Replicas = app.Replicas,
             EnvironmentVariables = app.EnvironmentVariables.ToDictionary(e => e.Key, e => e.Value),
+            Domain = app.Domain,
+            AdditionalDomains = app.AdditionalDomains,
+            EnableHttps = app.EnableHttps,
+            ForceHttps = app.ForceHttps,
+            LetsEncryptEmail = app.LetsEncryptEmail,
             Status = latestDeployment?.Status ?? DeploymentStatus.Queued,
             ContainerId = latestDeployment?.ContainerId,
             ServiceId = latestDeployment?.ServiceId,
@@ -146,6 +151,11 @@ public class ApplicationsController : ControllerBase
             SourceType = ApplicationSourceType.DockerImage,
             Replicas = request.Replicas ?? 1,
             Port = request.Port,
+            Domain = request.Domain,
+            AdditionalDomains = request.AdditionalDomains,
+            EnableHttps = request.EnableHttps,
+            ForceHttps = request.ForceHttps,
+            LetsEncryptEmail = request.LetsEncryptEmail,
             CreatedAt = DateTime.UtcNow
         };
         
@@ -213,7 +223,12 @@ public class ApplicationsController : ControllerBase
             app.Replicas,
             app.EnvironmentVariables?.ToDictionary(e => e.Key, e => e.Value),
             null,
-            app.Port
+            app.Port,
+            app.Domain,
+            app.AdditionalDomains,
+            app.EnableHttps,
+            app.ForceHttps,
+            app.LetsEncryptEmail
         );
         
         _ = Task.Run(async () => await DeployApplicationAsync(deployment.Id, request));
@@ -737,7 +752,12 @@ public record CreateApplicationRequest(
     int? Replicas = 1,
     Dictionary<string, string>? EnvironmentVariables = null,
     List<string>? Networks = null,
-    int? Port = null);
+    int? Port = null,
+    string? Domain = null,
+    string? AdditionalDomains = null,
+    bool EnableHttps = true,
+    bool ForceHttps = true,
+    string? LetsEncryptEmail = null);
 
 public record ApplicationDto
 {
@@ -769,6 +789,11 @@ public record ApplicationWithDeploymentsDto
     public int? Port { get; init; }
     public int Replicas { get; init; }
     public Dictionary<string, string>? EnvironmentVariables { get; init; }
+    public string? Domain { get; init; }
+    public string? AdditionalDomains { get; init; }
+    public bool EnableHttps { get; init; }
+    public bool ForceHttps { get; init; }
+    public string? LetsEncryptEmail { get; init; }
     public DeploymentStatus Status { get; init; }
     public string? ContainerId { get; init; }
     public string? ServiceId { get; init; }

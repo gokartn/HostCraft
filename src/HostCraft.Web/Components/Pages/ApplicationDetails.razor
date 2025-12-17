@@ -82,6 +82,54 @@
                     </div>
                 </div>
                 
+                @if (!string.IsNullOrEmpty(app.Domain))
+                {
+                    <div class="card compact-card">
+                        <div class="card-header">
+                            <h3>🌐 Domain & SSL</h3>
+                        </div>
+                        <div class="info-grid compact">
+                            <div class="info-item">
+                                <span class="label">Primary Domain</span>
+                                <span class="value">
+                                    <a href="@(app.EnableHttps ? "https" : "http")://@app.Domain" target="_blank" style="color: #6366f1; text-decoration: none;">
+                                        @app.Domain
+                                    </a>
+                                </span>
+                            </div>
+                            @if (!string.IsNullOrEmpty(app.AdditionalDomains))
+                            {
+                                <div class="info-item">
+                                    <span class="label">Additional Domains</span>
+                                    <span class="value">@app.AdditionalDomains</span>
+                                </div>
+                            }
+                            <div class="info-item">
+                                <span class="label">HTTPS Enabled</span>
+                                <span class="value">@(app.EnableHttps ? "✅ Yes" : "❌ No")</span>
+                            </div>
+                            @if (app.EnableHttps)
+                            {
+                                <div class="info-item">
+                                    <span class="label">Force HTTPS</span>
+                                    <span class="value">@(app.ForceHttps ? "✅ Yes" : "❌ No")</span>
+                                </div>
+                                <div class="info-item">
+                                    <span class="label">SSL Certificate</span>
+                                    <span class="value">🔒 Let's Encrypt</span>
+                                </div>
+                                @if (!string.IsNullOrEmpty(app.LetsEncryptEmail))
+                                {
+                                    <div class="info-item">
+                                        <span class="label">Certificate Email</span>
+                                        <span class="value">@app.LetsEncryptEmail</span>
+                                    </div>
+                                }
+                            }
+                        </div>
+                    </div>
+                }
+                
                 @if (app.EnvironmentVariables != null && app.EnvironmentVariables.Any())
                 {
                     <div class="card compact-card">
@@ -362,6 +410,11 @@
         int? Port,
         int Replicas,
         Dictionary<string, string>? EnvironmentVariables,
+        string? Domain,
+        string? AdditionalDomains,
+        bool EnableHttps,
+        bool ForceHttps,
+        string? LetsEncryptEmail,
         DeploymentStatus Status,
         string? ContainerId,
         string? ServiceId,
