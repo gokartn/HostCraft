@@ -366,17 +366,35 @@ public class ServersController : ControllerBase
     [HttpDelete("{id}")]
     public async Task<IActionResult> DeleteServer(int id)
     {
-        var server = await _context.Servers.FindAsync(id);
+        var server = await _context.Servers
+            .Include(s => s.Applications)
+            .FirstOrDefaultAsync(s => s.Id == id);
         
         if (server == null)
         {
-            return NotFound();
+            return NotFound(new { error = "Server not found" });
         }
         
-        _context.Servers.Remove(server);
-        await _context.SaveChangesAsync();
+        // Check if server has any applications
+        if (server.Applications.Any())
+        {
+            return Conflict(new { error = $"Cannot delete server. It has {server.Applications.Count} application(s). Please remove all applications first." });
+        }
         
-        return NoContent();
+        try
+        {
+            _context.Servers.Remove(server);
+            await _context.SaveChangesAsync();
+            
+            _logger.LogInformation("Deleted server {ServerName} (ID: {ServerId})", server.Name, server.Id);
+            
+            return NoContent();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error deleting server {ServerId}", id);
+            return StatusCode(500, new { error = "Failed to delete server: " + ex.Message });
+        }
     }
     
     [HttpPost("configure-localhost")]
