@@ -23,6 +23,7 @@ public class HostCraftDbContext : DbContext
     public DbSet<Volume> Volumes => Set<Volume>();
     public DbSet<GitProvider> GitProviders => Set<GitProvider>();
     public DbSet<Certificate> Certificates => Set<Certificate>();
+    public DbSet<SystemSettings> SystemSettings => Set<SystemSettings>();
     
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

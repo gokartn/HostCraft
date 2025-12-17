@@ -403,4 +403,64 @@ public class ProxyService : IProxyService
   }}
 }}";
     }
+
+    public async Task<bool> ConfigureHostCraftDomainAsync(
+        string domain,
+        bool enableHttps,
+        string? letsEncryptEmail,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            _logger.LogInformation("Configuring HostCraft domain: {Domain} (HTTPS: {EnableHttps})", domain, enableHttps);
+
+            // Generate Traefik labels for the HostCraft web service
+            var labels = new Dictionary<string, string>
+            {
+                // Enable Traefik
+                ["traefik.enable"] = "true",
+                
+                // HTTP router
+                ["traefik.http.routers.hostcraft-web.rule"] = $"Host(`{domain}`)",
+                ["traefik.http.routers.hostcraft-web.entrypoints"] = enableHttps ? "websecure" : "web",
+                ["traefik.http.routers.hostcraft-web.service"] = "hostcraft-web",
+                
+                // Service configuration
+                ["traefik.http.services.hostcraft-web.loadbalancer.server.port"] = "8080",
+                
+                // Docker Swarm specific
+                ["traefik.docker.network"] = "traefik-public"
+            };
+
+            if (enableHttps)
+            {
+                // HTTPS configuration with Let's Encrypt
+                labels["traefik.http.routers.hostcraft-web.tls"] = "true";
+                labels["traefik.http.routers.hostcraft-web.tls.certresolver"] = "letsencrypt";
+                
+                // HTTP to HTTPS redirect
+                labels["traefik.http.routers.hostcraft-web-http.rule"] = $"Host(`{domain}`)";
+                labels["traefik.http.routers.hostcraft-web-http.entrypoints"] = "web";
+                labels["traefik.http.routers.hostcraft-web-http.middlewares"] = "redirect-to-https";
+                labels["traefik.http.middlewares.redirect-to-https.redirectscheme.scheme"] = "https";
+                labels["traefik.http.middlewares.redirect-to-https.redirectscheme.permanent"] = "true";
+            }
+
+            // Log instructions for manual update
+            // In the future, we can implement automatic service update via Docker API
+            _logger.LogInformation("HostCraft domain configuration completed for {Domain}. To apply changes, run: docker service update --force hostcraft_hostcraft-web", domain);
+            _logger.LogInformation("Required labels:");
+            foreach (var label in labels)
+            {
+                _logger.LogInformation("  {Key}={Value}", label.Key, label.Value);
+            }
+            
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to configure HostCraft domain {Domain}", domain);
+            return false;
+        }
+    }
 }
