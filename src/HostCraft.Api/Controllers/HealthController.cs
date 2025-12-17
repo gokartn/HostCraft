@@ -128,8 +128,9 @@ public class HealthController : ControllerBase
             
             // Get container counts
             var containers = await _dockerService.ListContainersAsync(server, showAll: true);
-            metrics.ContainerCount = containers.Count;
-            metrics.RunningContainers = containers.Count(c => c.State == "running");
+            var containerList = containers.ToList();
+            metrics.ContainerCount = containerList.Count;
+            metrics.RunningContainers = containerList.Count(c => c.State == "running");
             
             // Get CPU and Memory usage from the server
             try
