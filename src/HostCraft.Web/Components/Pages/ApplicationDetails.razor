@@ -147,31 +147,31 @@
             </div>
             
             <div class="details-sidebar">
-                <div class="card compact-card actions-card">
+                <div class="card compact-card">
                     <div class="card-header">
                         <h3>Actions</h3>
                     </div>
-                    <div class="action-buttons">
-                        <button class="btn btn-primary" @onclick="Redeploy" disabled="@isRedeploying">
+                    <div class="actions-grid">
+                        <button class="btn btn-primary btn-sm" @onclick="Redeploy" disabled="@isRedeploying">
                             @if (isRedeploying)
                             {
-                                <span>🔄 Deploying...</span>
+                                <span>🔄</span>
                             }
                             else
                             {
                                 <span>🚀 Redeploy</span>
                             }
                         </button>
-                        <button class="btn btn-secondary" @onclick="ViewLogs" disabled="@(!CanViewLogs())">
-                            📄 View Logs
+                        <button class="btn btn-secondary btn-sm" @onclick="ViewLogs" disabled="@(!CanViewLogs())">
+                            📄 Logs
                         </button>
-                        <button class="btn btn-secondary" @onclick="EditApplication">
+                        <button class="btn btn-secondary btn-sm" @onclick="EditApplication">
                             ✏️ Edit
                         </button>
-                        <button class="btn btn-danger" @onclick="DeleteApplication" disabled="@isDeleting">
+                        <button class="btn btn-danger btn-sm" @onclick="DeleteApplication" disabled="@isDeleting">
                             @if (isDeleting)
                             {
-                                <span>🗑️ Deleting...</span>
+                                <span>🗑️</span>
                             }
                             else
                             {
