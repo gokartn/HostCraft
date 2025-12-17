@@ -571,8 +571,37 @@ EOF
                 fi
                 
                 if [ $? -eq 0 ]; then
-                    echo "✅ HostCraft configured with domain: $hostcraft_domain"
-                    domain_configured=true
+                    echo "✅ Traefik labels applied successfully"
+                    
+                    # Wait for services to be ready
+                    echo "⏳ Waiting for API to be ready..."
+                    sleep 10
+                    
+                    # Read Let's Encrypt email for HTTPS
+                    letsencrypt_email=""
+                    if [ "$enable_https" = "yes" ]; then
+                        read -p "Enter Let's Encrypt email for SSL certificate notifications: " letsencrypt_email
+                    fi
+                    
+                    # Save domain configuration to database via API
+                    echo "💾 Saving domain configuration to database..."
+                    api_response=$(curl -s -X POST "http://localhost:5100/api/systemsettings" \
+                        -H "Content-Type: application/json" \
+                        -d "{\"domain\":\"$hostcraft_domain\",\"enableHttps\":$([ "$enable_https" = "yes" ] && echo "true" || echo "false"),\"letsEncryptEmail\":\"$letsencrypt_email\"}" \
+                        -w "%{http_code}" -o /tmp/hostcraft_api_response.txt)
+                    
+                    if [ "$api_response" = "200" ]; then
+                        echo "✅ Domain configuration saved to database"
+                        domain_configured=true
+                    else
+                        echo "⚠️  API response code: $api_response"
+                        echo "⚠️  Traefik is configured but database save failed. You may need to re-enter the domain in Settings."
+                        if [ -f /tmp/hostcraft_api_response.txt ]; then
+                            cat /tmp/hostcraft_api_response.txt
+                        fi
+                        domain_configured=true  # Traefik is still configured
+                    fi
+                    rm -f /tmp/hostcraft_api_response.txt
                 else
                     echo "⚠️  Failed to apply domain configuration. You can configure it later in the Web UI."
                     domain_configured=false
