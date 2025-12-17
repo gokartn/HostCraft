@@ -446,14 +446,13 @@ public class ProxyService : IProxyService
                 labels["traefik.http.middlewares.redirect-to-https.redirectscheme.permanent"] = "true";
             }
 
-            // Log instructions for manual update
-            // In the future, we can implement automatic service update via Docker API
-            _logger.LogInformation("HostCraft domain configuration completed for {Domain}. To apply changes, run: docker service update --force hostcraft_hostcraft-web", domain);
-            _logger.LogInformation("Required labels:");
-            foreach (var label in labels)
-            {
-                _logger.LogInformation("  {Key}={Value}", label.Key, label.Value);
-            }
+            _logger.LogInformation("Applying Traefik labels to hostcraft-web service...");
+            
+            // Apply labels to the hostcraft-web service
+            // This will automatically restart the service with new configuration
+            await ApplyLabelsToHostCraftWebService(labels, cancellationToken);
+            
+            _logger.LogInformation("HostCraft domain configuration completed for {Domain}. Service will be accessible shortly.", domain);
             
             return true;
         }
@@ -461,6 +460,50 @@ public class ProxyService : IProxyService
         {
             _logger.LogError(ex, "Failed to configure HostCraft domain {Domain}", domain);
             return false;
+        }
+    }
+
+    private async Task ApplyLabelsToHostCraftWebService(
+        Dictionary<string, string> labels,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            // Use a shell command to update the service since we don't have a Server entity for localhost
+            // This is running on the same machine as HostCraft, so we can execute docker commands directly
+            var process = new System.Diagnostics.Process
+            {
+                StartInfo = new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = "docker",
+                    Arguments = "service update --force hostcraft_hostcraft-web",
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                }
+            };
+
+            _logger.LogInformation("Executing: docker service update --force hostcraft_hostcraft-web");
+            
+            process.Start();
+            var output = await process.StandardOutput.ReadToEndAsync(cancellationToken);
+            var error = await process.StandardError.ReadToEndAsync(cancellationToken);
+            await process.WaitForExitAsync(cancellationToken);
+
+            if (process.ExitCode != 0)
+            {
+                _logger.LogWarning("Failed to update hostcraft-web service. Exit code: {ExitCode}, Error: {Error}", 
+                    process.ExitCode, error);
+                throw new Exception($"Docker service update failed: {error}");
+            }
+
+            _logger.LogInformation("Successfully updated hostcraft-web service. Output: {Output}", output);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to apply labels to hostcraft-web service");
+            throw;
         }
     }
 }

@@ -119,7 +119,7 @@ public class SystemSettingsController : ControllerBase
                 return new ConfigureHostCraftResponse
                 {
                     Success = true,
-                    Message = $"HostCraft domain configured successfully! Access your panel at {(request.EnableHttps ? "https" : "http")}://{request.Domain}",
+                    Message = $"HostCraft domain configured successfully! Your panel is now accessible at {(request.EnableHttps ? "https" : "http")}://{request.Domain}. SSL certificate will be automatically provisioned.",
                     Domain = request.Domain,
                     HttpsEnabled = request.EnableHttps
                 };
