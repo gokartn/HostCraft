@@ -39,8 +39,27 @@ public class HealthController : ControllerBase
             {
                 try
                 {
-                    var metrics = await GetServerMetrics(server.Id);
+                    // Use a timeout for metrics gathering to prevent hanging
+                    using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                    var metrics = await GetServerMetrics(server.Id, cts.Token);
                     serverMetrics.Add(metrics);
+                }
+                catch (OperationCanceledException)
+                {
+                    _logger.LogWarning("Timeout getting metrics for server {ServerId} - {ServerName}", server.Id, server.Name);
+                    // Add placeholder metrics for timeout
+                    serverMetrics.Add(new ServerHealthMetrics
+                    {
+                        ServerId = server.Id,
+                        ServerName = server.Name,
+                        Status = ServerStatus.Error,
+                        CpuUsagePercent = 0,
+                        MemoryUsagePercent = 0,
+                        DiskUsagePercent = 0,
+                        ContainerCount = 0,
+                        RunningContainers = 0,
+                        ErrorMessage = "Timeout connecting to server"
+                    });
                 }
                 catch (Exception ex)
                 {
@@ -96,9 +115,9 @@ public class HealthController : ControllerBase
         }
     }
 
-    private async Task<ServerHealthMetrics> GetServerMetrics(int serverId)
+    private async Task<ServerHealthMetrics> GetServerMetrics(int serverId, CancellationToken cancellationToken = default)
     {
-        var server = await _context.Servers.FindAsync(serverId);
+        var server = await _context.Servers.FindAsync(new object[] { serverId }, cancellationToken);
         if (server == null)
         {
             throw new Exception($"Server {serverId} not found");
@@ -124,10 +143,10 @@ public class HealthController : ControllerBase
             }
             
             // Get actual system metrics
-            var systemInfo = await _dockerService.GetSystemInfoAsync(server);
+            var systemInfo = await _dockerService.GetSystemInfoAsync(server, cancellationToken);
             
             // Get container counts
-            var containers = await _dockerService.ListContainersAsync(server, showAll: true);
+            var containers = await _dockerService.ListContainersAsync(server, showAll: true, cancellationToken);
             var containerList = containers.ToList();
             metrics.ContainerCount = containerList.Count;
             metrics.RunningContainers = containerList.Count(c => c.State == "running");
@@ -135,7 +154,7 @@ public class HealthController : ControllerBase
             // Get CPU and Memory usage from the server
             try
             {
-                var cpuMemory = await GetServerResourceUsageAsync(server);
+                var cpuMemory = await GetServerResourceUsageAsync(server, cancellationToken);
                 metrics.CpuUsagePercent = cpuMemory.CpuUsage;
                 metrics.MemoryUsagePercent = cpuMemory.MemoryUsage;
                 metrics.TotalMemoryMB = cpuMemory.TotalMemoryMB;
@@ -165,18 +184,18 @@ public class HealthController : ControllerBase
     }
 
     private async Task<(double CpuUsage, double MemoryUsage, double DiskUsage, long TotalMemoryMB, long UsedMemoryMB)> 
-        GetServerResourceUsageAsync(HostCraft.Core.Entities.Server server)
+        GetServerResourceUsageAsync(HostCraft.Core.Entities.Server server, CancellationToken cancellationToken = default)
     {
         try
         {
             // Get CPU usage (1 second average)
             var cpuCommand = "top -bn1 | grep 'Cpu(s)' | sed 's/.*, *\\([0-9.]*\\)%* id.*/\\1/' | awk '{print 100 - $1}'";
-            var cpuResult = await _sshService.ExecuteCommandAsync(server, cpuCommand);
+            var cpuResult = await _sshService.ExecuteCommandAsync(server, cpuCommand, cancellationToken);
             var cpuUsage = cpuResult.ExitCode == 0 && double.TryParse(cpuResult.Output.Trim(), out var cpu) ? cpu : 0;
             
             // Get memory usage
             var memCommand = "free -m | awk 'NR==2{printf \"%s %s\", $2,$3}'";
-            var memResult = await _sshService.ExecuteCommandAsync(server, memCommand);
+            var memResult = await _sshService.ExecuteCommandAsync(server, memCommand, cancellationToken);
             var memParts = memResult.Output.Trim().Split(' ');
             var totalMemory = memParts.Length > 0 && long.TryParse(memParts[0], out var total) ? total : 0;
             var usedMemory = memParts.Length > 1 && long.TryParse(memParts[1], out var used) ? used : 0;
@@ -184,7 +203,7 @@ public class HealthController : ControllerBase
             
             // Get disk usage
             var diskCommand = "df -h / | awk 'NR==2{print $5}' | sed 's/%//'";
-            var diskResult = await _sshService.ExecuteCommandAsync(server, diskCommand);
+            var diskResult = await _sshService.ExecuteCommandAsync(server, diskCommand, cancellationToken);
             var diskUsage = diskResult.ExitCode == 0 && double.TryParse(diskResult.Output.Trim(), out var disk) ? disk : 0;
             
             return (cpuUsage, memoryUsage, diskUsage, totalMemory, usedMemory);

@@ -29,6 +29,7 @@ builder.Services.AddDbContext<HostCraftDbContext>(options =>
 // Services
 // DockerService as singleton to maintain SSH tunnels across requests
 builder.Services.AddSingleton<IDockerService, DockerService>();
+builder.Services.AddSingleton<ISshService, HostCraft.Infrastructure.Ssh.SshService>();
 builder.Services.AddScoped<INetworkManager, NetworkManager>();
 builder.Services.AddScoped<IProxyService, HostCraft.Infrastructure.Proxy.ProxyService>();
 builder.Services.AddHttpClient<IUpdateService, HostCraft.Infrastructure.Updates.UpdateService>();
