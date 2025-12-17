@@ -579,67 +579,28 @@ EOF
                         read -p "Enter Let's Encrypt email for SSL certificate notifications: " letsencrypt_email
                     fi
                     
-                    # Wait for API to be ready (health check)
-                    echo "⏳ Waiting for HostCraft API to be ready (this may take 30-60 seconds)..."
-                    max_attempts=60
-                    attempt=0
-                    api_ready=false
-                    success_count=0
-                    
-                    while [ $attempt -lt $max_attempts ]; do
-                        # Check if health endpoint responds (need 3 successful checks in a row)
-                        if curl -sf --max-time 2 "http://localhost:5100/health" > /dev/null 2>&1; then
-                            success_count=$((success_count + 1))
-                            if [ $success_count -ge 3 ]; then
-                                api_ready=true
-                                break
-                            fi
-                            echo -n "✓"
-                        else
-                            success_count=0
-                            echo -n "."
-                        fi
-                        attempt=$((attempt + 1))
-                        sleep 2
-                    done
+                    echo ""
+                    echo "✅ Traefik routing configured successfully!"
+                    echo ""
+                    echo "📝 Final Configuration Step"
+                    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                    echo "To complete the setup, save your domain settings in the HostCraft UI:"
+                    echo ""
+                    echo "   1. Open: https://$hostcraft_domain/settings"
+                    echo "   2. HostCraft Domain: $hostcraft_domain"
+                    if [ "$enable_https" = "yes" ]; then
+                        echo "   3. Enable HTTPS: ✓ (checked)"
+                        echo "   4. Let's Encrypt Email: $letsencrypt_email"
+                    else
+                        echo "   3. Enable HTTPS: ☐ (unchecked)"
+                    fi
+                    echo "   5. Click 'Save Configuration'"
+                    echo ""
+                    echo "💡 The Traefik routing is already active. This step just saves the"
+                    echo "   settings to your database so they persist after restarts."
                     echo ""
                     
-                    if [ "$api_ready" = "true" ]; then
-                        echo "✅ API is ready"
-                        
-                        # Save domain configuration to database via API
-                        echo "💾 Saving domain configuration to database..."
-                        echo ""
-                        echo "⚠️  Note: Due to Docker Swarm networking, the install script cannot automatically"
-                        echo "   save the domain to the database. Please complete the configuration manually:"
-                        echo ""
-                        echo "   1. Open your browser and go to: https://$hostcraft_domain/settings"
-                        echo "   2. In the 'HostCraft Domain' field, enter: $hostcraft_domain"
-                        if [ "$enable_https" = "yes" ]; then
-                            echo "   3. Check 'Enable HTTPS (Let's Encrypt)'"
-                            echo "   4. In the 'Let's Encrypt Email' field, enter: $letsencrypt_email"
-                        else
-                            echo "   3. Uncheck 'Enable HTTPS (Let's Encrypt)'"
-                        fi
-                        echo "   5. Click 'Save Configuration'"
-                        echo ""
-                        echo "   The Traefik routing is already configured and working."
-                        echo "   This step just saves the settings to your database for display in the UI."
-                        echo ""
-                        
-                        domain_configured=true  # Traefik is configured
-                        
-                        # Skip the API call - it doesn't work reliably from install script due to Swarm networking
-                        # api_response=$(curl -s -X POST "http://localhost:5100/api/systemsettings" \
-                        #     -H "Content-Type: application/json" \
-                        #     -d "{\"domain\":\"$hostcraft_domain\",\"enableHttps\":$([ "$enable_https" = "yes" ] && echo "true" || echo "false"),\"letsEncryptEmail\":\"$letsencrypt_email\"}" \
-                        #     -w "\n%{http_code}" -o /tmp/hostcraft_api_response.txt)
-
-                    else
-                        echo "⚠️  API did not become ready in time"
-                        echo "⚠️  Traefik labels are applied, but you'll need to re-enter the domain in Settings → HostCraft Domain & SSL"
-                        domain_configured=true  # Traefik is still configured
-                    fi
+                    domain_configured=true
                 else
                     echo "⚠️  Failed to apply domain configuration. You can configure it later in the Web UI."
                     domain_configured=false
