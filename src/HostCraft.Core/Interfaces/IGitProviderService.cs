@@ -1,3 +1,6 @@
+using HostCraft.Core.Entities;
+using HostCraft.Core.Enums;
+
 namespace HostCraft.Core.Interfaces;
 
 /// <summary>

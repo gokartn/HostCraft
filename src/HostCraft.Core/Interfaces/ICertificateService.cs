@@ -1,3 +1,5 @@
+using HostCraft.Core.Entities;
+
 namespace HostCraft.Core.Interfaces;
 
 /// <summary>
