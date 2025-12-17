@@ -469,6 +469,20 @@ public class ProxyService : IProxyService
     {
         try
         {
+            // Build docker service update command with all label arguments
+            var arguments = new System.Text.StringBuilder("service update");
+            
+            // Add all labels as --label-add arguments
+            foreach (var label in labels)
+            {
+                arguments.Append($" --label-add \"{label.Key}={label.Value}\"");
+            }
+            
+            // Force update to apply changes
+            arguments.Append(" --force hostcraft_hostcraft-web");
+            
+            var commandArgs = arguments.ToString();
+            
             // Use a shell command to update the service since we don't have a Server entity for localhost
             // This is running on the same machine as HostCraft, so we can execute docker commands directly
             var process = new System.Diagnostics.Process
@@ -476,7 +490,7 @@ public class ProxyService : IProxyService
                 StartInfo = new System.Diagnostics.ProcessStartInfo
                 {
                     FileName = "docker",
-                    Arguments = "service update --force hostcraft_hostcraft-web",
+                    Arguments = commandArgs,
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
                     UseShellExecute = false,
@@ -484,7 +498,7 @@ public class ProxyService : IProxyService
                 }
             };
 
-            _logger.LogInformation("Executing: docker service update --force hostcraft_hostcraft-web");
+            _logger.LogInformation("Executing: docker {Command}", commandArgs);
             
             process.Start();
             var output = await process.StandardOutput.ReadToEndAsync(cancellationToken);
@@ -498,7 +512,8 @@ public class ProxyService : IProxyService
                 throw new Exception($"Docker service update failed: {error}");
             }
 
-            _logger.LogInformation("Successfully updated hostcraft-web service. Output: {Output}", output);
+            _logger.LogInformation("Successfully updated hostcraft-web service with {LabelCount} labels. Output: {Output}", 
+                labels.Count, output);
         }
         catch (Exception ex)
         {

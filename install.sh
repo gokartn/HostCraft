@@ -521,6 +521,73 @@ EOF
         docker service update --network-add traefik-public hostcraft_hostcraft-web 2>/dev/null || true
         echo "✅ HostCraft web service connected to Traefik"
         echo ""
+        
+        # Ask if user wants to configure domain now
+        echo "🌐 Domain Configuration"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "Would you like to configure a domain for HostCraft now?"
+        echo "This will make HostCraft accessible via your domain with HTTPS."
+        echo ""
+        echo "You can also configure this later in the Web UI (Settings → HostCraft Domain & SSL)"
+        read -p "Configure domain now? (yes/no): " configure_domain
+        
+        if [ "$configure_domain" = "yes" ]; then
+            echo ""
+            read -p "Enter your domain (e.g., hostcraft.example.com): " hostcraft_domain
+            read -p "Enable HTTPS with Let's Encrypt? (yes/no): " enable_https
+            
+            if [ -n "$hostcraft_domain" ]; then
+                echo ""
+                echo "🔧 Applying Traefik configuration to HostCraft..."
+                
+                # Build the docker service update command with Traefik labels
+                update_cmd="docker service update"
+                update_cmd="$update_cmd --label-add traefik.enable=true"
+                update_cmd="$update_cmd --label-add traefik.docker.network=traefik-public"
+                
+                if [ "$enable_https" = "yes" ]; then
+                    # HTTPS configuration
+                    update_cmd="$update_cmd --label-add traefik.http.routers.hostcraft-web.rule=Host(\`$hostcraft_domain\`)"
+                    update_cmd="$update_cmd --label-add traefik.http.routers.hostcraft-web.entrypoints=websecure"
+                    update_cmd="$update_cmd --label-add traefik.http.routers.hostcraft-web.tls=true"
+                    update_cmd="$update_cmd --label-add traefik.http.routers.hostcraft-web.tls.certresolver=letsencrypt"
+                    update_cmd="$update_cmd --label-add traefik.http.routers.hostcraft-web.service=hostcraft-web"
+                    update_cmd="$update_cmd --label-add traefik.http.services.hostcraft-web.loadbalancer.server.port=8080"
+                    
+                    # HTTP to HTTPS redirect
+                    update_cmd="$update_cmd --label-add traefik.http.routers.hostcraft-web-http.rule=Host(\`$hostcraft_domain\`)"
+                    update_cmd="$update_cmd --label-add traefik.http.routers.hostcraft-web-http.entrypoints=web"
+                    update_cmd="$update_cmd --label-add traefik.http.routers.hostcraft-web-http.middlewares=redirect-to-https"
+                    update_cmd="$update_cmd --label-add traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https"
+                    update_cmd="$update_cmd --label-add traefik.http.middlewares.redirect-to-https.redirectscheme.permanent=true"
+                else
+                    # HTTP only configuration
+                    update_cmd="$update_cmd --label-add traefik.http.routers.hostcraft-web.rule=Host(\`$hostcraft_domain\`)"
+                    update_cmd="$update_cmd --label-add traefik.http.routers.hostcraft-web.entrypoints=web"
+                    update_cmd="$update_cmd --label-add traefik.http.routers.hostcraft-web.service=hostcraft-web"
+                    update_cmd="$update_cmd --label-add traefik.http.services.hostcraft-web.loadbalancer.server.port=8080"
+                fi
+                
+                update_cmd="$update_cmd --force hostcraft_hostcraft-web"
+                
+                # Execute the update command
+                eval $update_cmd
+                
+                if [ $? -eq 0 ]; then
+                    echo "✅ HostCraft configured with domain: $hostcraft_domain"
+                    domain_configured=true
+                else
+                    echo "⚠️  Failed to apply domain configuration. You can configure it later in the Web UI."
+                    domain_configured=false
+                fi
+            else
+                echo "⚠️  No domain entered. You can configure it later in the Web UI."
+                domain_configured=false
+            fi
+        else
+            domain_configured=false
+        fi
+        echo ""
     else
         echo "⚠️  Traefik deployment may have issues. Check logs: docker service logs traefik_traefik"
     fi
@@ -546,15 +613,22 @@ echo ""
 echo "✅ Installation completed successfully!"
 echo ""
 echo "📍 Access your HostCraft instance:"
-echo "   Web UI: http://$(hostname -I | awk '{print $1}'):5000"
-echo "   API:    http://$(hostname -I | awk '{print $1}'):5100"
-if [ "$setup_traefik" = "yes" ]; then
-    echo "   Traefik Dashboard: http://$(hostname -I | awk '{print $1}'):8080"
-    echo ""
-    echo "   💡 To enable domain access with HTTPS:"
-    echo "      1. Open the Web UI above"
-    echo "      2. Go to Settings → HostCraft Domain & SSL"
-    echo "      3. Enter your domain and enable HTTPS"
+if [ "$setup_traefik" = "yes" ] && [ "$domain_configured" = "true" ]; then
+    echo "   🌐 Web UI: https://$hostcraft_domain (via Traefik)"
+    echo "   📊 Direct access: http://$(hostname -I | awk '{print $1}'):5000"
+    echo "   🔧 API: http://$(hostname -I | awk '{print $1}'):5100"
+    echo "   📈 Traefik Dashboard: http://$(hostname -I | awk '{print $1}'):8080"
+else
+    echo "   Web UI: http://$(hostname -I | awk '{print $1}'):5000"
+    echo "   API:    http://$(hostname -I | awk '{print $1}'):5100"
+    if [ "$setup_traefik" = "yes" ]; then
+        echo "   Traefik Dashboard: http://$(hostname -I | awk '{print $1}'):8080"
+        echo ""
+        echo "   💡 To enable domain access with HTTPS:"
+        echo "      1. Open the Web UI above"
+        echo "      2. Go to Settings → HostCraft Domain & SSL"
+        echo "      3. Enter your domain and enable HTTPS"
+    fi
 fi
 echo ""
 
