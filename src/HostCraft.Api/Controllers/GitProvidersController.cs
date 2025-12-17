@@ -62,7 +62,7 @@ public class GitProvidersController : ControllerBase
             var redirectUri = $"{Request.Scheme}://{Request.Host}/api/gitproviders/callback";
             var authUrl = await _gitProviderService.GetAuthorizationUrlAsync(type, redirectUri, apiUrl);
             
-            return new AuthUrlResponse { AuthUrl = authUrl };
+            return new AuthUrlResponse(authUrl);
         }
         catch (Exception ex)
         {
