@@ -86,13 +86,20 @@ public class ServersController : ControllerBase
                 return BadRequest(new { error = "Username is required" });
             }
             
-            if (string.IsNullOrWhiteSpace(request.PrivateKeyContent))
+            // Check if this is a localhost connection
+            var isLocalhost = request.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase) || 
+                             request.Host == "127.0.0.1" || 
+                             request.Host == "::1";
+            
+            // SSH private key is required for remote servers, but optional for localhost
+            if (!isLocalhost && string.IsNullOrWhiteSpace(request.PrivateKeyContent))
             {
-                return BadRequest(new { error = "SSH private key is required" });
+                return BadRequest(new { error = "SSH private key is required for remote servers" });
             }
             
-            // Validate private key format
-            if (!request.PrivateKeyContent.Contains("BEGIN") || !request.PrivateKeyContent.Contains("PRIVATE KEY"))
+            // Validate private key format if provided
+            if (!string.IsNullOrWhiteSpace(request.PrivateKeyContent) && 
+                (!request.PrivateKeyContent.Contains("BEGIN") || !request.PrivateKeyContent.Contains("PRIVATE KEY")))
             {
                 return BadRequest(new { error = "Invalid SSH private key format. Key must contain BEGIN and PRIVATE KEY markers." });
             }
