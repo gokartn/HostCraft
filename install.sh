@@ -573,35 +573,61 @@ EOF
                 if [ $? -eq 0 ]; then
                     echo "✅ Traefik labels applied successfully"
                     
-                    # Wait for services to be ready
-                    echo "⏳ Waiting for API to be ready..."
-                    sleep 10
-                    
                     # Read Let's Encrypt email for HTTPS
                     letsencrypt_email=""
                     if [ "$enable_https" = "yes" ]; then
                         read -p "Enter Let's Encrypt email for SSL certificate notifications: " letsencrypt_email
                     fi
                     
-                    # Save domain configuration to database via API
-                    echo "💾 Saving domain configuration to database..."
-                    api_response=$(curl -s -X POST "http://localhost:5100/api/systemsettings" \
-                        -H "Content-Type: application/json" \
-                        -d "{\"domain\":\"$hostcraft_domain\",\"enableHttps\":$([ "$enable_https" = "yes" ] && echo "true" || echo "false"),\"letsEncryptEmail\":\"$letsencrypt_email\"}" \
-                        -w "%{http_code}" -o /tmp/hostcraft_api_response.txt)
+                    # Wait for API to be ready (health check)
+                    echo "⏳ Waiting for HostCraft API to be ready..."
+                    max_attempts=30
+                    attempt=0
+                    api_ready=false
                     
-                    if [ "$api_response" = "200" ]; then
-                        echo "✅ Domain configuration saved to database"
-                        domain_configured=true
-                    else
-                        echo "⚠️  API response code: $api_response"
-                        echo "⚠️  Traefik is configured but database save failed. You may need to re-enter the domain in Settings."
-                        if [ -f /tmp/hostcraft_api_response.txt ]; then
-                            cat /tmp/hostcraft_api_response.txt
+                    while [ $attempt -lt $max_attempts ]; do
+                        if curl -sf "http://localhost:5100/health" > /dev/null 2>&1; then
+                            api_ready=true
+                            break
                         fi
+                        attempt=$((attempt + 1))
+                        echo -n "."
+                        sleep 2
+                    done
+                    echo ""
+                    
+                    if [ "$api_ready" = "true" ]; then
+                        echo "✅ API is ready"
+                        
+                        # Save domain configuration to database via API
+                        echo "💾 Saving domain configuration to database..."
+                        
+                        api_response=$(curl -s -X POST "http://localhost:5100/api/systemsettings" \
+                            -H "Content-Type: application/json" \
+                            -d "{\"domain\":\"$hostcraft_domain\",\"enableHttps\":$([ "$enable_https" = "yes" ] && echo "true" || echo "false"),\"letsEncryptEmail\":\"$letsencrypt_email\"}" \
+                            -w "\n%{http_code}" -o /tmp/hostcraft_api_response.txt)
+                        
+                        http_code=$(echo "$api_response" | tail -n 1)
+                        
+                        if [ "$http_code" = "200" ]; then
+                            echo "✅ Domain configuration saved to database"
+                            domain_configured=true
+                        else
+                            echo "⚠️  Failed to save domain configuration (HTTP $http_code)"
+                            echo "⚠️  API Response:"
+                            if [ -f /tmp/hostcraft_api_response.txt ]; then
+                                cat /tmp/hostcraft_api_response.txt
+                                echo ""
+                            fi
+                            echo "⚠️  Traefik labels are applied, but you'll need to re-enter the domain in Settings → HostCraft Domain & SSL"
+                            domain_configured=true  # Traefik is still configured
+                        fi
+                        rm -f /tmp/hostcraft_api_response.txt
+                    else
+                        echo "⚠️  API did not become ready in time"
+                        echo "⚠️  Traefik labels are applied, but you'll need to re-enter the domain in Settings → HostCraft Domain & SSL"
                         domain_configured=true  # Traefik is still configured
                     fi
-                    rm -f /tmp/hostcraft_api_response.txt
                 else
                     echo "⚠️  Failed to apply domain configuration. You can configure it later in the Web UI."
                     domain_configured=false
