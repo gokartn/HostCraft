@@ -117,8 +117,9 @@ if [ "$init_swarm" = "yes" ]; then
             echo "⚠️  No email provided. Skipping Traefik setup."
             setup_traefik="no"
         else
-            echo ""
-            read -p "🌐 Enter domain for Traefik dashboard (optional, press Enter to skip): " TRAEFIK_DASHBOARD_DOMAIN
+            # Always expose Traefik dashboard on port 8080 for management
+            TRAEFIK_DASHBOARD_PORT="8080"
+            echo "✅ Traefik dashboard will be accessible on port 8080"
             echo ""
         fi
     fi
@@ -458,6 +459,7 @@ services:
     ports:
       - "80:80"
       - "443:443"
+      - "8080:8080"
     
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
@@ -544,13 +546,15 @@ echo ""
 echo "✅ Installation completed successfully!"
 echo ""
 echo "📍 Access your HostCraft instance:"
+echo "   Web UI: http://$(hostname -I | awk '{print $1}'):5000"
+echo "   API:    http://$(hostname -I | awk '{print $1}'):5100"
 if [ "$setup_traefik" = "yes" ]; then
-    echo "   Web UI: Configure domain via Settings → HostCraft Domain & SSL"
-    echo "   Direct:  http://$(hostname -I | awk '{print $1}'):5000"
-    echo "   API:     http://$(hostname -I | awk '{print $1}'):5100"
-else
-    echo "   Web UI: http://$(hostname -I | awk '{print $1}'):5000"
-    echo "   API:    http://$(hostname -I | awk '{print $1}'):5100"
+    echo "   Traefik Dashboard: http://$(hostname -I | awk '{print $1}'):8080"
+    echo ""
+    echo "   💡 To enable domain access with HTTPS:"
+    echo "      1. Open the Web UI above"
+    echo "      2. Go to Settings → HostCraft Domain & SSL"
+    echo "      3. Enter your domain and enable HTTPS"
 fi
 echo ""
 
@@ -572,10 +576,7 @@ if [ "$SWARM_ACTIVE" = "true" ]; then
         echo "🌐 Traefik Reverse Proxy:"
         echo "   ✅ Traefik is running and ready for domain configuration"
         echo "   📧 Let's Encrypt Email: $TRAEFIK_EMAIL"
-        if [ -n "$TRAEFIK_DASHBOARD_DOMAIN" ]; then
-            echo "   📊 Dashboard: https://${TRAEFIK_DASHBOARD_DOMAIN}/dashboard/"
-            echo "      (SSL certificate will be provisioned automatically)"
-        fi
+        echo "   📊 Dashboard: http://$(hostname -I | awk '{print $1}'):8080"
         echo ""
         echo "   Next steps:"
         echo "   1. Ensure your domain DNS points to this server"

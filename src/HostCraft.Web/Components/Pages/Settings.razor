@@ -80,6 +80,26 @@
         </div>
     </div>
 
+    <!-- Traefik Dashboard Link -->
+    <div class="card">
+        <div class="card-header">
+            <h2 class="card-title">
+                <span>🔧</span> Reverse Proxy Management
+            </h2>
+        </div>
+        <div class="settings-section">
+            <p style="margin-bottom: 1rem; color: #a3a3a3;">Access the Traefik reverse proxy dashboard to monitor routing, SSL certificates, and service health.</p>
+            <div class="action-buttons">
+                <a href="http://@(GetServerIP()):8080" target="_blank" class="btn btn-primary">
+                    📊 Open Traefik Dashboard
+                </a>
+            </div>
+            <small style="display: block; margin-top: 1rem; color: #a3a3a3;">
+                <strong>Note:</strong> The Traefik dashboard is accessible on port 8080. This provides real-time insights into your routing rules, SSL certificates, and backend services.
+            </small>
+        </div>
+    </div>
+
     <!-- Version & Updates Section -->
     <div class="card">
         <div class="card-header">
@@ -464,6 +484,23 @@
     private string GetArchitecture()
     {
         return System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture.ToString();
+    }
+
+    private string GetServerIP()
+    {
+        // Try to get the server IP from request context
+        try
+        {
+            var request = Http.BaseAddress;
+            if (request != null)
+            {
+                return request.Host;
+            }
+        }
+        catch { }
+        
+        // Fallback to localhost
+        return "localhost";
     }
 
     public class VersionInfo
