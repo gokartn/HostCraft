@@ -19,12 +19,24 @@ public class Application
     
     public int ServerId { get; set; }
     
+    public int? GitProviderId { get; set; }
+    
     // Source configuration
     public ApplicationSourceType SourceType { get; set; }
     
     public string? GitRepository { get; set; }
     
     public string? GitBranch { get; set; } = "main";
+    
+    /// <summary>
+    /// Repository owner/organization name
+    /// </summary>
+    public string? GitOwner { get; set; }
+    
+    /// <summary>
+    /// Repository name (without owner)
+    /// </summary>
+    public string? GitRepoName { get; set; }
     
     public string? DockerImage { get; set; }
     
@@ -77,6 +89,8 @@ public class Application
     public Project Project { get; set; } = null!;
     
     public Server Server { get; set; } = null!;
+    
+    public GitProvider? GitProvider { get; set; }
     
     public ICollection<EnvironmentVariable> EnvironmentVariables { get; set; } = new List<EnvironmentVariable>();
     
