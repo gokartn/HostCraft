@@ -188,31 +188,162 @@ public class HealthController : ControllerBase
     {
         try
         {
-            // Get CPU usage (1 second average)
-            var cpuCommand = "top -bn1 | grep 'Cpu(s)' | sed 's/.*, *\\([0-9.]*\\)%* id.*/\\1/' | awk '{print 100 - $1}'";
-            var cpuResult = await _sshService.ExecuteCommandAsync(server, cpuCommand, cancellationToken);
-            var cpuUsage = cpuResult.ExitCode == 0 && double.TryParse(cpuResult.Output.Trim(), out var cpu) ? cpu : 0;
-            
-            // Get memory usage
-            var memCommand = "free -m | awk 'NR==2{printf \"%s %s\", $2,$3}'";
-            var memResult = await _sshService.ExecuteCommandAsync(server, memCommand, cancellationToken);
-            var memParts = memResult.Output.Trim().Split(' ');
-            var totalMemory = memParts.Length > 0 && long.TryParse(memParts[0], out var total) ? total : 0;
-            var usedMemory = memParts.Length > 1 && long.TryParse(memParts[1], out var used) ? used : 0;
-            var memoryUsage = totalMemory > 0 ? (double)usedMemory / totalMemory * 100 : 0;
-            
-            // Get disk usage
-            var diskCommand = "df -h / | awk 'NR==2{print $5}' | sed 's/%//'";
-            var diskResult = await _sshService.ExecuteCommandAsync(server, diskCommand, cancellationToken);
-            var diskUsage = diskResult.ExitCode == 0 && double.TryParse(diskResult.Output.Trim(), out var disk) ? disk : 0;
-            
-            return (cpuUsage, memoryUsage, diskUsage, totalMemory, usedMemory);
+            // Check if this is localhost
+            bool isLocalhost = server.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase) || 
+                               server.Host == "127.0.0.1" || 
+                               server.Host == "::1";
+
+            if (isLocalhost)
+            {
+                // For localhost, read directly from host /proc filesystem (if running in container)
+                // or use system APIs
+                return await GetLocalHostMetricsAsync(cancellationToken);
+            }
+            else
+            {
+                // For remote servers, use SSH
+                return await GetRemoteHostMetricsAsync(server, cancellationToken);
+            }
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to get resource usage for server {ServerId}", server.Id);
             return (0, 0, 0, 0, 0);
         }
+    }
+
+    private async Task<(double CpuUsage, double MemoryUsage, double DiskUsage, long TotalMemoryMB, long UsedMemoryMB)>
+        GetLocalHostMetricsAsync(CancellationToken cancellationToken)
+    {
+        // Check if we're running in a container with host /proc mounted
+        bool hasHostProc = Directory.Exists("/host/proc");
+        string procPath = hasHostProc ? "/host/proc" : "/proc";
+        
+        _logger.LogInformation("Reading metrics from {ProcPath} (container: {IsContainer})", procPath, hasHostProc);
+
+        double cpuUsage = 0;
+        long totalMemory = 0;
+        long usedMemory = 0;
+        double memoryUsage = 0;
+        double diskUsage = 0;
+
+        // Read CPU usage from /proc/stat
+        try
+        {
+            var statFile = Path.Combine(procPath, "stat");
+            if (System.IO.File.Exists(statFile))
+            {
+                var lines = await System.IO.File.ReadAllLinesAsync(statFile, cancellationToken);
+                var cpuLine = lines.FirstOrDefault(l => l.StartsWith("cpu "));
+                if (cpuLine != null)
+                {
+                    var values = cpuLine.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries).Skip(1).Select(long.Parse).ToArray();
+                    if (values.Length >= 4)
+                    {
+                        var idle = values[3];
+                        var total = values.Sum();
+                        cpuUsage = total > 0 ? (double)(total - idle) / total * 100.0 : 0;
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to read CPU from {Path}", procPath);
+        }
+
+        // Read memory from /proc/meminfo
+        try
+        {
+            var meminfoFile = Path.Combine(procPath, "meminfo");
+            if (System.IO.File.Exists(meminfoFile))
+            {
+                var lines = await System.IO.File.ReadAllLinesAsync(meminfoFile, cancellationToken);
+                var memTotal = lines.FirstOrDefault(l => l.StartsWith("MemTotal:"));
+                var memAvailable = lines.FirstOrDefault(l => l.StartsWith("MemAvailable:"));
+                
+                if (memTotal != null && memAvailable != null)
+                {
+                    var totalKB = long.Parse(memTotal.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries)[1]);
+                    var availableKB = long.Parse(memAvailable.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries)[1]);
+                    
+                    totalMemory = totalKB / 1024; // Convert to MB
+                    usedMemory = (totalKB - availableKB) / 1024;
+                    memoryUsage = totalMemory > 0 ? (double)usedMemory / totalMemory * 100.0 : 0;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to read memory from {Path}", procPath);
+        }
+
+        // For disk usage, read from actual host root mount
+        try
+        {
+            var hostRoot = hasHostProc ? "/host/proc/../.." : "/";
+            var driveInfo = new System.IO.DriveInfo(hostRoot);
+            if (driveInfo.IsReady)
+            {
+                diskUsage = (1.0 - (double)driveInfo.AvailableFreeSpace / driveInfo.TotalSize) * 100.0;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to read disk usage");
+        }
+
+        return (cpuUsage, memoryUsage, diskUsage, totalMemory, usedMemory);
+    }
+
+    private async Task<(double CpuUsage, double MemoryUsage, double DiskUsage, long TotalMemoryMB, long UsedMemoryMB)>
+        GetRemoteHostMetricsAsync(HostCraft.Core.Entities.Server server, CancellationToken cancellationToken)
+    {
+        // Use SSH for remote servers
+        var cpuResult = await _sshService.ExecuteCommandAsync(server, "top -bn1 | grep 'Cpu(s)' | head -1", cancellationToken);
+        var memResult = await _sshService.ExecuteCommandAsync(server, "free -m | grep 'Mem:'", cancellationToken);
+        var diskResult = await _sshService.ExecuteCommandAsync(server, "df -h / | tail -1", cancellationToken);
+
+        double cpuUsage = 0;
+        if (cpuResult.ExitCode == 0)
+        {
+            var match = System.Text.RegularExpressions.Regex.Match(cpuResult.Output, @"(\d+\.?\d*)\s+id");
+            if (match.Success && double.TryParse(match.Groups[1].Value, out var idlePercent))
+            {
+                cpuUsage = 100.0 - idlePercent;
+            }
+        }
+        
+        long totalMemory = 0;
+        long usedMemory = 0;
+        double memoryUsage = 0;
+        
+        if (memResult.ExitCode == 0)
+        {
+            var parts = memResult.Output.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length >= 3)
+            {
+                long.TryParse(parts[1], out totalMemory);
+                long.TryParse(parts[2], out usedMemory);
+                if (totalMemory > 0)
+                {
+                    memoryUsage = (double)usedMemory / totalMemory * 100.0;
+                }
+            }
+        }
+        
+        double diskUsage = 0;
+        if (diskResult.ExitCode == 0)
+        {
+            var parts = diskResult.Output.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length >= 5)
+            {
+                var percentStr = parts[4].TrimEnd('%');
+                double.TryParse(percentStr, out diskUsage);
+            }
+        }
+        
+        return (cpuUsage, memoryUsage, diskUsage, totalMemory, usedMemory);
     }
 }
 

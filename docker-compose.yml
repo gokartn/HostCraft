@@ -70,6 +70,8 @@ services:
     restart: unless-stopped  # For standalone mode
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock  # Access to Docker daemon
+      - /proc:/host/proc:ro  # Read host system metrics
+      - /sys:/host/sys:ro    # Read host system info
     # Swarm mode configuration
     deploy:
       mode: replicated
