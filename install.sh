@@ -540,38 +540,35 @@ EOF
                 echo ""
                 echo "🔧 Applying Traefik configuration to HostCraft..."
                 
-                # Build the docker service update command with Traefik labels
-                update_cmd="docker service update"
-                update_cmd="$update_cmd --label-add traefik.enable=true"
-                update_cmd="$update_cmd --label-add traefik.docker.network=traefik-public"
-                
+                # Apply Traefik labels to HostCraft web service
                 if [ "$enable_https" = "yes" ]; then
-                    # HTTPS configuration
-                    update_cmd="$update_cmd --label-add traefik.http.routers.hostcraft-web.rule=Host(\`$hostcraft_domain\`)"
-                    update_cmd="$update_cmd --label-add traefik.http.routers.hostcraft-web.entrypoints=websecure"
-                    update_cmd="$update_cmd --label-add traefik.http.routers.hostcraft-web.tls=true"
-                    update_cmd="$update_cmd --label-add traefik.http.routers.hostcraft-web.tls.certresolver=letsencrypt"
-                    update_cmd="$update_cmd --label-add traefik.http.routers.hostcraft-web.service=hostcraft-web"
-                    update_cmd="$update_cmd --label-add traefik.http.services.hostcraft-web.loadbalancer.server.port=8080"
-                    
-                    # HTTP to HTTPS redirect
-                    update_cmd="$update_cmd --label-add traefik.http.routers.hostcraft-web-http.rule=Host(\`$hostcraft_domain\`)"
-                    update_cmd="$update_cmd --label-add traefik.http.routers.hostcraft-web-http.entrypoints=web"
-                    update_cmd="$update_cmd --label-add traefik.http.routers.hostcraft-web-http.middlewares=redirect-to-https"
-                    update_cmd="$update_cmd --label-add traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https"
-                    update_cmd="$update_cmd --label-add traefik.http.middlewares.redirect-to-https.redirectscheme.permanent=true"
+                    # HTTPS configuration with Let's Encrypt
+                    docker service update \
+                        --label-add "traefik.enable=true" \
+                        --label-add "traefik.docker.network=traefik-public" \
+                        --label-add "traefik.http.routers.hostcraft-web.rule=Host(\`$hostcraft_domain\`)" \
+                        --label-add "traefik.http.routers.hostcraft-web.entrypoints=websecure" \
+                        --label-add "traefik.http.routers.hostcraft-web.tls=true" \
+                        --label-add "traefik.http.routers.hostcraft-web.tls.certresolver=letsencrypt" \
+                        --label-add "traefik.http.routers.hostcraft-web.service=hostcraft-web" \
+                        --label-add "traefik.http.services.hostcraft-web.loadbalancer.server.port=8080" \
+                        --label-add "traefik.http.routers.hostcraft-web-http.rule=Host(\`$hostcraft_domain\`)" \
+                        --label-add "traefik.http.routers.hostcraft-web-http.entrypoints=web" \
+                        --label-add "traefik.http.routers.hostcraft-web-http.middlewares=redirect-to-https" \
+                        --label-add "traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https" \
+                        --label-add "traefik.http.middlewares.redirect-to-https.redirectscheme.permanent=true" \
+                        --force hostcraft_hostcraft-web
                 else
                     # HTTP only configuration
-                    update_cmd="$update_cmd --label-add traefik.http.routers.hostcraft-web.rule=Host(\`$hostcraft_domain\`)"
-                    update_cmd="$update_cmd --label-add traefik.http.routers.hostcraft-web.entrypoints=web"
-                    update_cmd="$update_cmd --label-add traefik.http.routers.hostcraft-web.service=hostcraft-web"
-                    update_cmd="$update_cmd --label-add traefik.http.services.hostcraft-web.loadbalancer.server.port=8080"
+                    docker service update \
+                        --label-add "traefik.enable=true" \
+                        --label-add "traefik.docker.network=traefik-public" \
+                        --label-add "traefik.http.routers.hostcraft-web.rule=Host(\`$hostcraft_domain\`)" \
+                        --label-add "traefik.http.routers.hostcraft-web.entrypoints=web" \
+                        --label-add "traefik.http.routers.hostcraft-web.service=hostcraft-web" \
+                        --label-add "traefik.http.services.hostcraft-web.loadbalancer.server.port=8080" \
+                        --force hostcraft_hostcraft-web
                 fi
-                
-                update_cmd="$update_cmd --force hostcraft_hostcraft-web"
-                
-                # Execute the update command
-                eval $update_cmd
                 
                 if [ $? -eq 0 ]; then
                     echo "✅ HostCraft configured with domain: $hostcraft_domain"
