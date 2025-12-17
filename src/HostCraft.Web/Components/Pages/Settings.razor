@@ -282,14 +282,20 @@
     {
         try
         {
-            // Load HostCraft domain configuration from API or settings
-            // For now, use placeholder
-            hostcraftDomain = "91.99.81.132:5000";
-            hostcraftEnableHttps = false;
+            var settings = await Http.GetFromJsonAsync<SystemSettingsDto>("api/systemsettings");
+            if (settings != null)
+            {
+                hostcraftDomain = settings.HostCraftDomain ?? "91.99.81.132:5000";
+                hostcraftEnableHttps = settings.HostCraftEnableHttps;
+                hostcraftLetsEncryptEmail = settings.HostCraftLetsEncryptEmail;
+            }
         }
         catch (Exception ex)
         {
             domainError = $"Failed to load domain configuration: {ex.Message}";
+            // Set defaults
+            hostcraftDomain = "91.99.81.132:5000";
+            hostcraftEnableHttps = false;
         }
     }
 
@@ -316,17 +322,32 @@
                 return;
             }
 
-            // TODO: Call API to save HostCraft domain configuration
-            // For now, show success message
-            await Task.Delay(500); // Simulate API call
+            // Call API to save HostCraft domain configuration
+            var request = new ConfigureHostCraftRequest(
+                hostcraftDomain,
+                hostcraftEnableHttps,
+                hostcraftLetsEncryptEmail
+            );
+
+            var response = await Http.PostAsJsonAsync("api/systemsettings", request);
             
-            domainSuccess = $"Domain configuration saved! HostCraft will be accessible at {(hostcraftEnableHttps ? "https" : "http")}://{hostcraftDomain}";
-            
-            // In a real implementation, you would:
-            // 1. Update Traefik/Caddy configuration to route to HostCraft UI
-            // 2. Request SSL certificate if HTTPS is enabled
-            // 3. Update docker-compose.yml or stack configuration
-            // 4. Restart/reload proxy service
+            if (response.IsSuccessStatusCode)
+            {
+                var result = await response.Content.ReadFromJsonAsync<ConfigureHostCraftResponse>();
+                if (result?.Success == true)
+                {
+                    domainSuccess = result.Message + " Note: You may need to restart the web service for changes to take full effect.";
+                }
+                else
+                {
+                    domainError = result?.Message ?? "Configuration failed";
+                }
+            }
+            else
+            {
+                var errorText = await response.Content.ReadAsStringAsync();
+                domainError = $"Failed to save configuration: {errorText}";
+            }
         }
         catch (Exception ex)
         {
@@ -337,6 +358,25 @@
             savingDomain = false;
         }
     }
+
+    private record SystemSettingsDto(
+        string? HostCraftDomain,
+        bool HostCraftEnableHttps,
+        string? HostCraftLetsEncryptEmail,
+        string? CertificateStatus,
+        DateTime? ConfiguredAt,
+        DateTime? ProxyUpdatedAt);
+
+    private record ConfigureHostCraftRequest(
+        string Domain,
+        bool EnableHttps,
+        string? LetsEncryptEmail);
+
+    private record ConfigureHostCraftResponse(
+        bool Success,
+        string Message,
+        string? Domain,
+        bool HttpsEnabled);
 
     private async Task LoadVersion()
     {
