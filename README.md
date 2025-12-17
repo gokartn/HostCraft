@@ -61,29 +61,35 @@ docker-compose logs -f
 
 ## 🗑️ Uninstallation
 
-To completely remove HostCraft from your system:
+### Quick Uninstall (keeps data)
 
-### Using the uninstall script:
+To remove HostCraft while keeping data for potential reinstall:
 
-1. **Make the script executable:**
-   ```bash
-   chmod +x uninstall.sh
-   ```
+```bash
+chmod +x uninstall.sh
+./uninstall.sh
+```
 
-2. **Run the uninstaller:**
-   ```bash
-   ./uninstall.sh
-   ```
-   
-   Or run directly with bash:
-   ```bash
-   bash uninstall.sh
-   ```
+This removes containers, networks, and images but preserves volumes.
 
-This will:
-- Stop all running containers
-- Remove containers, networks, and images
-- Clean up volumes (optional, you'll be prompted)
+### Complete Cleanup (⚠️ REMOVES EVERYTHING)
+
+To remove **EVERY TRACE** of HostCraft including all data, folders, and configuration:
+
+```bash
+chmod +x cleanup.sh
+./cleanup.sh
+```
+
+**This will delete:**
+- ✓ All Docker containers, volumes, and networks
+- ✓ All application data directories (`/var/lib/hostcraft`, `/opt/hostcraft`, etc.)
+- ✓ All configuration files (`/etc/hostcraft`)
+- ✓ All log files (`/var/log/hostcraft`)
+- ✓ Docker images (optional)
+- ✓ Installation directory (optional)
+
+**⚠️ WARNING: This action cannot be undone! All data will be permanently lost.**
 
 ### Manual Uninstallation
 
