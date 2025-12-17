@@ -25,6 +25,9 @@
                     </div>
                 </div>
                 <div class="header-actions">
+                    <button class="btn btn-outline" @onclick="ValidateServer" disabled="@validating">
+                        @(validating ? "🔄 Validating..." : "🔄 Re-validate")
+                    </button>
                     <button class="btn btn-outline" @onclick="@(() => Navigation.NavigateTo($"/servers/{Id}/edit"))">
                         ✏️ Edit
                     </button>
@@ -162,6 +165,7 @@
 
     private ServerDto? server;
     private bool loading = true;
+    private bool validating = false;
     private string? publicKeyInfo;
     private bool showingPublicKey = false;
 
@@ -188,6 +192,33 @@
     }
 
     private void OpenTerminal() => Navigation.NavigateTo($"/servers/{Id}/terminal");
+
+    private async Task ValidateServer()
+    {
+        validating = true;
+        try
+        {
+            var response = await Http.PostAsync($"api/servers/{Id}/validate", null);
+            if (response.IsSuccessStatusCode)
+            {
+                await JSRuntime.InvokeVoidAsync("alert", "✅ Server validated successfully! Swarm mode detection completed.");
+                await LoadServer(); // Reload to show updated type
+            }
+            else
+            {
+                var error = await response.Content.ReadAsStringAsync();
+                await JSRuntime.InvokeVoidAsync("alert", $"❌ Validation failed: {error}");
+            }
+        }
+        catch (Exception ex)
+        {
+            await JSRuntime.InvokeVoidAsync("alert", $"❌ Error validating server: {ex.Message}");
+        }
+        finally
+        {
+            validating = false;
+        }
+    }
 
     private async Task ShowPublicKey()
     {

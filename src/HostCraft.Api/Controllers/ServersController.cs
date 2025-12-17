@@ -260,6 +260,25 @@ public class ServersController : ControllerBase
                 serverToValidate.Status = isValid ? ServerStatus.Online : ServerStatus.Offline;
                 serverToValidate.LastHealthCheck = DateTime.UtcNow;
                 
+                // Detect Swarm mode if connection is valid
+                if (isValid)
+                {
+                    try
+                    {
+                        var systemInfo = await scopedDockerService.GetSystemInfoAsync(serverToValidate);
+                        if (systemInfo.SwarmActive && serverToValidate.Type == ServerType.Standalone)
+                        {
+                            _logger.LogInformation("Swarm detected on updated server {ServerName}, updating type to SwarmManager", serverToValidate.Name);
+                            serverToValidate.Type = ServerType.SwarmManager;
+                            serverToValidate.IsSwarmManager = true;
+                        }
+                    }
+                    catch (Exception swarmEx)
+                    {
+                        _logger.LogWarning(swarmEx, "Failed to detect Swarm on server {ServerName}", serverToValidate.Name);
+                    }
+                }
+                
                 await scopedContext.SaveChangesAsync();
                 
                 _logger.LogInformation("Server {ServerName} validation result: {Status}", serverToValidate.Name, serverToValidate.Status);
@@ -495,8 +514,9 @@ public class ServersController : ControllerBase
                 // Update server type if Swarm is detected
                 if (systemInfo.SwarmActive && server.Type == ServerType.Standalone)
                 {
-                    _logger.LogInformation("Swarm detected on server {ServerName}, updating type", server.Name);
+                    _logger.LogInformation("Swarm detected on server {ServerName}, updating type to SwarmManager", server.Name);
                     server.Type = ServerType.SwarmManager;
+                    server.IsSwarmManager = true;
                 }
                 
                 await _context.SaveChangesAsync();
