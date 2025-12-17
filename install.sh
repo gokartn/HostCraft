@@ -426,14 +426,8 @@ version: '3.8'
 
 services:
   traefik:
-if [ "$setup_traefik" = "yes" ]; then
-    echo "   Web UI: Configure domain via Settings → HostCraft Domain & SSL"
-    echo "   Direct:  http://$(hostname -I | awk '{print $1}'):5000"
-    echo "   API:     http://$(hostname -I | awk '{print $1}'):5100"
-else
-    echo "   Web UI: http://$(hostname -I | awk '{print $1}'):5000"
-    echo "   API:    http://$(hostname -I | awk '{print $1}'):5100"
-fi
+    image: traefik:v2.11
+    command:
       # Docker provider
       - --providers.docker=true
       - --providers.docker.swarmMode=true
@@ -550,8 +544,14 @@ echo ""
 echo "✅ Installation completed successfully!"
 echo ""
 echo "📍 Access your HostCraft instance:"
-echo "   Web UI: http://$(hostname -I | awk '{print $1}'):5000"
-echo "   API:    http://$(hostname -I | awk '{print $1}'):5100"
+if [ "$setup_traefik" = "yes" ]; then
+    echo "   Web UI: Configure domain via Settings → HostCraft Domain & SSL"
+    echo "   Direct:  http://$(hostname -I | awk '{print $1}'):5000"
+    echo "   API:     http://$(hostname -I | awk '{print $1}'):5100"
+else
+    echo "   Web UI: http://$(hostname -I | awk '{print $1}'):5000"
+    echo "   API:    http://$(hostname -I | awk '{print $1}'):5100"
+fi
 echo ""
 
 if [ "$SWARM_ACTIVE" = "true" ]; then
