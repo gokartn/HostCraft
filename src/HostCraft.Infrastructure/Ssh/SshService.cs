@@ -1,5 +1,6 @@
 using HostCraft.Core.Entities;
 using HostCraft.Core.Interfaces;
+using Microsoft.Extensions.Logging;
 using Renci.SshNet;
 
 namespace HostCraft.Infrastructure.Ssh;
@@ -65,7 +66,8 @@ public class SshService : ISshService
                 await Task.Run(() => client.Connect(), cancellationToken);
             }
 
-            using var sftpClient = new SftpClient(server.Host, server.Port, server.Username, GetAuthenticationMethod(server));
+            var connectionInfo = new ConnectionInfo(server.Host, server.Port, server.Username, GetAuthenticationMethod(server));
+            using var sftpClient = new SftpClient(connectionInfo);
             if (!sftpClient.IsConnected)
             {
                 await Task.Run(() => sftpClient.Connect(), cancellationToken);
@@ -93,7 +95,8 @@ public class SshService : ISshService
                 await Task.Run(() => client.Connect(), cancellationToken);
             }
 
-            using var sftpClient = new SftpClient(server.Host, server.Port, server.Username, GetAuthenticationMethod(server));
+            var connectionInfo = new ConnectionInfo(server.Host, server.Port, server.Username, GetAuthenticationMethod(server));
+            using var sftpClient = new SftpClient(connectionInfo);
             if (!sftpClient.IsConnected)
             {
                 await Task.Run(() => sftpClient.Connect(), cancellationToken);
@@ -132,8 +135,8 @@ public class SshService : ISshService
             }
 
             // Create new client
-            var authMethod = GetAuthenticationMethod(server);
-            var client = new SshClient(server.Host, server.Port, server.Username, authMethod);
+            var connectionInfo = new ConnectionInfo(server.Host, server.Port, server.Username, GetAuthenticationMethod(server));
+            var client = new SshClient(connectionInfo);
             _sshClients[key] = client;
             
             return client;
