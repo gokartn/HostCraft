@@ -46,7 +46,7 @@ sleep 10
 
 ### Step 3: Apply Database Fixes
 
-Due to Entity Framework Core migrations being generated for SQLite, we need to convert column types for PostgreSQL:
+The following SQL fixes ensure all column types are correctly set for PostgreSQL:
 
 ```bash
 cat > /tmp/fix_postgres.sql << 'EOF'
@@ -172,14 +172,14 @@ All containers should show as "Up" status.
 
 ## Why These Fixes Are Needed
 
-Entity Framework Core generates migrations based on the development database (SQLite), which creates column types incompatible with PostgreSQL:
+While HostCraft now uses PostgreSQL-native migrations, older databases or migrations may require column type conversions:
 
-- **Boolean columns**: Created as `INTEGER` instead of `boolean`
-- **UUID columns**: Created as `TEXT` instead of `uuid`
-- **DateTime columns**: Created as `TEXT` instead of `timestamp`
-- **Auto-increment**: Missing sequences for ID columns
+- **Boolean columns**: Ensure proper `boolean` type
+- **UUID columns**: Ensure proper `uuid` type  
+- **DateTime columns**: Ensure proper `timestamp with time zone` type
+- **Auto-increment**: Ensure proper sequences for ID columns
 
-The installation script automatically converts all these types to their proper PostgreSQL equivalents.
+The installation script automatically ensures all types are correct for PostgreSQL.
 
 ---
 

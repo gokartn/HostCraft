@@ -187,20 +187,24 @@ HostCraft/
 
 | Component | Technology |
 |-----------|------------|
-| Backend API | ASP.NET Core 8 |
-| Web UI | Blazor Server (planned) |
-| Database | EF Core 8 + PostgreSQL/SQLite |
+| Backend API | ASP.NET Core 10 |
+| Web UI | Blazor Server |
+| Database | EF Core 10 + PostgreSQL |
 | Docker API | Docker.DotNet |
 | SSH | SSH.NET |
 | Background Jobs | Hangfire (planned) |
 
 ## 🏃 Running Locally
 
+**Prerequisites:**
+- PostgreSQL 16 or higher
+- .NET 10 SDK
+
 ```powershell
 # Build the solution
 dotnet build HostCraft.sln
 
-# Run the API (uses SQLite by default)
+# Run the API (requires PostgreSQL)
 dotnet run --project src/HostCraft.Api
 
 # API will be available at http://localhost:5100
@@ -208,7 +212,7 @@ dotnet run --project src/HostCraft.Api
 
 ## 📋 Database
 
-Currently configured to use SQLite for development. To use PostgreSQL, update the connection string in `appsettings.json`:
+HostCraft requires PostgreSQL. Configure the connection string in `appsettings.json`:
 
 ```json
 {

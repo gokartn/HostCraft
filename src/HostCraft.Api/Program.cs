@@ -17,24 +17,14 @@ builder.Services.AddControllers()
     });
 builder.Services.AddEndpointsApiExplorer();
 
-// Database
+// Database - PostgreSQL only
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
-    ?? "Data Source=hostcraft.db";
+    ?? throw new InvalidOperationException("Connection string 'DefaultConnection' not found. HostCraft requires PostgreSQL.");
 
-if (connectionString.Contains("Data Source="))
-{
-    // SQLite for development
-    builder.Services.AddDbContext<HostCraftDbContext>(options =>
-        options.UseSqlite(connectionString));
-}
-else
-{
-    // PostgreSQL for production
-    builder.Services.AddDbContext<HostCraftDbContext>(options =>
-        options.UseNpgsql(connectionString)
-            .ConfigureWarnings(warnings => 
-                warnings.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.PendingModelChangesWarning)));
-}
+builder.Services.AddDbContext<HostCraftDbContext>(options =>
+    options.UseNpgsql(connectionString)
+        .ConfigureWarnings(warnings => 
+            warnings.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.PendingModelChangesWarning)));
 
 // Services
 // DockerService as singleton to maintain SSH tunnels across requests
