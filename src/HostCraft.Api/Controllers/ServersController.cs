@@ -34,10 +34,19 @@ public class ServersController : ControllerBase
     [HttpGet]
     public async Task<ActionResult<IEnumerable<Server>>> GetServers()
     {
-        return await _context.Servers
+        var servers = await _context.Servers
             .Include(s => s.PrivateKey)
             .Include(s => s.Region)
+            .AsNoTracking()
             .ToListAsync();
+            
+        // Clear navigation properties that might cause serialization issues
+        foreach (var server in servers)
+        {
+            server.Applications = new List<Application>();
+        }
+            
+        return servers;
     }
     
     [HttpGet("{id}")]
