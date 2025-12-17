@@ -16,7 +16,7 @@ Get HostCraft up and running in minutes with Docker Compose:
 1. **Clone the repository:**
    ```bash
    git clone https://github.com/gokartn/hostcraft.git
-   cd HostCraft
+   cd hostcraft
    ```
 
 2. **Make the install script executable:**
