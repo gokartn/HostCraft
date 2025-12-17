@@ -142,6 +142,79 @@ public class GitProviderService : IGitProviderService
         return true;
     }
 
+    public async Task<bool> RegisterWebhookAsync(Application application, string webhookUrl, string webhookSecret)
+    {
+        if (application.GitProvider == null)
+        {
+            var provider = await _context.GitProviders.FindAsync(application.GitProviderId);
+            if (provider == null) return false;
+            application.GitProvider = provider;
+        }
+
+        return application.GitProvider.Type switch
+        {
+            GitProviderType.GitHub => await RegisterGitHubWebhookAsync(application, webhookUrl, webhookSecret),
+            _ => throw new NotSupportedException($"Webhook registration for {application.GitProvider.Type} not yet implemented")
+        };
+    }
+
+    public async Task<bool> UnregisterWebhookAsync(Application application)
+    {
+        // TODO: Implement webhook deletion
+        await Task.CompletedTask;
+        return false;
+    }
+
+    private async Task<bool> RegisterGitHubWebhookAsync(Application application, string webhookUrl, string webhookSecret)
+    {
+        try
+        {
+            var client = CreateAuthenticatedClient(application.GitProvider!);
+            client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("HostCraft", "1.0"));
+
+            var payload = new
+            {
+                name = "web",
+                active = true,
+                events = new[] { "push", "pull_request" },
+                config = new
+                {
+                    url = webhookUrl,
+                    content_type = "json",
+                    secret = webhookSecret,
+                    insecure_ssl = "0"
+                }
+            };
+
+            var response = await client.PostAsJsonAsync(
+                $"https://api.github.com/repos/{application.GitOwner}/{application.GitRepoName}/hooks",
+                payload);
+
+            if (response.IsSuccessStatusCode)
+            {
+                _logger.LogInformation(
+                    "Registered webhook for {Owner}/{Repo}",
+                    application.GitOwner,
+                    application.GitRepoName);
+                return true;
+            }
+            else
+            {
+                var error = await response.Content.ReadAsStringAsync();
+                _logger.LogWarning(
+                    "Failed to register webhook: {StatusCode} - {Error}",
+                    response.StatusCode,
+                    error);
+                return false;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error registering webhook for {Owner}/{Repo}", application.GitOwner, application.GitRepoName);
+            return false;
+        }
+    }
+
     // GitHub implementation
     private string GetGitHubAuthUrl(string redirectUri)
     {

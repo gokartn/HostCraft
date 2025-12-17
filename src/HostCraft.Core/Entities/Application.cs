@@ -46,6 +46,46 @@ public class Application
     
     public string? BuildContext { get; set; } = ".";
     
+    /// <summary>
+    /// Build args to pass to Docker build
+    /// </summary>
+    public string? BuildArgs { get; set; }
+    
+    /// <summary>
+    /// Watch specific paths for changes (comma-separated). If null, watches all files.
+    /// </summary>
+    public string? WatchPaths { get; set; }
+    
+    /// <summary>
+    /// Auto-deploy on push to configured branch
+    /// </summary>
+    public bool AutoDeployOnPush { get; set; } = true;
+    
+    /// <summary>
+    /// Enable preview deployments for pull requests
+    /// </summary>
+    public bool EnablePreviewDeployments { get; set; } = false;
+    
+    /// <summary>
+    /// Unique token for webhook authentication
+    /// </summary>
+    public string? WebhookSecret { get; set; }
+    
+    /// <summary>
+    /// Last commit SHA deployed
+    /// </summary>
+    public string? LastCommitSha { get; set; }
+    
+    /// <summary>
+    /// Last commit message
+    /// </summary>
+    public string? LastCommitMessage { get; set; }
+    
+    /// <summary>
+    /// Clone submodules when pulling from Git
+    /// </summary>
+    public bool CloneSubmodules { get; set; } = false;
+    
     // Deployment configuration
     public string? Domain { get; set; }
     

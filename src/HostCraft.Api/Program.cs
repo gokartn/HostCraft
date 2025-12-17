@@ -34,6 +34,12 @@ builder.Services.AddScoped<INetworkManager, NetworkManager>();
 builder.Services.AddScoped<IProxyService, HostCraft.Infrastructure.Proxy.ProxyService>();
 builder.Services.AddHttpClient<IUpdateService, HostCraft.Infrastructure.Updates.UpdateService>();
 
+// Git integration services
+builder.Services.AddHttpClient(); // For GitProviderService
+builder.Services.AddScoped<IGitProviderService, HostCraft.Infrastructure.Git.GitProviderService>();
+builder.Services.AddScoped<IGitService, HostCraft.Infrastructure.Git.GitService>();
+builder.Services.AddScoped<IBuildService, BuildService>();
+
 // CORS for development
 builder.Services.AddCors(options =>
 {

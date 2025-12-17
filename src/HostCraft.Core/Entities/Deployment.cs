@@ -17,6 +17,45 @@ public class Deployment
     
     public string? CommitHash { get; set; }
     
+    /// <summary>
+    /// Git commit SHA being deployed (alias for CommitHash)
+    /// </summary>
+    public string? CommitSha
+    {
+        get => CommitHash;
+        set => CommitHash = value;
+    }
+    
+    /// <summary>
+    /// Git commit message
+    /// </summary>
+    public string? CommitMessage { get; set; }
+    
+    /// <summary>
+    /// Git commit author
+    /// </summary>
+    public string? CommitAuthor { get; set; }
+    
+    /// <summary>
+    /// Who/what triggered this deployment
+    /// </summary>
+    public string? TriggeredBy { get; set; }
+    
+    /// <summary>
+    /// Whether this is a preview deployment (e.g., for a PR)
+    /// </summary>
+    public bool IsPreview { get; set; } = false;
+    
+    /// <summary>
+    /// Preview identifier (e.g., "pr-123")
+    /// </summary>
+    public string? PreviewId { get; set; }
+    
+    /// <summary>
+    /// Timestamp when deployment was created/queued
+    /// </summary>
+    public DateTime CreatedAt { get; set; }
+    
     public string? ImageTag { get; set; }
     
     public string? ImageDigest { get; set; }

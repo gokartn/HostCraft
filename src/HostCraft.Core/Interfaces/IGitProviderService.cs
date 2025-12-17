@@ -24,6 +24,16 @@ public interface IGitProviderService
     Task<bool> RefreshTokenAsync(int providerId);
     
     /// <summary>
+    /// Register a webhook with the Git provider for an application.
+    /// </summary>
+    Task<bool> RegisterWebhookAsync(Application application, string webhookUrl, string webhookSecret);
+    
+    /// <summary>
+    /// Unregister a webhook from the Git provider.
+    /// </summary>
+    Task<bool> UnregisterWebhookAsync(Application application);
+    
+    /// <summary>
     /// Get all repositories for a connected Git provider.
     /// </summary>
     Task<List<GitRepository>> GetRepositoriesAsync(int providerId);
