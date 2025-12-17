@@ -357,8 +357,7 @@
                 }
                 else
                 {
-                    var error = await response.Content.ReadAsStringAsync();
-                    errorMessage = $"Failed to update server: {error}";
+                    errorMessage = await ParseErrorResponse(response, "update");
                 }
             }
             else
@@ -370,19 +369,81 @@
                 }
                 else
                 {
-                    var error = await response.Content.ReadAsStringAsync();
-                    errorMessage = $"Failed to add server: {error}";
+                    errorMessage = await ParseErrorResponse(response, "add");
                 }
             }
         }
         catch (Exception ex)
         {
-            errorMessage = $"Failed to save server: {ex.Message}";
+            errorMessage = $"❌ Failed to save server: {ex.Message}";
         }
         finally
         {
             saving = false;
         }
+    }
+
+    private async Task<string> ParseErrorResponse(HttpResponseMessage response, string action)
+    {
+        try
+        {
+            var contentType = response.Content.Headers.ContentType?.MediaType;
+            var statusCode = (int)response.StatusCode;
+            
+            // Try to parse as JSON first
+            if (contentType?.Contains("application/json") == true || contentType?.Contains("application/problem+json") == true)
+            {
+                try
+                {
+                    var errorObj = await response.Content.ReadFromJsonAsync<ErrorResponse>();
+                    if (errorObj?.Error != null)
+                    {
+                        return $"❌ Failed to {action} server ({statusCode}): {errorObj.Error}";
+                    }
+                    if (errorObj?.Title != null)
+                    {
+                        var details = !string.IsNullOrEmpty(errorObj.Detail) ? $": {errorObj.Detail}" : "";
+                        return $"❌ Failed to {action} server ({statusCode}): {errorObj.Title}{details}";
+                    }
+                }
+                catch { }
+            }
+            
+            // Fall back to raw text
+            var rawError = await response.Content.ReadAsStringAsync();
+            
+            // Clean up common error patterns
+            if (string.IsNullOrWhiteSpace(rawError))
+            {
+                return $"❌ Failed to {action} server ({statusCode}): {response.ReasonPhrase}";
+            }
+            
+            // Truncate very long errors
+            if (rawError.Length > 500)
+            {
+                rawError = rawError.Substring(0, 497) + "...";
+            }
+            
+            // Remove HTML tags if present
+            if (rawError.Contains("<html") || rawError.Contains("<!DOCTYPE"))
+            {
+                return $"❌ Failed to {action} server ({statusCode}): Server returned an error. Check server logs for details.";
+            }
+            
+            return $"❌ Failed to {action} server ({statusCode}): {rawError}";
+        }
+        catch (Exception ex)
+        {
+            return $"❌ Failed to {action} server: {ex.Message}";
+        }
+    }
+
+    private class ErrorResponse
+    {
+        public string? Error { get; set; }
+        public string? Title { get; set; }
+        public string? Detail { get; set; }
+        public int? Status { get; set; }
     }
 
     private void GoBack()

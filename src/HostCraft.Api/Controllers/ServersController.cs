@@ -68,108 +68,156 @@ public class ServersController : ControllerBase
     [HttpPost]
     public async Task<ActionResult<Server>> CreateServer(CreateServerRequest request)
     {
-        // Create PrivateKey entity if provided
-        PrivateKey? privateKey = null;
-        if (!string.IsNullOrEmpty(request.PrivateKeyContent))
+        try
         {
-            // Make the name unique with a timestamp to avoid conflicts
-            privateKey = new PrivateKey
+            // Validate required fields
+            if (string.IsNullOrWhiteSpace(request.Name))
             {
-                Name = $"{request.Name} SSH Key - {DateTime.UtcNow:yyyyMMddHHmmss}",
-                KeyData = request.PrivateKeyContent,
-                CreatedAt = DateTime.UtcNow
-            };
-            _context.PrivateKeys.Add(privateKey);
-        }
-        
-        // Find or create Region if provided
-        Region? region = null;
-        if (!string.IsNullOrEmpty(request.Region))
-        {
-            // Try to find existing region by name or code
-            region = await _context.Regions
-                .FirstOrDefaultAsync(r => r.Name == request.Region || r.Code == request.Region);
+                return BadRequest(new { error = "Server name is required" });
+            }
             
-            // Create new region if not found
-            if (region == null)
+            if (string.IsNullOrWhiteSpace(request.Host))
             {
-                region = new Region
+                return BadRequest(new { error = "Host/IP address is required" });
+            }
+            
+            if (string.IsNullOrWhiteSpace(request.User))
+            {
+                return BadRequest(new { error = "Username is required" });
+            }
+            
+            if (string.IsNullOrWhiteSpace(request.PrivateKeyContent))
+            {
+                return BadRequest(new { error = "SSH private key is required" });
+            }
+            
+            // Validate private key format
+            if (!request.PrivateKeyContent.Contains("BEGIN") || !request.PrivateKeyContent.Contains("PRIVATE KEY"))
+            {
+                return BadRequest(new { error = "Invalid SSH private key format. Key must contain BEGIN and PRIVATE KEY markers." });
+            }
+            
+            // Check for duplicate server name
+            var existingServer = await _context.Servers
+                .FirstOrDefaultAsync(s => s.Name == request.Name);
+            if (existingServer != null)
+            {
+                return BadRequest(new { error = $"A server with the name '{request.Name}' already exists" });
+            }
+        
+            // Create PrivateKey entity if provided
+            PrivateKey? privateKey = null;
+            if (!string.IsNullOrEmpty(request.PrivateKeyContent))
+            {
+                // Make the name unique with a timestamp to avoid conflicts
+                privateKey = new PrivateKey
                 {
-                    Name = request.Region,
-                    Code = request.Region.ToLower().Replace(" ", "-"),
+                    Name = $"{request.Name} SSH Key - {DateTime.UtcNow:yyyyMMddHHmmss}",
+                    KeyData = request.PrivateKeyContent,
                     CreatedAt = DateTime.UtcNow
                 };
-                _context.Regions.Add(region);
+                _context.PrivateKeys.Add(privateKey);
             }
-        }
-        
-        var server = new Server
-        {
-            Name = request.Name,
-            Host = request.Host,
-            Port = request.Port,
-            Username = request.User,
-            Type = request.Type,
-            ProxyType = request.ProxyType,
-            Status = ServerStatus.Validating,
-            CreatedAt = DateTime.UtcNow,
-            PrivateKey = privateKey,
-            Region = region
-        };
-        
-        _context.Servers.Add(server);
-        await _context.SaveChangesAsync();
-        
-        var serverId = server.Id;
-        var proxyType = server.ProxyType;
-        
-        // Validate connection and deploy proxy in background with proper scope
-        _ = Task.Run(async () => 
-        {
-            using var scope = _scopeFactory.CreateScope();
-            var scopedContext = scope.ServiceProvider.GetRequiredService<HostCraftDbContext>();
-            var scopedDockerService = scope.ServiceProvider.GetRequiredService<IDockerService>();
-            var scopedProxyService = scope.ServiceProvider.GetRequiredService<IProxyService>();
             
-            try
+            // Find or create Region if provided
+            Region? region = null;
+            if (!string.IsNullOrEmpty(request.Region))
             {
-                await Task.Delay(1000);
+                // Try to find existing region by name or code
+                region = await _context.Regions
+                    .FirstOrDefaultAsync(r => r.Name == request.Region || r.Code == request.Region);
                 
-                var serverToValidate = await scopedContext.Servers
-                    .Include(s => s.PrivateKey)
-                    .FirstOrDefaultAsync(s => s.Id == serverId);
-                
-                if (serverToValidate == null) return;
-                
-                var isValid = await scopedDockerService.ValidateConnectionAsync(serverToValidate);
-                serverToValidate.Status = isValid ? ServerStatus.Online : ServerStatus.Offline;
-                serverToValidate.LastHealthCheck = DateTime.UtcNow;
-                
-                await scopedContext.SaveChangesAsync();
-                
-                // Deploy reverse proxy if configured and online
-                if (proxyType != ProxyType.None && serverToValidate.Status == ServerStatus.Online)
+                // Create new region if not found
+                if (region == null)
                 {
-                    _logger.LogInformation("Deploying {ProxyType} on server {ServerName}", 
-                        proxyType, serverToValidate.Name);
+                    region = new Region
+                    {
+                        Name = request.Region,
+                        Code = request.Region.ToLower().Replace(" ", "-"),
+                        CreatedAt = DateTime.UtcNow
+                    };
+                    _context.Regions.Add(region);
+                }
+            }
+            
+            var server = new Server
+            {
+                Name = request.Name,
+                Host = request.Host,
+                Port = request.Port,
+                Username = request.User,
+                Type = request.Type,
+                ProxyType = request.ProxyType,
+                Status = ServerStatus.Validating,
+                CreatedAt = DateTime.UtcNow,
+                PrivateKey = privateKey,
+                Region = region
+            };
+            
+            _context.Servers.Add(server);
+            await _context.SaveChangesAsync();
+            
+            var serverId = server.Id;
+            var proxyType = server.ProxyType;
+            
+            // Validate connection and deploy proxy in background with proper scope
+            _ = Task.Run(async () => 
+            {
+                using var scope = _scopeFactory.CreateScope();
+                var scopedContext = scope.ServiceProvider.GetRequiredService<HostCraftDbContext>();
+                var scopedDockerService = scope.ServiceProvider.GetRequiredService<IDockerService>();
+                var scopedProxyService = scope.ServiceProvider.GetRequiredService<IProxyService>();
+                
+                try
+                {
+                    await Task.Delay(1000);
                     
-                    await scopedProxyService.EnsureProxyDeployedAsync(serverToValidate);
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Background validation failed for server {ServerId}", serverId);
-                
-                var serverToUpdate = await scopedContext.Servers.FindAsync(serverId);
-                if (serverToUpdate != null)
-                {
-                    serverToUpdate.Status = ServerStatus.Error;
+                    var serverToValidate = await scopedContext.Servers
+                        .Include(s => s.PrivateKey)
+                        .FirstOrDefaultAsync(s => s.Id == serverId);
+                    
+                    if (serverToValidate == null) return;
+                    
+                    var isValid = await scopedDockerService.ValidateConnectionAsync(serverToValidate);
+                    serverToValidate.Status = isValid ? ServerStatus.Online : ServerStatus.Offline;
+                    serverToValidate.LastHealthCheck = DateTime.UtcNow;
+                    
                     await scopedContext.SaveChangesAsync();
+                    
+                    // Deploy reverse proxy if configured and online
+                    if (proxyType != ProxyType.None && serverToValidate.Status == ServerStatus.Online)
+                    {
+                        _logger.LogInformation("Deploying {ProxyType} on server {ServerName}", 
+                            proxyType, serverToValidate.Name);
+                        
+                        await scopedProxyService.EnsureProxyDeployedAsync(serverToValidate);
+                    }
                 }
-            }
-        });
-        
-        return CreatedAtAction(nameof(GetServer), new { id = server.Id }, server);
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Background validation failed for server {ServerId}", serverId);
+                    
+                    var serverToUpdate = await scopedContext.Servers.FindAsync(serverId);
+                    if (serverToUpdate != null)
+                    {
+                        serverToUpdate.Status = ServerStatus.Error;
+                        await scopedContext.SaveChangesAsync();
+                    }
+                }
+            });
+            
+            return CreatedAtAction(nameof(GetServer), new { id = server.Id }, server);
+        }
+        catch (DbUpdateException ex)
+        {
+            _logger.LogError(ex, "Database error while creating server");
+            return BadRequest(new { error = "Database error: " + ex.InnerException?.Message ?? ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Unexpected error while creating server");
+            return StatusCode(500, new { error = "Server error: " + ex.Message });
+        }
     }
     
     [HttpPut("{id}")]
