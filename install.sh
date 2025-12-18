@@ -401,13 +401,15 @@ echo ""
 # Restart API to ensure everything is picked up
 echo "🔄 Restarting API..."
 if [ "$SWARM_ACTIVE" = "true" ]; then
-    docker service update --force hostcraft_hostcraft-api > /dev/null 2>&1
+    docker service update --detach --force hostcraft_hostcraft-api > /dev/null 2>&1
     echo "   ✅ API service restarted"
+    echo "   ⏳ Waiting for API to become healthy..."
+    sleep 5
 else
     docker restart hostcraft-hostcraft-api-1 > /dev/null
     echo "   ✅ API container restarted"
+    sleep 3
 fi
-sleep 3
 echo ""
 
 # Setup Traefik if requested
