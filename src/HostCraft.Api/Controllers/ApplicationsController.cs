@@ -473,6 +473,13 @@ public class ApplicationsController : ControllerBase
             {
                 try
                 {
+                    // Skip worker nodes - they can't manage resources independently
+                    if (server.Type == ServerType.SwarmWorker)
+                    {
+                        _logger.LogDebug("Skipping worker node {ServerName} for orphan check", server.Name);
+                        continue;
+                    }
+                    
                     // Check containers
                     var containers = await _dockerService.ListContainersAsync(server, true);
                     foreach (var container in containers)
