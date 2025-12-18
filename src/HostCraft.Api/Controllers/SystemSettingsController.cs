@@ -170,8 +170,8 @@ public class SystemSettingsController : ControllerBase
                         {
                             StartInfo = new System.Diagnostics.ProcessStartInfo
                             {
-                                FileName = "docker",
-                                Arguments = $"logs --tail {lines} $(docker ps --filter name=hostcraft_web --format \"{{{{.Names}}}}\" | head -1)",
+                                FileName = "/bin/sh",
+                                Arguments = $"-c \"docker logs --tail {lines} $(docker ps --filter name=hostcraft_web --format '{{{{.Names}}}}' | head -1)\"",
                                 RedirectStandardOutput = true,
                                 RedirectStandardError = true,
                                 UseShellExecute = false,
@@ -201,8 +201,8 @@ public class SystemSettingsController : ControllerBase
                         {
                             StartInfo = new System.Diagnostics.ProcessStartInfo
                             {
-                                FileName = "docker",
-                                Arguments = $"logs --tail {lines} $(docker ps --filter name=hostcraft_api --format \"{{{{.Names}}}}\" | head -1)",
+                                FileName = "/bin/sh",
+                                Arguments = $"-c \"docker logs --tail {lines} $(docker ps --filter name=hostcraft_api --format '{{{{.Names}}}}' | head -1)\"",
                                 RedirectStandardOutput = true,
                                 RedirectStandardError = true,
                                 UseShellExecute = false,
@@ -232,8 +232,8 @@ public class SystemSettingsController : ControllerBase
                         {
                             StartInfo = new System.Diagnostics.ProcessStartInfo
                             {
-                                FileName = "docker",
-                                Arguments = $"logs --tail {lines} $(docker ps --filter name=hostcraft_postgres --format \"{{{{.Names}}}}\" | head -1)",
+                                FileName = "/bin/sh",
+                                Arguments = $"-c \"docker logs --tail {lines} $(docker ps --filter name=hostcraft_postgres --format '{{{{.Names}}}}' | head -1)\"",
                                 RedirectStandardOutput = true,
                                 RedirectStandardError = true,
                                 UseShellExecute = false,
