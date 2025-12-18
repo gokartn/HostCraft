@@ -259,6 +259,14 @@
     {
         await LoadServers();
         
+        // If no swarm managers detected yet, try to detect them now
+        if (servers != null && !servers.Any(s => s.IsSwarmManager))
+        {
+            Logger.LogInformation("No swarm managers found, attempting to detect swarm on all servers");
+            await DetectSwarmManagers();
+            await LoadServers(); // Reload after detection
+        }
+        
         if (ServerId > 0)
         {
             selectedServerId = ServerId;
@@ -271,6 +279,36 @@
             selectedServerId = firstManager.Id;
             await LoadNodes();
         }
+    }
+    
+    private async Task DetectSwarmManagers()
+    {
+        if (servers == null) return;
+        
+        // Try to refresh swarm status for all servers
+        var tasks = servers.Select(async server =>
+        {
+            try
+            {
+                Logger.LogInformation("Checking swarm status for server {ServerName} (ID: {ServerId})", server.Name, server.Id);
+                var response = await Http.PostAsync($"api/servers/{server.Id}/refresh-swarm-status", null);
+                if (response.IsSuccessStatusCode)
+                {
+                    var result = await response.Content.ReadAsStringAsync();
+                    Logger.LogInformation("Swarm detection result for {ServerName}: {Result}", server.Name, result);
+                }
+                else
+                {
+                    Logger.LogWarning("Failed to check swarm for {ServerName}: {StatusCode}", server.Name, response.StatusCode);
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(ex, "Error detecting swarm for server {ServerName}", server.Name);
+            }
+        });
+        
+        await Task.WhenAll(tasks);
     }
     
     private async Task LoadServers()
