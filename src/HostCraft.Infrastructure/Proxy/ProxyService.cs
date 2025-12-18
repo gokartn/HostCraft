@@ -32,10 +32,13 @@ public class ProxyService : IProxyService
         try
         {
             _logger.LogInformation("Configuring {ProxyType} for application {AppName}", 
-                application.Server.ProxyType, application.Name);
+                application.Server?.ProxyType, application.Name);
 
             // Ensure proxy is deployed on the server
-            await EnsureProxyDeployedAsync(application.Server, cancellationToken);
+            if (application.Server != null)
+            {
+                await EnsureProxyDeployedAsync(application.Server, cancellationToken);
+            }
 
             // Application labels are already set in DockerService.DeployServiceAsync
             // No additional configuration needed here
@@ -56,7 +59,7 @@ public class ProxyService : IProxyService
         try
         {
             _logger.LogInformation("Removing {ProxyType} configuration for application {AppName}", 
-                application.Server.ProxyType, application.Name);
+                application.Server?.ProxyType, application.Name);
 
             // Docker service removal automatically removes labels
             // No additional cleanup needed
@@ -92,7 +95,7 @@ public class ProxyService : IProxyService
 
     public async Task<string> GenerateConfigAsync(Application application, CancellationToken cancellationToken = default)
     {
-        if (application.Server?.ProxyType == ProxyType.None)
+        if (application.Server?.ProxyType == null || application.Server.ProxyType == ProxyType.None)
             return "# No proxy configured";
 
         return application.Server.ProxyType switch
@@ -297,8 +300,8 @@ public class ProxyService : IProxyService
             var containerId = await _dockerService.CreateContainerAsync(server, createParams, cancellationToken);
             await _dockerService.StartContainerAsync(server, containerId, cancellationToken);
             
-            _logger.LogInformation("Nginx deployed successfully on {ServerName} (HTTP: {Host}:80, HTTPS: {Host}:443)", 
-                server.Name, server.Host);
+            _logger.LogInformation("Nginx deployed successfully on {ServerName} (HTTP: {HttpHost}:80, HTTPS: {HttpsHost}:443)", 
+                server.Name, server.Host, server.Host);
             return true;
         }
         catch (Exception ex)

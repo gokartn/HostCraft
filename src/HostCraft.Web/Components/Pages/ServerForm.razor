@@ -495,8 +495,8 @@
         
         // Write SSH RSA public key format: algorithm name, exponent, modulus
         WriteSSHBytes(writer, System.Text.Encoding.ASCII.GetBytes("ssh-rsa"));
-        WriteSSHBytes(writer, parameters.Exponent);
-        WriteSSHBytes(writer, parameters.Modulus);
+        WriteSSHBytes(writer, parameters.Exponent ?? Array.Empty<byte>());
+        WriteSSHBytes(writer, parameters.Modulus ?? Array.Empty<byte>());
         
         var publicKeyBase64 = Convert.ToBase64String(ms.ToArray());
         var publicKey = $"ssh-rsa {publicKeyBase64} hostcraft-generated-{timestamp}";

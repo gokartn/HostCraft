@@ -241,7 +241,7 @@
                         <p>Run this command on the server you want to add as a worker:</p>
                         <div class="command-box">
                             <code>@workerJoinCommand</code>
-                            <button class="btn-copy" @onclick="() => CopyToClipboard(workerJoinCommand)" title="Copy">
+                            <button class="btn-copy" @onclick="() => CopyToClipboard(workerJoinCommand ?? string.Empty)" title="Copy">
                                 📋
                             </button>
                         </div>
@@ -252,7 +252,7 @@
                         <p>Run this command on the server you want to add as a manager:</p>
                         <div class="command-box">
                             <code>@managerJoinCommand</code>
-                            <button class="btn-copy" @onclick="() => CopyToClipboard(managerJoinCommand)" title="Copy">
+                            <button class="btn-copy" @onclick="() => CopyToClipboard(managerJoinCommand ?? string.Empty)" title="Copy">
                                 📋
                             </button>
                         </div>

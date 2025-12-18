@@ -307,7 +307,9 @@ public class DockerService : IDockerService, IDisposable
             Tail = "500" // Get last 500 lines
         };
         
+#pragma warning disable CS0618 // Type or member is obsolete - we need Stream return type for interface
         return await client.Containers.GetContainerLogsAsync(containerId, logsParams, cancellationToken);
+#pragma warning restore CS0618
     }
     
     // Service operations (Swarm)

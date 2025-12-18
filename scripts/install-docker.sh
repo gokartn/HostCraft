@@ -63,6 +63,13 @@ if ! command -v docker &> /dev/null; then
             
             # Install Docker without any prompts
             apt-get update -qq
+            apt-get install -y -qq \
+                --no-install-recommends \
+                -o Dpkg::Options::="--force-confdef" \
+                -o Dpkg::Options::="--force-confold" \
+                docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+            ;;
+        centos|rhel|fedora)
             # Install Docker on RHEL-based systems non-interactively
             yum install -y -q yum-utils
             yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
@@ -108,12 +115,5 @@ echo "✅ Installation completed without requiring restart"
 echo ""
 echo "📝 HostCraft can now manage this server"
 echo "   - Ready for standalone container deployments"
-echo "   - Ready to join Docker Swarm
-echo ""
-echo "✅ Docker installed successfully!"
-echo ""
-echo "📝 Next steps:"
-echo "   - For standalone: docker run hello-world"
-echo "   - For Swarm manager: docker swarm init --advertise-addr <your-ip>"
-echo "   - For Swarm worker: docker swarm join --token <token> <manager-ip>:2377"
+echo "   - Ready to join Docker Swarm"
 echo ""

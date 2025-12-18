@@ -800,7 +800,7 @@ public class ApplicationsController : ControllerBase
             await context.SaveChangesAsync();
             
             // Configure reverse proxy if enabled
-            if (app.Server?.ProxyType != ProxyType.None)
+            if (app.Server?.ProxyType != null && app.Server.ProxyType != ProxyType.None)
             {
                 logger.LogInformation("Configuring {ProxyType} for application {AppName}", 
                     app.Server.ProxyType, app.Name);
