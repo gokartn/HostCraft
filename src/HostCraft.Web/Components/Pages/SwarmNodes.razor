@@ -29,6 +29,12 @@
             <button class="btn btn-secondary" @onclick="RefreshNodes" disabled="@(selectedServerId == 0)">
                 <span class="icon">🔄</span> Refresh
             </button>
+            @if (nodes != null && nodes.Any(n => n.State == "down"))
+            {
+                <button class="btn btn-warning" @onclick="CleanupStaleNodes" disabled="@(selectedServerId == 0)">
+                    <span class="icon">🧹</span> Clean Up Stale Nodes
+                </button>
+            }
             <button class="btn btn-primary" @onclick="ShowJoinTokens" disabled="@(selectedServerId == 0)">
                 <span class="icon">➕</span> Add Node
             </button>
@@ -197,11 +203,20 @@
                             </button>
                         }
                         
-                        @if (node.State != "ready" && !node.IsLeader)
+                        @if (!node.IsLeader)
                         {
-                            <button class="btn-icon btn-danger" @onclick="() => RemoveNode(node.Id)" title="Remove Node">
-                                🗑️
-                            </button>
+                            @if (node.State == "down")
+                            {
+                                <button class="btn-icon btn-danger" @onclick="() => RemoveNode(node.Id)" title="Remove Stale Node">
+                                    🗑️ Remove
+                                </button>
+                            }
+                            else if (node.State != "ready")
+                            {
+                                <button class="btn-icon btn-danger" @onclick="() => RemoveNode(node.Id)" title="Remove Node">
+                                    🗑️
+                                </button>
+                            }
                         }
                     </div>
                 </div>
@@ -564,6 +579,33 @@
         catch (Exception ex)
         {
             Logger.LogError(ex, "Error removing node");
+        }
+    }
+    
+    private async Task CleanupStaleNodes()
+    {
+        if (nodes == null) return;
+        
+        try
+        {
+            Logger.LogInformation("Cleaning up stale nodes (down state)");
+            var staleNodes = nodes.Where(n => n.State == "down" && !n.IsLeader).ToList();
+            
+            foreach (var node in staleNodes)
+            {
+                Logger.LogInformation("Removing stale node {NodeId} - {NodeHostname}", node.Id, node.Hostname);
+                var response = await CreateHttpClient().DeleteAsync($"api/servers/{selectedServerId}/nodes/{node.Id}?force=true");
+                if (!response.IsSuccessStatusCode)
+                {
+                    Logger.LogWarning("Failed to remove node {NodeId}", node.Id);
+                }
+            }
+            
+            await LoadNodes();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error cleaning up stale nodes");
         }
     }
     

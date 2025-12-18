@@ -215,6 +215,27 @@ public class ServersController : ControllerBase
                         {
                             try
                             {
+                                // Check if worker is already part of a swarm - if yes, leave it first
+                                var workerSystemInfo = await scopedDockerService.GetSystemInfoAsync(serverToValidate);
+                                if (workerSystemInfo.SwarmActive)
+                                {
+                                    _logger.LogInformation("Server {ServerName} is already part of a swarm, leaving it first", 
+                                        serverToValidate.Name);
+                                    
+                                    try
+                                    {
+                                        await scopedDockerService.LeaveSwarmAsync(serverToValidate, force: true);
+                                        _logger.LogInformation("Successfully left old swarm");
+                                        
+                                        // Wait a moment for the leave operation to complete
+                                        await Task.Delay(2000);
+                                    }
+                                    catch (Exception leaveEx)
+                                    {
+                                        _logger.LogWarning(leaveEx, "Failed to leave old swarm, will attempt join anyway");
+                                    }
+                                }
+                                
                                 // Get manager's advertise address from swarm nodes
                                 var nodes = await scopedDockerService.ListNodesAsync(swarmManager);
                                 var managerNode = nodes.FirstOrDefault(n => n.Role == "manager" && n.Availability == "active");
