@@ -166,6 +166,7 @@ public class ServersController : ControllerBase
             
             var serverId = server.Id;
             var proxyType = server.ProxyType;
+            var serverType = server.Type;
             
             // Validate connection and deploy proxy in background with proper scope
             _ = Task.Run(async () => 
@@ -174,6 +175,7 @@ public class ServersController : ControllerBase
                 var scopedContext = scope.ServiceProvider.GetRequiredService<HostCraftDbContext>();
                 var scopedDockerService = scope.ServiceProvider.GetRequiredService<IDockerService>();
                 var scopedProxyService = scope.ServiceProvider.GetRequiredService<IProxyService>();
+                var scopedSshService = scope.ServiceProvider.GetRequiredService<ISshService>();
                 
                 try
                 {
@@ -190,6 +192,58 @@ public class ServersController : ControllerBase
                     serverToValidate.LastHealthCheck = DateTime.UtcNow;
                     
                     await scopedContext.SaveChangesAsync();
+                    
+                    // If server is online and marked as SwarmWorker, try to join it to an existing swarm
+                    if (serverType == ServerType.SwarmWorker && serverToValidate.Status == ServerStatus.Online)
+                    {
+                        _logger.LogInformation("Server {ServerName} marked as SwarmWorker, attempting to join swarm", serverToValidate.Name);
+                        
+                        // Find an active swarm manager
+                        var swarmManager = await scopedContext.Servers
+                            .Include(s => s.PrivateKey)
+                            .FirstOrDefaultAsync(s => s.IsSwarmManager && s.Status == ServerStatus.Online);
+                        
+                        if (swarmManager != null)
+                        {
+                            try
+                            {
+                                // Get worker join token from manager
+                                var (workerToken, _) = await scopedDockerService.GetJoinTokensAsync(swarmManager);
+                                
+                                if (!string.IsNullOrEmpty(workerToken))
+                                {
+                                    // Get manager's IP address
+                                    var managerAddress = $"{swarmManager.Host}:2377";
+                                    
+                                    // Execute join command on the worker
+                                    var joinCommand = $"docker swarm join --token {workerToken} {managerAddress}";
+                                    
+                                    _logger.LogInformation("Executing swarm join on {ServerName}", serverToValidate.Name);
+                                    var result = await scopedSshService.ExecuteCommandAsync(serverToValidate, joinCommand);
+                                    
+                                    if (result.ExitCode == 0)
+                                    {
+                                        _logger.LogInformation("Successfully joined {ServerName} to swarm", serverToValidate.Name);
+                                        serverToValidate.SwarmNodeState = "ready";
+                                        serverToValidate.SwarmNodeAvailability = "active";
+                                        await scopedContext.SaveChangesAsync();
+                                    }
+                                    else
+                                    {
+                                        _logger.LogError("Failed to join swarm: {Output}", result.Output + result.Error);
+                                    }
+                                }
+                            }
+                            catch (Exception joinEx)
+                            {
+                                _logger.LogError(joinEx, "Error joining server {ServerName} to swarm", serverToValidate.Name);
+                            }
+                        }
+                        else
+                        {
+                            _logger.LogWarning("No active swarm manager found to join {ServerName}", serverToValidate.Name);
+                        }
+                    }
                     
                     // Deploy reverse proxy if configured and online
                     if (proxyType != ProxyType.None && serverToValidate.Status == ServerStatus.Online)

@@ -166,40 +166,62 @@ public class TerminalHub : Hub
     {
         _logger.LogInformation("Connecting via SSH to {Host}:{Port}", server.Host, server.Port);
 
-        var connectionInfo = new Renci.SshNet.ConnectionInfo(
-            server.Host,
-            server.Port,
-            server.Username,
-            new PrivateKeyAuthenticationMethod(server.Username, 
-                new PrivateKeyFile(new MemoryStream(Encoding.UTF8.GetBytes(server.PrivateKey!.KeyData))))
-        );
-
-        var client = new SshClient(connectionInfo);
-        await Task.Run(() => client.Connect());
-
-        var shell = client.CreateShellStream("xterm", 80, 24, 800, 600, 1024);
-        
-        var session = new SshTerminalSession
+        try
         {
-            Client = client,
-            Shell = shell,
-            ServerId = server.Id
-        };
+            var keyFile = new PrivateKeyFile(new MemoryStream(Encoding.UTF8.GetBytes(server.PrivateKey!.KeyData)));
+            var authMethod = new PrivateKeyAuthenticationMethod(server.Username, keyFile);
+            
+            var connectionInfo = new Renci.SshNet.ConnectionInfo(
+                server.Host,
+                server.Port,
+                server.Username,
+                authMethod
+            )
+            {
+                Timeout = TimeSpan.FromSeconds(30)
+            };
 
-        _sessions[Context.ConnectionId] = session;
+            var client = new SshClient(connectionInfo);
+            
+            _logger.LogInformation("Attempting SSH connection to {Host}:{Port}", server.Host, server.Port);
+            await Task.Run(() => client.Connect());
+            
+            if (!client.IsConnected)
+            {
+                throw new Exception("SSH connection established but client reports not connected");
+            }
+            
+            _logger.LogInformation("SSH connection successful to {Host}:{Port}", server.Host, server.Port);
 
-        // Start reading output
-        _ = Task.Run(async () => await ReadSshOutput(Context.ConnectionId));
+            var shell = client.CreateShellStream("xterm", 80, 24, 800, 600, 1024);
+            
+            var session = new SshTerminalSession
+            {
+                Client = client,
+                Shell = shell,
+                ServerId = server.Id
+            };
 
-        // Notify client of successful connection
-        await Clients.Caller.SendAsync("ConnectionEstablished");
-        await Clients.Caller.SendAsync("ReceiveOutput", $"\x1b[32mConnected to {server.Host}\x1b[0m\r\n");
-        
-        // Get initial prompt
-        var initialOutput = await ReadInitialPrompt(shell);
-        if (!string.IsNullOrEmpty(initialOutput))
+            _sessions[Context.ConnectionId] = session;
+
+            // Start reading output
+            _ = Task.Run(async () => await ReadSshOutput(Context.ConnectionId));
+
+            // Notify client of successful connection
+            await Clients.Caller.SendAsync("ConnectionEstablished");
+            await Clients.Caller.SendAsync("ReceiveOutput", $"\x1b[32mConnected to {server.Host}\x1b[0m\r\n");
+            
+            // Get initial prompt
+            var initialOutput = await ReadInitialPrompt(shell);
+            if (!string.IsNullOrEmpty(initialOutput))
+            {
+                await Clients.Caller.SendAsync("UpdatePrompt", ExtractPrompt(initialOutput));
+            }
+        }
+        catch (Exception ex)
         {
-            await Clients.Caller.SendAsync("UpdatePrompt", ExtractPrompt(initialOutput));
+            _logger.LogError(ex, "Failed to establish SSH connection to {Host}:{Port}", server.Host, server.Port);
+            throw new Exception($"SSH connection failed: {ex.Message}. Please verify the server is reachable and SSH key is correct.");
         }
     }
 
