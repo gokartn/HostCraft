@@ -3,6 +3,7 @@ using System;
 using HostCraft.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace HostCraft.Infrastructure.Migrations
 {
     [DbContext(typeof(HostCraftDbContext))]
-    partial class HostCraftDbContextModelSnapshot : ModelSnapshot
+    [Migration("20251218102520_AddIsSwarmWorkerColumn")]
+    partial class AddIsSwarmWorkerColumn
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
