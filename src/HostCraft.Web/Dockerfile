@@ -18,5 +18,9 @@ RUN dotnet publish "HostCraft.Web.csproj" -c Release -o /app/publish /p:UseAppHo
 
 FROM base AS final
 WORKDIR /app
+
+# Install nsenter for host terminal access when running in container
+RUN apt-get update && apt-get install -y util-linux && rm -rf /var/lib/apt/lists/*
+
 COPY --from=publish /app/publish .
 ENTRYPOINT ["dotnet", "HostCraft.Web.dll"]

@@ -72,7 +72,8 @@ public static class DbSeeder
     {
         try
         {
-            // Check if Docker socket exists (works inside Docker containers)
+            // IMPORTANT: When running in container, check if HOST's Docker socket is mounted
+            // The mounted /var/run/docker.sock gives us access to the HOST's Docker
             var isWindows = RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
             var dockerSocket = isWindows ? "//./pipe/docker_engine" : "/var/run/docker.sock";
             
@@ -108,6 +109,8 @@ public static class DbSeeder
             else
             {
                 // On Linux/Unix, check if Docker socket file exists
+                // If we're in a container, this checks for the MOUNTED socket from host
+                // which is exactly what we want - it means we CAN access Docker (the host's)
                 return File.Exists(dockerSocket);
             }
         }

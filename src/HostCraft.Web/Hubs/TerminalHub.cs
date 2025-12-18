@@ -71,35 +71,46 @@ public class TerminalHub : Hub
 
     private async Task ConnectLocalTerminal(ServerDto server)
     {
-        _logger.LogInformation("Connecting to localhost terminal via docker exec");
+        _logger.LogInformation("Connecting to localhost terminal");
 
-        // For localhost in Docker environment, we use docker exec to get a shell
-        // in the API container which has Docker socket access
-        var processStartInfo = new ProcessStartInfo
-        {
-            FileName = "docker",
-            Arguments = "exec -i hostcraft-hostcraft-api-1 /bin/bash",
-            UseShellExecute = false,
-            RedirectStandardInput = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            CreateNoWindow = true
-        };
-
-        // Set environment for proper terminal behavior
-        processStartInfo.Environment["TERM"] = "xterm-256color";
-
-        var process = new Process { StartInfo = processStartInfo };
-        
+        // Check if we're running inside a Docker container
+        bool isInContainer = false;
         try
         {
-            process.Start();
+            isInContainer = File.Exists("/.dockerenv") || 
+                           (File.Exists("/proc/self/cgroup") && 
+                            File.ReadAllText("/proc/self/cgroup").Contains("docker"));
         }
-        catch (Exception ex)
+        catch
         {
-            _logger.LogWarning(ex, "Failed to start docker exec, falling back to local shell");
+            isInContainer = false;
+        }
+
+        ProcessStartInfo processStartInfo;
+        
+        if (isInContainer)
+        {
+            // CRITICAL: When in container with "localhost" server, user wants HOST's terminal
+            // Use nsenter to access host's PID namespace and spawn a shell there
+            _logger.LogInformation("Detected container environment, accessing HOST terminal via nsenter");
             
-            // Fallback: try local shell (for non-Docker environments)
+            // nsenter enters the host's namespace through /proc/1/ns/
+            // This requires privileged container or specific capabilities
+            processStartInfo = new ProcessStartInfo
+            {
+                FileName = "nsenter",
+                Arguments = "--target 1 --mount --uts --ipc --net --pid -- /bin/bash",
+                UseShellExecute = false,
+                RedirectStandardInput = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true
+            };
+        }
+        else
+        {
+            // Not in container - use local shell directly
+            _logger.LogInformation("Using local shell");
             var isWindows = OperatingSystem.IsWindows();
             processStartInfo = new ProcessStartInfo
             {
@@ -112,10 +123,21 @@ public class TerminalHub : Hub
                 CreateNoWindow = true,
                 WorkingDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
             };
-            processStartInfo.Environment["TERM"] = "xterm-256color";
-            
-            process = new Process { StartInfo = processStartInfo };
+        }
+
+        // Set environment for proper terminal behavior
+        processStartInfo.Environment["TERM"] = "xterm-256color";
+
+        var process = new Process { StartInfo = processStartInfo };
+        
+        try
+        {
             process.Start();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to start terminal process");
+            throw new Exception($"Could not start terminal: {ex.Message}. If running in Docker, ensure container has CAP_SYS_ADMIN or --privileged for nsenter.");
         }
 
         var session = new LocalTerminalSession
@@ -132,7 +154,8 @@ public class TerminalHub : Hub
 
         // Notify client of successful connection
         await Clients.Caller.SendAsync("ConnectionEstablished");
-        await Clients.Caller.SendAsync("ReceiveOutput", $"\x1b[32mConnected to localhost (container shell)\x1b[0m\r\n");
+        var locationMsg = isInContainer ? "HOST machine shell" : "local shell";
+        await Clients.Caller.SendAsync("ReceiveOutput", $"\x1b[32mConnected to localhost ({locationMsg})\x1b[0m\r\n");
         
         // Send initial newline to trigger prompt
         await Task.Delay(100);

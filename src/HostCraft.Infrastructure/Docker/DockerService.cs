@@ -144,7 +144,42 @@ public class DockerService : IDockerService, IDisposable
     
     private static bool IsLocalhostServer(Server server)
     {
-        // Check common localhost identifiers
+        // IMPORTANT: When running in Docker, "localhost" means the CONTAINER, not the HOST
+        // To access the host's Docker daemon:
+        // 1. Mount /var/run/docker.sock from host into container
+        // 2. Use unix:///var/run/docker.sock which connects to the HOST's Docker
+        // The mounted socket from the host will show the HOST's Docker info (including swarm)
+        
+        // Check if we're running inside a Docker container
+        bool isInContainer = false;
+        try
+        {
+            isInContainer = File.Exists("/.dockerenv") || 
+                           (File.Exists("/proc/self/cgroup") && 
+                            File.ReadAllText("/proc/self/cgroup").Contains("docker"));
+        }
+        catch
+        {
+            // If we can't check, assume not in container
+            isInContainer = false;
+        }
+        
+        // When in container with mounted Docker socket, "localhost" accesses the HOST's Docker
+        // This is what we want - the mounted socket connects to the host's daemon
+        if (isInContainer)
+        {
+            // In container: "localhost" via mounted socket = HOST's Docker daemon
+            if (server.Host == "localhost" || 
+                server.Host == "127.0.0.1" || 
+                server.Host == "::1")
+            {
+                return true;
+            }
+            // Don't check hostname in container - it's the container's name, not the host
+            return false;
+        }
+        
+        // Not in container - check common localhost identifiers
         if (server.Host == "localhost" || 
             server.Host == "127.0.0.1" || 
             server.Host == "::1" ||
@@ -704,30 +739,43 @@ public class DockerService : IDockerService, IDisposable
     
     public async Task<SystemInfo> GetSystemInfoAsync(Server server, CancellationToken cancellationToken = default)
     {
+        var isLocalhost = IsLocalhostServer(server);
+        Console.WriteLine($"[DockerService.GetSystemInfo] Server: {server.Name} ({server.Host}) - IsLocalhost: {isLocalhost}");
+        
         // For local servers, use Docker client directly (no SSH)
-        if (IsLocalhostServer(server))
+        if (isLocalhost)
         {
+            Console.WriteLine($"[DockerService.GetSystemInfo] Using local Docker client for {server.Name}");
             var client = GetClient(server);
             var info = await client.System.GetSystemInfoAsync(cancellationToken);
+            
+            var swarmActive = info.Swarm?.LocalNodeState == "active";
+            Console.WriteLine($"[DockerService.GetSystemInfo] Docker info retrieved - SwarmNodeState: {info.Swarm?.LocalNodeState}, SwarmActive: {swarmActive}");
             
             return new SystemInfo(
                 info.OperatingSystem,
                 info.Architecture,
-                info.Swarm?.LocalNodeState == "active",
+                swarmActive,
                 info.ServerVersion);
         }
         
         // For remote servers, use SSH to get Docker info
+        Console.WriteLine($"[DockerService.GetSystemInfo] Using SSH for remote server {server.Name}");
         var sshClient = GetSshClient(server);
         var command = sshClient.CreateCommand("docker info --format '{{.OperatingSystem}}|{{.Architecture}}|{{.Swarm.LocalNodeState}}|{{.ServerVersion}}'");
         var result = await Task.Run(() => command.Execute(), cancellationToken);
         
+        Console.WriteLine($"[DockerService.GetSystemInfo] SSH result: {result}");
         var parts = result.Trim().Split('|');
+        
+        var swarmState = parts.Length > 2 ? parts[2] : "unknown";
+        var isSwarmActive = swarmState == "active";
+        Console.WriteLine($"[DockerService.GetSystemInfo] Swarm state: {swarmState}, Active: {isSwarmActive}");
         
         return new SystemInfo(
             parts.Length > 0 ? parts[0] : "Unknown",
             parts.Length > 1 ? parts[1] : "Unknown",
-            parts.Length > 2 && parts[2] == "active",
+            isSwarmActive,
             parts.Length > 3 ? parts[3] : "Unknown");
     }
     

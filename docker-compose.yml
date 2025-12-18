@@ -23,7 +23,13 @@ services:
     restart: unless-stopped  # For standalone mode
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock  # Access to Docker daemon
+      - /proc:/host/proc:ro  # Access host processes for nsenter
       - hostcraft-data:/app/data
+    cap_add:
+      - SYS_ADMIN  # Required for nsenter to access host namespace
+      - SYS_PTRACE  # Required for process inspection
+    security_opt:
+      - apparmor:unconfined  # Allow nsenter operations
     # Swarm mode configuration
     deploy:
       mode: replicated
