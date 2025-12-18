@@ -46,7 +46,18 @@ EOF
 # Also disable service restarts during package installation
 mkdir -p /etc/apt/apt.conf.d 2>/dev/null || true
 echo 'DPkg::Pre-Install-Pkgs {"/bin/true";};' > /etc/apt/apt.conf.d/99hostcraft 2>/dev/null || true
-echo "🔄 Updating package index..."
+
+# Check if Docker is already installed
+if command -v docker &> /dev/null; then
+    echo "✅ Docker already installed"
+    docker --version
+else
+    echo "📦 Installing Docker..."
+    
+    case $OS in
+        ubuntu|debian)
+            # Update package index non-interactively
+            echo "🔄 Updating package index..."
             apt-get update -qq -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" 2>&1 | grep -v "^\(Ign\|Get\|Hit\|Reading\|Building\)" || true
             
             # Install prerequisites without prompts
@@ -59,16 +70,16 @@ echo "🔄 Updating package index..."
                 -o Dpkg::Options::="--force-confdef" \
                 -o Dpkg::Options::="--force-confold" \
                 -o Dpkg::Use-Pty=0 \
-                ca-certificates curl gnupg lsb-release apt-transport-https 2>&1 | grep -v "^\(Selecting\|Preparing\|Unpacking\|Setting\)" || tru
+                ca-certificates curl gnupg lsb-release apt-transport-https 2>&1 | grep -v "^\(Selecting\|Preparing\|Unpacking\|Setting\)" || true
             
-            # Install prerequisites without prompts
-            apt-get install -y -qq \
-                --no-install-recommends \
-                -o Dpkg::Options::="--force-confdef" \
-                -o Dpkg::Options::="--force-confold" \
-                ca-certificates curl gnupg lsb-release
             # Add Docker's official GPG key (batch mode for non-interactive)
-            insta"📝 Adding Docker repository..."
+            echo "🔑 Adding Docker GPG key..."
+            mkdir -p /etc/apt/keyrings
+            curl -fsSL https://download.docker.com/linux/$OS/gpg | gpg --batch --yes --dearmor -o /etc/apt/keyrings/docker.gpg 2>/dev/null || curl -fsSL https://download.docker.com/linux/$OS/gpg > /etc/apt/keyrings/docker.gpg
+            chmod a+r /etc/apt/keyrings/docker.gpg
+            
+            # Add Docker repository
+            echo "📝 Adding Docker repository..."
             echo \
               "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/$OS \
               $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
@@ -86,19 +97,12 @@ echo "🔄 Updating package index..."
                 -o Dpkg::Options::="--force-confold" \
                 -o Dpkg::Use-Pty=0 \
                 docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin 2>&1 | grep -v "^\(Selecting\|Preparing\|Unpacking\|Setting\)" || true
-            apt-get update -qq
-            apt-get install -y -qq \
-                --no-install-recommends \
-                -o Dpkg::Options::="--force-confdef" \
-                -o Dpkg::Options::="--force-confold" \
-                docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
             ;;
         centos|rhel|fedora)
             # Install Docker on RHEL-based systems non-interactively
             yum install -y -q yum-utils
             yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
             yum install -y -q docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-            systemctl start docker
             ;;
         *)
             echo "❌ Unsupported OS: $OS"
@@ -106,8 +110,6 @@ echo "🔄 Updating package index..."
             ;;
     esac
     echo "✅ Docker installed"
-else
-    echo "✅ Docker already installed"
 fi
 
 # Start and enable Docker
@@ -118,7 +120,15 @@ systemctl enable docker --now 2>/dev/null || systemctl enable docker && systemct
 echo "⏳ Waiting for Docker to be ready..."
 for i in {1..30}; do
     if docker info >/dev/null 2>&1; then
-        bretemporary configs
+        break
+    fi
+    sleep 1
+done
+
+# Verify Docker is working
+docker info >/dev/null 2>&1 && echo "✅ Docker daemon is running"
+
+# Clean up temporary configs
 rm -f /etc/needrestart/conf.d/50-hostcraft.conf 2>/dev/null || true
 rm -f /etc/apt/apt.conf.d/99hostcraft 2>/dev/null || true
 
@@ -132,16 +142,4 @@ echo "📝 HostCraft can now manage this server"
 echo "   - Ready for standalone container deployments"
 echo "   - Ready to join Docker Swarm"
 echo ""
-exit 0info >/dev/null 2>&1 && echo "✅ Docker daemon is running"
-
-# Clean up needrestart config if it was created
-rm -f /etc/needrestart/conf.d/50-hostcraft.conf 2>/dev/null || true
-
-echo ""
-echo "✅ Docker installed successfully!"
-echo "✅ Installation completed without requiring restart"
-echo ""
-echo "📝 HostCraft can now manage this server"
-echo "   - Ready for standalone container deployments"
-echo "   - Ready to join Docker Swarm"
-echo ""
+exit 0
