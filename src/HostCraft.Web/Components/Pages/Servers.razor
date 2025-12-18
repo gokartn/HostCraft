@@ -93,12 +93,38 @@
                                 <span class="value">@server.SwarmId.Substring(0, 12)</span>
                             </div>
                         }
+                        @if (!string.IsNullOrEmpty(server.SwarmNodeState))
+                        {
+                            <div class="info-row">
+                                <span class="label">Node State:</span>
+                                <span class="value">@GetNodeStateIcon(server.SwarmNodeState) @server.SwarmNodeState</span>
+                            </div>
+                        }
+                        @if (!string.IsNullOrEmpty(server.SwarmNodeAvailability))
+                        {
+                            <div class="info-row">
+                                <span class="label">Availability:</span>
+                                <span class="value">@GetAvailabilityIcon(server.SwarmNodeAvailability) @server.SwarmNodeAvailability</span>
+                            </div>
+                        }
                     </div>
 
                     <div class="server-actions">
                         <button class="btn-icon" @onclick="() => NavigateToDetails(server.Id)" title="Details">
                             🔍
                         </button>
+                        @if (server.Type == ServerType.Standalone)
+                        {
+                            <button class="btn-icon btn-primary" @onclick="() => InitializeSwarm(server.Id)" title="Initialize Swarm">
+                                🐝
+                            </button>
+                        }
+                        @if (server.IsSwarm)
+                        {
+                            <button class="btn-icon" @onclick="() => NavigateToSwarmNodes(server.Id)" title="Swarm Nodes">
+                                🔗
+                            </button>
+                        }
                         <button class="btn-icon" @onclick="() => NavigateToEdit(server.Id)" title="Edit">
                             ✏️
                         </button>
@@ -185,6 +211,37 @@
     private void NavigateToDetails(int id)
     {
         Navigation.NavigateTo($"/servers/{id}");
+    }
+
+    private void NavigateToSwarmNodes(int id)
+    {
+        Navigation.NavigateTo($"/swarm/nodes/{id}");
+    }
+
+    private async Task InitializeSwarm(int id)
+    {
+        if (await JS.InvokeAsync<bool>("confirm", "Initialize Docker Swarm on this server?\n\nThis will make it a Swarm Manager."))
+        {
+            try
+            {
+                var response = await Http.PostAsync($"api/servers/{id}/swarm/init", null);
+                
+                if (response.IsSuccessStatusCode)
+                {
+                    await JS.InvokeVoidAsync("alert", "✅ Swarm initialized successfully!");
+                    await LoadServers();
+                }
+                else
+                {
+                    var error = await response.Content.ReadAsStringAsync();
+                    await JS.InvokeVoidAsync("alert", $"❌ Failed to initialize swarm: {error}");
+                }
+            }
+            catch (Exception ex)
+            {
+                await JS.InvokeVoidAsync("alert", $"❌ Error: {ex.Message}");
+            }
+        }
     }
 
     private async Task DeleteServer(int id)
@@ -280,6 +337,31 @@
         if (span.TotalMinutes < 60) return $"{(int)span.TotalMinutes}m ago";
         if (span.TotalHours < 24) return $"{(int)span.TotalHours}h ago";
         return $"{(int)span.TotalDays}d ago";
+    }
+
+    private string GetNodeStateIcon(string state)
+    {
+        return state.ToLower() switch
+        {
+            "ready" => "✅",
+            "down" => "🔴",
+            "disconnected" => "⚠️",
+            _ => "⚪"
+        };
+    }
+
+    private string GetAvailabilityIcon(string availability)
+    {string? SwarmNodeId { get; set; }
+        public string? SwarmNodeState { get; set; }
+        public string? SwarmNodeAvailability { get; set; }
+        public 
+        return availability.ToLower() switch
+        {
+            "active" => "✅",
+            "drain" => "🔄",
+            "pause" => "⏸️",
+            _ => "⚪"
+        };
     }
 
     public class ServerDto

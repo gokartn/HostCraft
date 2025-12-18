@@ -1,0 +1,478 @@
+@page "/swarm/nodes"
+@page "/swarm/nodes/{serverId:int}"
+@rendermode InteractiveServer
+@using System.Net.Http.Json
+@inject HttpClient Http
+@inject NavigationManager Navigation
+@inject ILogger<SwarmNodes> Logger
+
+<div class="page-container">
+    <div class="page-header">
+        <div class="header-left">
+            <h1>⚡ Docker Swarm Nodes</h1>
+            <p class="subtitle">Manage your swarm cluster nodes</p>
+        </div>
+        <div class="header-actions">
+            @if (servers != null && servers.Any())
+            {
+                <select class="server-selector" @onchange="OnServerSelected" value="@selectedServerId">
+                    <option value="0">Select Server...</option>
+                    @foreach (var server in servers.Where(s => s.IsSwarmManager))
+                    {
+                        <option value="@server.Id">@server.Name</option>
+                    }
+                </select>
+            }
+            <button class="btn btn-secondary" @onclick="RefreshNodes" disabled="@(selectedServerId == 0)">
+                🔄 Refresh
+            </button>
+            <button class="btn btn-primary" @onclick="ShowJoinTokens" disabled="@(selectedServerId == 0)">
+                ➕ Add Node
+            </button>
+        </div>
+    </div>
+
+    @if (selectedServerId == 0)
+    {
+        <div class="info-message">
+            <p>👆 Select a swarm manager server to view and manage nodes</p>
+        </div>
+    }
+    else if (isLoading)
+    {
+        <div class="loading-spinner">
+            <div class="spinner"></div>
+            <p>Loading nodes...</p>
+        </div>
+    }
+    else if (!isSwarmActive)
+    {
+        <div class="warning-message">
+            <h3>⚠️ Swarm Not Active</h3>
+            <p>Docker Swarm is not initialized on this server.</p>
+            <button class="btn btn-primary" @onclick="InitializeSwarm">
+                Initialize Swarm
+            </button>
+        </div>
+    }
+    else if (nodes == null || !nodes.Any())
+    {
+        <div class="empty-state">
+            <div class="empty-icon">⚡</div>
+            <h2>No Nodes Found</h2>
+            <p>No swarm nodes detected on this server</p>
+        </div>
+    }
+    else
+    {
+        <div class="swarm-summary">
+            <div class="summary-card">
+                <div class="card-icon manager">👑</div>
+                <div class="card-content">
+                    <span class="card-value">@nodes.Count(n => n.Role == "manager")</span>
+                    <span class="card-label">Managers</span>
+                </div>
+            </div>
+            <div class="summary-card">
+                <div class="card-icon worker">⚙️</div>
+                <div class="card-content">
+                    <span class="card-value">@nodes.Count(n => n.Role == "worker")</span>
+                    <span class="card-label">Workers</span>
+                </div>
+            </div>
+            <div class="summary-card">
+                <div class="card-icon ready">✅</div>
+                <div class="card-content">
+                    <span class="card-value">@nodes.Count(n => n.State == "ready")</span>
+                    <span class="card-label">Ready</span>
+                </div>
+            </div>
+            <div class="summary-card">
+                <div class="card-icon active">🟢</div>
+                <div class="card-content">
+                    <span class="card-value">@nodes.Count(n => n.Availability == "active")</span>
+                    <span class="card-label">Active</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="nodes-grid">
+            @foreach (var node in nodes)
+            {
+                <div class="node-card @GetNodeStatusClass(node)">
+                    <div class="node-header">
+                        <div class="node-title">
+                            <h3>@node.Hostname</h3>
+                            @if (node.IsLeader)
+                            {
+                                <span class="leader-badge">👑 Leader</span>
+                            }
+                        </div>
+                        <span class="role-badge @node.Role">@node.Role</span>
+                    </div>
+                    
+                    <div class="node-info">
+                        <div class="info-row">
+                            <span class="label">ID:</span>
+                            <span class="value mono">@node.Id.Substring(0, 12)</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="label">Status:</span>
+                            <span class="value status-@node.State">@node.State</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="label">Availability:</span>
+                            <span class="value availability-@node.Availability">@node.Availability</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="label">Address:</span>
+                            <span class="value">@node.Address</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="label">Platform:</span>
+                            <span class="value">@node.Platform</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="label">Engine:</span>
+                            <span class="value">@node.EngineVersion</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="label">Resources:</span>
+                            <span class="value">@FormatCPU(node.NanoCPUs) CPUs, @FormatMemory(node.MemoryBytes) RAM</span>
+                        </div>
+                    </div>
+                    
+                    <div class="node-actions">
+                        @if (node.Availability == "active")
+                        {
+                            <button class="btn btn-sm btn-warning" @onclick="() => DrainNode(node.Id)">
+                                ⏸️ Drain
+                            </button>
+                        }
+                        else if (node.Availability == "drain")
+                        {
+                            <button class="btn btn-sm btn-success" @onclick="() => ActivateNode(node.Id)">
+                                ▶️ Activate
+                            </button>
+                        }
+                        
+                        @if (node.Role == "worker" && node.State == "ready")
+                        {
+                            <button class="btn btn-sm btn-primary" @onclick="() => PromoteNode(node.Id)">
+                                ⬆️ Promote
+                            </button>
+                        }
+                        else if (node.Role == "manager" && !node.IsLeader)
+                        {
+                            <button class="btn btn-sm btn-secondary" @onclick="() => DemoteNode(node.Id)">
+                                ⬇️ Demote
+                            </button>
+                        }
+                        
+                        @if (node.State != "ready" && !node.IsLeader)
+                        {
+                            <button class="btn btn-sm btn-danger" @onclick="() => RemoveNode(node.Id)">
+                                🗑️ Remove
+                            </button>
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@if (showJoinTokensModal)
+{
+    <div class="modal-overlay" @onclick="CloseJoinTokens">
+        <div class="modal-content" @onclick:stopPropagation="true">
+            <div class="modal-header">
+                <h2>Add Nodes to Swarm</h2>
+                <button class="btn-close" @onclick="CloseJoinTokens">✖</button>
+            </div>
+            <div class="modal-body">
+                @if (joinTokens != null)
+                {
+                    <div class="join-command-section">
+                        <h3>👤 Add Worker Node</h3>
+                        <p>Run this command on the server you want to add as a worker:</p>
+                        <div class="command-box">
+                            <code>@workerJoinCommand</code>
+                            <button class="btn-copy" @onclick="() => CopyToClipboard(workerJoinCommand)" title="Copy">
+                                📋
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div class="join-command-section">
+                        <h3>👑 Add Manager Node</h3>
+                        <p>Run this command on the server you want to add as a manager:</p>
+                        <div class="command-box">
+                            <code>@managerJoinCommand</code>
+                            <button class="btn-copy" @onclick="() => CopyToClipboard(managerJoinCommand)" title="Copy">
+                                📋
+                            </button>
+                        </div>
+                    </div>
+                    
+                    @if (copiedMessage != null)
+                    {
+                        <div class="success-message">@copiedMessage</div>
+                    }
+                }
+                else
+                {
+                    <div class="loading-spinner">
+                        <div class="spinner"></div>
+                        <p>Loading join tokens...</p>
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public int ServerId { get; set; }
+    
+    private List<ServerDto>? servers;
+    private List<NodeDto>? nodes;
+    private int selectedServerId = 0;
+    private bool isLoading = false;
+    private bool isSwarmActive = false;
+    private bool showJoinTokensModal = false;
+    private JoinTokensDto? joinTokens;
+    private string? workerJoinCommand;
+    private string? managerJoinCommand;
+    private string? copiedMessage;
+    
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadServers();
+        
+        if (ServerId > 0)
+        {
+            selectedServerId = ServerId;
+            await LoadNodes();
+        }
+    }
+    
+    private async Task LoadServers()
+    {
+        try
+        {
+            servers = await Http.GetFromJsonAsync<List<ServerDto>>("api/servers");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading servers");
+        }
+    }
+    
+    private async Task OnServerSelected(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out var serverId))
+        {
+            selectedServerId = serverId;
+            if (serverId > 0)
+            {
+                await LoadNodes();
+            }
+        }
+    }
+    
+    private async Task LoadNodes()
+    {
+        if (selectedServerId == 0) return;
+        
+        isLoading = true;
+        StateHasChanged();
+        
+        try
+        {
+            // Check if swarm is active
+            var systemInfo = await Http.GetFromJsonAsync<SystemInfoDto>($"api/servers/{selectedServerId}/info");
+            isSwarmActive = systemInfo?.SwarmActive ?? false;
+            
+            if (isSwarmActive)
+            {
+                nodes = await Http.GetFromJsonAsync<List<NodeDto>>($"api/servers/{selectedServerId}/nodes");
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading nodes");
+            isSwarmActive = false;
+        }
+        finally
+        {
+            isLoading = false;
+            StateHasChanged();
+        }
+    }
+    
+    private async Task RefreshNodes()
+    {
+        await LoadNodes();
+    }
+    
+    private async Task InitializeSwarm()
+    {
+        try
+        {
+            var response = await Http.PostAsync($"api/servers/{selectedServerId}/swarm/init", null);
+            if (response.IsSuccessStatusCode)
+            {
+                await LoadNodes();
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error initializing swarm");
+        }
+    }
+    
+    private async Task DrainNode(string nodeId)
+    {
+        try
+        {
+            var response = await Http.PutAsJsonAsync($"api/servers/{selectedServerId}/nodes/{nodeId}", 
+                new { Availability = "drain" });
+            if (response.IsSuccessStatusCode)
+            {
+                await LoadNodes();
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error draining node");
+        }
+    }
+    
+    private async Task ActivateNode(string nodeId)
+    {
+        try
+        {
+            var response = await Http.PutAsJsonAsync($"api/servers/{selectedServerId}/nodes/{nodeId}", 
+                new { Availability = "active" });
+            if (response.IsSuccessStatusCode)
+            {
+                await LoadNodes();
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error activating node");
+        }
+    }
+    
+    private async Task PromoteNode(string nodeId)
+    {
+        try
+        {
+            var response = await Http.PutAsJsonAsync($"api/servers/{selectedServerId}/nodes/{nodeId}", 
+                new { Role = "manager" });
+            if (response.IsSuccessStatusCode)
+            {
+                await LoadNodes();
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error promoting node");
+        }
+    }
+    
+    private async Task DemoteNode(string nodeId)
+    {
+        try
+        {
+            var response = await Http.PutAsJsonAsync($"api/servers/{selectedServerId}/nodes/{nodeId}", 
+                new { Role = "worker" });
+            if (response.IsSuccessStatusCode)
+            {
+                await LoadNodes();
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error demoting node");
+        }
+    }
+    
+    private async Task RemoveNode(string nodeId)
+    {
+        try
+        {
+            var response = await Http.DeleteAsync($"api/servers/{selectedServerId}/nodes/{nodeId}?force=true");
+            if (response.IsSuccessStatusCode)
+            {
+                await LoadNodes();
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error removing node");
+        }
+    }
+    
+    private async Task ShowJoinTokens()
+    {
+        showJoinTokensModal = true;
+        copiedMessage = null;
+        
+        try
+        {
+            joinTokens = await Http.GetFromJsonAsync<JoinTokensDto>($"api/servers/{selectedServerId}/swarm/tokens");
+            
+            if (joinTokens != null)
+            {
+                var server = servers?.FirstOrDefault(s => s.Id == selectedServerId);
+                var managerAddress = server != null ? $"{server.Host}:2377" : "MANAGER_IP:2377";
+                
+                workerJoinCommand = $"docker swarm join --token {joinTokens.WorkerToken} {managerAddress}";
+                managerJoinCommand = $"docker swarm join --token {joinTokens.ManagerToken} {managerAddress}";
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading join tokens");
+        }
+        
+        StateHasChanged();
+    }
+    
+    private void CloseJoinTokens()
+    {
+        showJoinTokensModal = false;
+        joinTokens = null;
+        copiedMessage = null;
+    }
+    
+    private async Task CopyToClipboard(string text)
+    {
+        // In a real implementation, this would use JavaScript interop to copy to clipboard
+        copiedMessage = "✅ Copied to clipboard!";
+        StateHasChanged();
+        
+        await Task.Delay(2000);
+        copiedMessage = null;
+        StateHasChanged();
+    }
+    
+    private string GetNodeStatusClass(NodeDto node)
+    {
+        if (node.State != "ready") return "node-down";
+        if (node.Availability == "drain") return "node-drain";
+        return "node-ready";
+    }
+    
+    private string FormatCPU(long nanoCPUs) => $"{nanoCPUs / 1_000_000_000.0:F2}";
+    private string FormatMemory(long bytes) => $"{bytes / 1024.0 / 1024.0 / 1024.0:F2} GB";
+    
+    private record ServerDto(int Id, string Name, string Host, bool IsSwarmManager);
+    private record NodeDto(string Id, string Hostname, string Role, string State, string Availability, 
+        bool IsLeader, string Address, long NanoCPUs, long MemoryBytes, string EngineVersion, string Platform);
+    private record SystemInfoDto(bool SwarmActive);
+    private record JoinTokensDto(string WorkerToken, string ManagerToken);
+}

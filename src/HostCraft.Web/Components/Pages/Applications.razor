@@ -68,6 +68,27 @@
                             <span class="label">Server</span>
                             <span class="value">@app.ServerName</span>
                         </div>
+                        @if (!string.IsNullOrEmpty(app.ServiceId))
+                        {
+                            <div class="info-item">
+                                <span class="label">Mode</span>
+                                <span class="value">🐝 Swarm Service</span>
+                            </div>
+                            @if (app.SwarmReplicas.HasValue)
+                            {
+                                <div class="info-item">
+                                    <span class="label">Replicas</span>
+                                    <span class="value">@app.RunningReplicas/@app.SwarmReplicas</span>
+                                </div>
+                            }
+                        }
+                        else if (!string.IsNullOrEmpty(app.ContainerId))
+                        {
+                            <div class="info-item">
+                                <span class="label">Mode</span>
+                                <span class="value">📦 Container</span>
+                            </div>
+                        }
                         @if (app.LastDeployedAt.HasValue)
                         {
                             <div class="info-item">
@@ -85,6 +106,15 @@
                         {
                             <button class="btn-icon" @onclick="() => ViewLogs(app.Id)" title="Logs">
                                 📄
+                            </button>
+                        }
+                        @if (!string.IsNullOrEmpty(app.ServiceId) && app.SwarmReplicas.HasValue)
+                        {
+                            <button class="btn-icon" @onclick="() => ScaleDown(app.Id)" title="Scale Down" disabled="@(app.SwarmReplicas <= 1)">
+                                ➖
+                            </button>
+                            <button class="btn-icon" @onclick="() => ScaleUp(app.Id)" title="Scale Up">
+                                ➕
                             </button>
                         }
                         <button class="btn-icon btn-primary" @onclick="() => Redeploy(app.Id)" title="Redeploy">
@@ -178,6 +208,50 @@
         catch (Exception ex)
         {
             Logger.LogError(ex, "Error deleting application");
+        }
+    }
+    
+    private async Task ScaleUp(int appId)
+    {
+        try
+        {
+            var app = applications?.FirstOrDefault(a => a.Id == appId);
+            if (app != null)
+            {
+                var newReplicas = (app.SwarmReplicas ?? 1) + 1;
+                var response = await Http.PostAsync($"api/applications/{appId}/scale?replicas={newReplicas}", null);
+                if (response.IsSuccessStatusCode)
+                {
+                    await LoadApplications();
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error scaling up application");
+        }
+    }
+    
+    private async Task ScaleDown(int appId)
+    {
+        try
+        {
+            var app = applications?.FirstOrDefault(a => a.Id == appId);
+            if (app != null && app.SwarmReplicas > 1)
+            {
+                var newReplicas = app.SwarmReplicas.Value - 1;
+                var response = await Http.PostAsync($"api/applications/{appId}/scale?replicas={newReplicas}", null);
+                if (response.IsSuccessStatusCode)
+                {
+        int? SwarmReplicas,
+        int? RunningReplicas,
+                    await LoadApplications();
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error scaling down application");
         }
     }
     

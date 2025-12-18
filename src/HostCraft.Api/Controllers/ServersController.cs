@@ -748,6 +748,99 @@ public class ServersController : ControllerBase
             return StatusCode(500, new { error = ex.Message });
         }
     }
+    
+    /// <summary>
+    /// Initialize Docker Swarm on a server
+    /// </summary>
+    [HttpPost("{id}/swarm/init")]
+    public async Task<IActionResult> InitializeSwarm(int id)
+    {
+        var server = await _context.Servers.FindAsync(id);
+        
+        if (server == null)
+        {
+            return NotFound(new { error = $"Server {id} not found" });
+        }
+        
+        try
+        {
+            // Use server's host as advertise address
+            var advertiseAddress = server.Host;
+            await _dockerService.InitializeSwarmAsync(server, advertiseAddress);
+            
+            // Update server type
+            server.Type = ServerType.SwarmManager;
+            server.IsSwarmManager = true;
+            await _context.SaveChangesAsync();
+            
+            return Ok(new { message = "Swarm initialized successfully", advertiseAddress });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error initializing swarm on server {ServerId}", id);
+            return StatusCode(500, new { error = "Failed to initialize swarm", message = ex.Message });
+        }
+    }
+    
+    /// <summary>
+    /// Get swarm join tokens
+    /// </summary>
+    [HttpGet("{id}/swarm/tokens")]
+    public async Task<ActionResult> GetJoinTokens(int id)
+    {
+        var server = await _context.Servers.FindAsync(id);
+        
+        if (server == null)
+        {
+            return NotFound(new { error = $"Server {id} not found" });
+        }
+        
+        if (!server.IsSwarmManager)
+        {
+            return BadRequest(new { error = "Server is not a swarm manager" });
+        }
+        
+        try
+        {
+            var (workerToken, managerToken) = await _dockerService.GetJoinTokensAsync(server);
+            
+            return Ok(new
+            {
+                WorkerToken = workerToken,
+                ManagerToken = managerToken
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting join tokens for server {ServerId}", id);
+            return StatusCode(500, new { error = "Failed to get join tokens", message = ex.Message });
+        }
+    }
+    
+    /// <summary>
+    /// Get system information including swarm status
+    /// </summary>
+    [HttpGet("{id}/info")]
+    public async Task<ActionResult<SystemInfo>> GetSystemInfo(int id)
+    {
+        var server = await _context.Servers.FindAsync(id);
+        
+        if (server == null)
+        {
+            return NotFound(new { error = $"Server {id} not found" });
+        }
+        
+        try
+        {
+            var systemInfo = await _dockerService.GetSystemInfoAsync(server);
+            return Ok(systemInfo);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting system info for server {ServerId}", id);
+            return StatusCode(500, new { error = "Failed to get system info", message = ex.Message });
+        }
+    }
 }
 
 public record CreateServerRequest(
