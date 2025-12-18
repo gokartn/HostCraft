@@ -119,6 +119,13 @@
             <div class="actions-card">
                 <h2>Quick Actions</h2>
                 <div class="action-buttons">
+                    @if (server.Status == ServerStatus.Offline || server.Host != "localhost")
+                    {
+                        <button class="action-btn action-btn-primary" @onclick="AutoConfigureServer" disabled="@configuring">
+                            <span class="action-icon">@(configuring ? "🔄" : "⚙️")</span>
+                            <span class="action-text">@(configuring ? "Configuring..." : "Auto Configure")</span>
+                        </button>
+                    }
                     <button class="action-btn" @onclick="ShowPublicKey">
                         <span class="action-icon">🔑</span>
                         <span class="action-text">Show Public Key</span>
@@ -167,6 +174,7 @@
     private ServerDto? server;
     private bool loading = true;
     private bool validating = false;
+    private bool configuring = false;
     private string? publicKeyInfo;
     private bool showingPublicKey = false;
 
@@ -222,6 +230,57 @@
         }
     }
 
+    private async Task AutoConfigureServer()
+    {
+        if (!await JSRuntime.InvokeAsync<bool>("confirm", 
+            "This will install Docker and required tools on the server. This may take 5-10 minutes. Continue?"))
+        {
+            return;
+        }
+        
+        configuring = true;
+        try
+        {
+            var response = await Http.PostAsync($"api/servers/{Id}/auto-configure", null);
+            if (response.IsSuccessStatusCode)
+            {
+                await JSRuntime.InvokeVoidAsync("alert", 
+                    "✅ Auto-configuration started!\n\n" +
+                    "Docker is being installed on the server. This will take 5-10 minutes.\n\n" +
+                    "The page will refresh automatically when complete. You can also check the server status manually.");
+                
+                // Poll for completion (check every 15 seconds for 10 minutes)
+                for (int i = 0; i < 40; i++)
+                {
+                    await Task.Delay(15000);
+                    await LoadServer();
+                    
+                    if (server?.Status == ServerStatus.Online)
+                    {
+                        await JSRuntime.InvokeVoidAsync("alert", 
+                            "🎉 Auto-configuration complete!\n\n" +
+                            "Docker has been successfully installed and the server is now online.");
+                        break;
+                    }
+                }
+            }
+            else
+            {
+                var error = await response.Content.ReadAsStringAsync();
+                await JSRuntime.InvokeVoidAsync("alert", $"❌ Configuration failed: {error}");
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to auto-configure server {ServerId}", Id);
+            await JSRuntime.InvokeVoidAsync("alert", $"❌ Error: {ex.Message}");
+        }
+        finally
+        {
+            configuring = false;
+        }
+    }
+    
     private async Task ShowPublicKey()
     {
         try
@@ -309,3 +368,32 @@
         public string ManualCommand { get; set; } = "";
     }
 }
+
+<style>
+    .action-btn-primary {
+        background: linear-gradient(135deg, #10b981 0%, #059669 100%) !important;
+        border: 2px solid #10b981 !important;
+        box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3) !important;
+        animation: pulse 2s infinite;
+    }
+    
+    .action-btn-primary:hover:not(:disabled) {
+        transform: translateY(-2px) scale(1.02);
+        box-shadow: 0 8px 20px rgba(16, 185, 129, 0.4) !important;
+    }
+    
+    .action-btn-primary:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+        animation: none;
+    }
+    
+    @@keyframes pulse {
+        0%, 100% {
+            box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+        }
+        50% {
+            box-shadow: 0 4px 20px rgba(16, 185, 129, 0.5);
+        }
+    }
+</style>

@@ -14,6 +14,7 @@ public class ServersController : ControllerBase
     private readonly HostCraftDbContext _context;
     private readonly IDockerService _dockerService;
     private readonly IProxyService _proxyService;
+    private readonly ISshService _sshService;
     private readonly ILogger<ServersController> _logger;
     private readonly IServiceScopeFactory _scopeFactory;
     
@@ -21,12 +22,14 @@ public class ServersController : ControllerBase
         HostCraftDbContext context,
         IDockerService dockerService,
         IProxyService proxyService,
+        ISshService sshService,
         ILogger<ServersController> logger,
         IServiceScopeFactory scopeFactory)
     {
         _context = context;
         _dockerService = dockerService;
         _proxyService = proxyService;
+        _sshService = sshService;
         _logger = logger;
         _scopeFactory = scopeFactory;
     }
@@ -1003,6 +1006,186 @@ public class ServersController : ControllerBase
         {
             _logger.LogError(ex, "Error getting join tokens for server {ServerId}", id);
             return StatusCode(500, new { error = "Failed to get join tokens", message = ex.Message });
+        }
+    }
+    
+    /// <summary>
+    /// Auto-configure server by installing Docker and prerequisites
+    /// </summary>
+    [HttpPost("{id}/auto-configure")]
+    public async Task<ActionResult> AutoConfigureServer(int id)
+    {
+        var server = await _context.Servers
+            .Include(s => s.PrivateKey)
+            .FirstOrDefaultAsync(s => s.Id == id);
+        
+        if (server == null)
+        {
+            return NotFound(new { error = $"Server {id} not found" });
+        }
+        
+        if (server.Host == "localhost" || server.Host == "127.0.0.1")
+        {
+            return BadRequest(new { error = "Cannot auto-configure localhost. Docker should be installed locally." });
+        }
+        
+        try
+        {
+            _logger.LogInformation("Starting auto-configuration for server {ServerName} ({Host})", server.Name, server.Host);
+            
+            // Run the configuration in background
+            _ = Task.Run(async () => await AutoConfigureServerAsync(server.Id));
+            
+            return Ok(new { message = "Auto-configuration started. This may take several minutes. Check server status for progress." });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error starting auto-configuration for server {ServerId}", id);
+            return StatusCode(500, new { error = "Failed to start auto-configuration", message = ex.Message });
+        }
+    }
+    
+    private async Task AutoConfigureServerAsync(int serverId)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var context = scope.ServiceProvider.GetRequiredService<HostCraftDbContext>();
+        var sshService = scope.ServiceProvider.GetRequiredService<ISshService>();
+        var logger = scope.ServiceProvider.GetRequiredService<ILogger<ServersController>>();
+        
+        var server = await context.Servers
+            .Include(s => s.PrivateKey)
+            .FirstOrDefaultAsync(s => s.Id == serverId);
+        
+        if (server == null) return;
+        
+        try
+        {
+            logger.LogInformation("Auto-configuring server {ServerName}...", server.Name);
+            
+            // Read the install-docker.sh script
+            var scriptPath = Path.Combine(AppContext.BaseDirectory, "scripts", "install-docker.sh");
+            if (!System.IO.File.Exists(scriptPath))
+            {
+                // Try relative path if running in development
+                scriptPath = Path.Combine(Directory.GetCurrentDirectory(), "..", "..", "..", "..", "scripts", "install-docker.sh");
+                if (!System.IO.File.Exists(scriptPath))
+                {
+                    logger.LogError("install-docker.sh script not found at {Path}", scriptPath);
+                    return;
+                }
+            }
+            
+            var installScript = await System.IO.File.ReadAllTextAsync(scriptPath);
+            
+            // Upload script to remote server
+            logger.LogInformation("Uploading installation script to {ServerName}...", server.Name);
+            var remoteScriptPath = "/tmp/install-docker-hostcraft.sh";
+            
+            // Create script on remote server using echo
+            var uploadCommand = $"cat > {remoteScriptPath} << 'HOSTCRAFT_EOF'\n{installScript}\nHOSTCRAFT_EOF\nchmod +x {remoteScriptPath}";
+            var uploadResult = await sshService.ExecuteCommandAsync(server, uploadCommand);
+            
+            if (uploadResult.ExitCode != 0)
+            {
+                logger.LogError("Failed to upload script: {Error}", uploadResult.Error);
+                return;
+            }
+            
+            logger.LogInformation("Running Docker installation on {ServerName}...", server.Name);
+            
+            // Execute the script with sudo (non-interactive mode)
+            var installCommand = $"sudo DEBIAN_FRONTEND=noninteractive bash {remoteScriptPath} 2>&1";
+            var installResult = await sshService.ExecuteCommandAsync(server, installCommand);
+            
+            logger.LogInformation("Installation output: {Output}", installResult.Output);
+            
+            if (installResult.ExitCode == 0)
+            {
+                logger.LogInformation("Docker installed successfully on {ServerName}", server.Name);
+                
+                // Clean up the script
+                try
+                {
+                    await sshService.ExecuteCommandAsync(server, $"rm -f {remoteScriptPath}");
+                }
+                catch
+                {
+                    // Ignore cleanup errors
+                }
+                
+                // Wait for Docker to fully initialize
+                logger.LogInformation("Waiting for Docker daemon to be ready...");
+                await Task.Delay(10000);
+                
+                // Try to reconnect and validate (server might have restarted)
+                var maxRetries = 5;
+                var retryDelay = 5000;
+                var dockerService = scope.ServiceProvider.GetRequiredService<IDockerService>();
+                
+                for (int retry = 0; retry < maxRetries; retry++)
+                {
+                    try
+                    {
+                        logger.LogInformation("Validating Docker installation (attempt {Attempt}/{Max})...", retry + 1, maxRetries);
+                        
+                        // Test SSH connection first
+                        var sshConnected = await sshService.ValidateConnectionAsync(server);
+                        if (!sshConnected)
+                        {
+                            logger.LogWarning("SSH connection lost, server may have restarted. Waiting...");
+                            await Task.Delay(retryDelay);
+                            continue;
+                        }
+                        
+                        // Test Docker connection
+                        var isValid = await dockerService.ValidateConnectionAsync(server);
+                        if (isValid)
+                        {
+                            server.Status = ServerStatus.Online;
+                            await context.SaveChangesAsync();
+                            logger.LogInformation("✅ Docker successfully validated on {ServerName}", server.Name);
+                            break;
+                        }
+                        else
+                        {
+                            logger.LogWarning("Docker not ready yet, retrying...");
+                            await Task.Delay(retryDelay);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        logger.LogWarning(ex, "Validation attempt {Attempt} failed, will retry", retry + 1);
+                        if (retry < maxRetries - 1)
+                        {
+                            await Task.Delay(retryDelay);
+                        }
+                    }
+                }
+                
+                // Final status check
+                try
+                {
+                    var isValid = await dockerService.ValidateConnectionAsync(server);
+                    server.Status = isValid ? ServerStatus.Online : ServerStatus.Offline;
+                    await context.SaveChangesAsync();
+                }
+                catch (Exception ex)
+                {
+                    logger.LogWarning(ex, "Docker installed but validation inconclusive for {ServerName}", server.Name);
+                    server.Status = ServerStatus.Offline;
+                    await context.SaveChangesAsync();
+                }
+            }
+            else
+            {
+                logger.LogError("Docker installation failed on {ServerName}: {Error}", server.Name, installResult.Error);
+                server.Status = ServerStatus.Error;
+                await context.SaveChangesAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Error during auto-configuration of server {ServerId}", serverId);
         }
     }
     
