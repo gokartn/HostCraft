@@ -4,6 +4,7 @@
 @inject HttpClient Http
 @inject NavigationManager Navigation
 @inject IJSRuntime JSRuntime
+@inject ILogger<ServerDetails> Logger
 
 <PageTitle>@(server?.Name ?? "Server") - HostCraft</PageTitle>
 
@@ -183,6 +184,7 @@
         }
         catch (Exception ex)
         {
+            Logger.LogError(ex, "Failed to load server {ServerId} details", Id);
             server = null;
         }
         finally
@@ -237,7 +239,8 @@
         }
         catch (Exception ex)
         {
-            await JSRuntime.InvokeVoidAsync("alert", $"Error getting public key: {ex.Message}");
+            Logger.LogError(ex, "Failed to retrieve public key for server {ServerId}", Id);
+            await JSRuntime.InvokeVoidAsync("alert", $"❌ Error getting public key: {ex.Message}");
         }
     }
 

@@ -81,8 +81,9 @@ public class TerminalHub : Hub
                            (File.Exists("/proc/self/cgroup") && 
                             File.ReadAllText("/proc/self/cgroup").Contains("docker"));
         }
-        catch
+        catch (Exception ex)
         {
+            _logger.LogWarning(ex, "Failed to detect Docker container environment, assuming not in container");
             isInContainer = false;
         }
 
@@ -456,7 +457,11 @@ public class LocalTerminalSession : ITerminalSession
             {
                 Process.Kill();
             }
-            catch { /* Ignore */ }
+            catch (Exception ex) 
+            { 
+                // Process may already be terminated - log for debugging
+                System.Diagnostics.Debug.WriteLine($"Failed to kill terminal process: {ex.Message}");
+            }
         }
         Process?.Dispose();
     }

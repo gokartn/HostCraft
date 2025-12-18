@@ -1,7 +1,33 @@
 using HostCraft.Web.Components;
 using HostCraft.Web.Hubs;
+using Serilog;
+using Serilog.Events;
+
+// Configure Serilog
+Log.Logger = new LoggerConfiguration()
+    .MinimumLevel.Information()
+    .MinimumLevel.Override("Microsoft", LogEventLevel.Warning)
+    .MinimumLevel.Override("Microsoft.EntityFrameworkCore", LogEventLevel.Warning)
+    .MinimumLevel.Override("System", LogEventLevel.Warning)
+    .Enrich.FromLogContext()
+    .Enrich.WithThreadId()
+    .Enrich.WithMachineName()
+    .WriteTo.Console(outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] [{SourceContext}] {Message:lj}{NewLine}{Exception}")
+    .WriteTo.File(
+        path: "/app/logs/hostcraft-web-.log",
+        rollingInterval: RollingInterval.Day,
+        retainedFileCountLimit: 7,
+        outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] [{SourceContext}] {Message:lj}{NewLine}{Exception}")
+    .CreateLogger();
+
+try
+{
+    Log.Information("Starting HostCraft Web");
 
 var builder = WebApplication.CreateBuilder(args);
+
+// Use Serilog for logging
+builder.Host.UseSerilog();
 
 // Add services to the container.
 builder.Services.AddRazorComponents()
@@ -22,28 +48,28 @@ if (!apiUrl.EndsWith("/"))
     apiUrl = apiUrl + "/";
 }
 
-Console.WriteLine($"[HostCraft.Web] Configured API URL: {apiUrl}");
-Console.WriteLine($"[HostCraft.Web] ASPNETCORE_ENVIRONMENT: {builder.Environment.EnvironmentName}");
-Console.WriteLine($"[HostCraft.Web] Attempting to resolve 'api' hostname...");
+Log.Information("Configured API URL: {ApiUrl}", apiUrl);
+Log.Information("ASPNETCORE_ENVIRONMENT: {Environment}", builder.Environment.EnvironmentName);
+Log.Information("Attempting to resolve 'api' hostname...");
 
 // Try to diagnose DNS issues
 try
 {
     var hostEntry = System.Net.Dns.GetHostEntry("api");
-    Console.WriteLine($"[HostCraft.Web] Successfully resolved 'api' to: {string.Join(", ", hostEntry.AddressList.Select(a => a.ToString()))}");
+    Log.Information("Successfully resolved 'api' to: {Addresses}", string.Join(", ", hostEntry.AddressList.Select(a => a.ToString())));
 }
 catch (Exception ex)
 {
-    Console.WriteLine($"[HostCraft.Web] FAILED to resolve 'api': {ex.Message}");
-    Console.WriteLine($"[HostCraft.Web] Trying 'hostcraft_api' instead...");
+    Log.Warning(ex, "FAILED to resolve 'api' hostname");
+    Log.Information("Trying 'hostcraft_api' instead...");
     try
     {
         var hostEntry2 = System.Net.Dns.GetHostEntry("hostcraft_api");
-        Console.WriteLine($"[HostCraft.Web] Successfully resolved 'hostcraft_api' to: {string.Join(", ", hostEntry2.AddressList.Select(a => a.ToString()))}");
+        Log.Information("Successfully resolved 'hostcraft_api' to: {Addresses}", string.Join(", ", hostEntry2.AddressList.Select(a => a.ToString())));
     }
     catch (Exception ex2)
     {
-        Console.WriteLine($"[HostCraft.Web] FAILED to resolve 'hostcraft_api': {ex2.Message}");
+        Log.Warning(ex2, "FAILED to resolve 'hostcraft_api' hostname");
     }
 }
 
@@ -75,4 +101,14 @@ app.MapRazorComponents<App>()
 // Map SignalR hub for terminal
 app.MapHub<TerminalHub>("/terminalhub");
 
-app.Run();
+    app.Run();
+}
+catch (Exception ex)
+{
+    Log.Fatal(ex, "Application terminated unexpectedly");
+    throw;
+}
+finally
+{
+    Log.CloseAndFlush();
+}

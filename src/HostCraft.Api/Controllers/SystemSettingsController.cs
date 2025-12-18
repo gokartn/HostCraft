@@ -146,6 +146,132 @@ public class SystemSettingsController : ControllerBase
             });
         }
     }
+
+    /// <summary>
+    /// Get container logs from HostCraft services (Developer Mode)
+    /// </summary>
+    [HttpGet("logs")]
+    public async Task<ActionResult<ContainerLogsResponse>> GetContainerLogs([FromQuery] int lines = 200)
+    {
+        try
+        {
+            string? webLogs = null;
+            string? apiLogs = null;
+            string? postgresLogs = null;
+
+            // Execute docker logs commands for each container
+            var tasks = new List<Task>
+            {
+                Task.Run(async () =>
+                {
+                    try
+                    {
+                        var process = new System.Diagnostics.Process
+                        {
+                            StartInfo = new System.Diagnostics.ProcessStartInfo
+                            {
+                                FileName = "docker",
+                                Arguments = $"logs --tail {lines} $(docker ps --filter name=hostcraft_web --format \"{{{{.Names}}}}\" | head -1)",
+                                RedirectStandardOutput = true,
+                                RedirectStandardError = true,
+                                UseShellExecute = false,
+                                CreateNoWindow = true
+                            }
+                        };
+                        process.Start();
+                        webLogs = await process.StandardOutput.ReadToEndAsync();
+                        var errors = await process.StandardError.ReadToEndAsync();
+                        if (!string.IsNullOrEmpty(errors))
+                        {
+                            webLogs += "\n" + errors;
+                        }
+                        await process.WaitForExitAsync();
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Failed to get web container logs");
+                        webLogs = $"Failed to get web logs: {ex.Message}";
+                    }
+                }),
+                Task.Run(async () =>
+                {
+                    try
+                    {
+                        var process = new System.Diagnostics.Process
+                        {
+                            StartInfo = new System.Diagnostics.ProcessStartInfo
+                            {
+                                FileName = "docker",
+                                Arguments = $"logs --tail {lines} $(docker ps --filter name=hostcraft_api --format \"{{{{.Names}}}}\" | head -1)",
+                                RedirectStandardOutput = true,
+                                RedirectStandardError = true,
+                                UseShellExecute = false,
+                                CreateNoWindow = true
+                            }
+                        };
+                        process.Start();
+                        apiLogs = await process.StandardOutput.ReadToEndAsync();
+                        var errors = await process.StandardError.ReadToEndAsync();
+                        if (!string.IsNullOrEmpty(errors))
+                        {
+                            apiLogs += "\n" + errors;
+                        }
+                        await process.WaitForExitAsync();
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Failed to get API container logs");
+                        apiLogs = $"Failed to get API logs: {ex.Message}";
+                    }
+                }),
+                Task.Run(async () =>
+                {
+                    try
+                    {
+                        var process = new System.Diagnostics.Process
+                        {
+                            StartInfo = new System.Diagnostics.ProcessStartInfo
+                            {
+                                FileName = "docker",
+                                Arguments = $"logs --tail {lines} $(docker ps --filter name=hostcraft_postgres --format \"{{{{.Names}}}}\" | head -1)",
+                                RedirectStandardOutput = true,
+                                RedirectStandardError = true,
+                                UseShellExecute = false,
+                                CreateNoWindow = true
+                            }
+                        };
+                        process.Start();
+                        postgresLogs = await process.StandardOutput.ReadToEndAsync();
+                        var errors = await process.StandardError.ReadToEndAsync();
+                        if (!string.IsNullOrEmpty(errors))
+                        {
+                            postgresLogs += "\n" + errors;
+                        }
+                        await process.WaitForExitAsync();
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Failed to get Postgres container logs");
+                        postgresLogs = $"Failed to get Postgres logs: {ex.Message}";
+                    }
+                })
+            };
+
+            await Task.WhenAll(tasks);
+
+            return new ContainerLogsResponse
+            {
+                WebLogs = webLogs ?? "No logs available",
+                ApiLogs = apiLogs ?? "No logs available",
+                PostgresLogs = postgresLogs ?? "No logs available"
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to get container logs");
+            return StatusCode(500, new { error = $"Failed to get container logs: {ex.Message}" });
+        }
+    }
 }
 
 public record ConfigureHostCraftRequest(
@@ -169,4 +295,11 @@ public record SystemSettingsDto
     public string? CertificateStatus { get; init; }
     public DateTime? ConfiguredAt { get; init; }
     public DateTime? ProxyUpdatedAt { get; init; }
+}
+
+public record ContainerLogsResponse
+{
+    public string? WebLogs { get; init; }
+    public string? ApiLogs { get; init; }
+    public string? PostgresLogs { get; init; }
 }

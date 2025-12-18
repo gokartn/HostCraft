@@ -3,6 +3,7 @@
 @inject HttpClient Http
 @inject NavigationManager Navigation
 @inject IJSRuntime JS
+@inject ILogger<Images> Logger
 
 <PageTitle>Images - HostCraft</PageTitle>
 
@@ -250,6 +251,7 @@
         }
         catch (Exception ex)
         {
+            Logger.LogError(ex, "Failed to load images for server {ServerId}", ServerId);
             errorMessage = ex.Message;
         }
         finally
@@ -320,6 +322,7 @@
         }
         catch (Exception ex)
         {
+            Logger.LogError(ex, "Failed to pull image {ImageName} on server {ServerId}", imageName, ServerId);
             errorMessage = $"Error pulling image: {ex.Message}";
         }
         finally
@@ -347,6 +350,7 @@
         }
         catch (Exception ex)
         {
+            Logger.LogError(ex, "Failed to delete image {ImageId} from server {ServerId}", imageId, ServerId);
             errorMessage = $"Error deleting image: {ex.Message}";
         }
     }

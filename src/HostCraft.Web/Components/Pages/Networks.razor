@@ -3,6 +3,7 @@
 @inject HttpClient Http
 @inject NavigationManager Navigation
 @inject IJSRuntime JS
+@inject ILogger<Networks> Logger
 
 <PageTitle>Networks - HostCraft</PageTitle>
 
@@ -220,6 +221,7 @@
         }
         catch (Exception ex)
         {
+            Logger.LogError(ex, "Failed to load networks for server {ServerId}", ServerId);
             errorMessage = ex.Message;
         }
         finally
@@ -269,6 +271,7 @@
         }
         catch (Exception ex)
         {
+            Logger.LogError(ex, "Failed to create network {NetworkName} on server {ServerId}", networkName, ServerId);
             errorMessage = $"Error creating network: {ex.Message}";
         }
         finally
@@ -296,6 +299,7 @@
         }
         catch (Exception ex)
         {
+            Logger.LogError(ex, "Failed to delete network {NetworkId} from server {ServerId}", networkId, ServerId);
             errorMessage = $"Error deleting network: {ex.Message}";
         }
     }

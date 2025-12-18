@@ -80,11 +80,121 @@
         </div>
     </div>
 
+    <!-- Developer Mode -->
+    <div class="card">
+        <div class="card-header">
+            <h2 class="card-title">
+                <span>🔧</span> Developer Mode
+            </h2>
+        </div>
+        <div class="settings-section">
+            <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; margin-bottom: 1rem;">
+                <input type="checkbox" @bind="developerMode" @bind:after="ToggleDeveloperMode" style="width: 18px; height: 18px;" />
+                <span style="font-weight: 500;">Enable Developer Mode</span>
+            </label>
+            <small style="display: block; color: #a3a3a3;">
+                Shows real-time logs from all HostCraft containers for debugging
+            </small>
+        </div>
+    </div>
+
+    @if (developerMode)
+    {
+        <!-- HostCraft Logs -->
+        <div class="card">
+            <div class="card-header">
+                <h2 class="card-title">
+                    <span>📋</span> HostCraft Container Logs
+                </h2>
+                <div class="action-buttons" style="margin-left: auto;">
+                    <button class="btn btn-outline" @onclick="RefreshLogs">
+                        <span>🔄 Refresh</span>
+                    </button>
+                    <button class="btn btn-outline" @onclick="ClearLogs">
+                        <span>🗑️ Clear</span>
+                    </button>
+                    <button class="btn btn-outline" @onclick="@(() => autoRefresh = !autoRefresh)">
+                        @if (autoRefresh)
+                        {
+                            <span>⏸️ Pause</span>
+                        }
+                        else
+                        {
+                            <span>▶️ Auto-Refresh</span>
+                        }
+                    </button>
+                </div>
+            </div>
+            <div class="settings-section">
+                <div class="tabs">
+                    <button class="tab-button @(activeTab == "web" ? "active" : "")" @onclick="@(() => activeTab = "web")">
+                        Web Container
+                    </button>
+                    <button class="tab-button @(activeTab == "api" ? "active" : "")" @onclick="@(() => activeTab = "api")">
+                        API Container
+                    </button>
+                    <button class="tab-button @(activeTab == "postgres" ? "active" : "")" @onclick="@(() => activeTab = "postgres")">
+                        Postgres Container
+                    </button>
+                    <button class="tab-button @(activeTab == "all" ? "active" : "")" @onclick="@(() => activeTab = "all")">
+                        All Containers
+                    </button>
+                </div>
+
+                <div class="log-controls" style="margin: 1rem 0; display: flex; gap: 1rem; align-items: center;">
+                    <label style="display: flex; align-items: center; gap: 0.5rem;">
+                        <span>Lines:</span>
+                        <select @bind="logLines" class="form-control" style="width: auto;">
+                            <option value="50">50</option>
+                            <option value="100">100</option>
+                            <option value="200">200</option>
+                            <option value="500">500</option>
+                            <option value="1000">1000</option>
+                        </select>
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 0.5rem;">
+                        <input type="checkbox" @bind="showTimestamps" style="width: 18px; height: 18px;" />
+                        <span>Show Timestamps</span>
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 0.5rem;">
+                        <input type="checkbox" @bind="onlyErrors" style="width: 18px; height: 18px;" />
+                        <span>Only Errors/Warnings</span>
+                    </label>
+                </div>
+
+                @if (loadingLogs)
+                {
+                    <div class="loading-state">
+                        <div class="spinner"></div>
+                        <p>Loading logs...</p>
+                    </div>
+                }
+                else if (!string.IsNullOrEmpty(logError))
+                {
+                    <div class="alert alert-danger">
+                        <strong>Error:</strong> @logError
+                    </div>
+                }
+                else
+                {
+                    <div class="log-container">
+                        <pre class="log-output">@GetFilteredLogs()</pre>
+                    </div>
+                }
+
+                <div class="log-info" style="margin-top: 1rem; color: #a3a3a3; font-size: 0.875rem;">
+                    <p>Last updated: @lastLogUpdate.ToString("HH:mm:ss")</p>
+                    <p>Total lines: @GetTotalLogLines()</p>
+                </div>
+            </div>
+        </div>
+    }
+
     <!-- Traefik Dashboard Link -->
     <div class="card">
         <div class="card-header">
             <h2 class="card-title">
-                <span>🔧</span> Reverse Proxy Management
+                <span>🌐</span> Reverse Proxy Management
             </h2>
         </div>
         <div class="settings-section">
@@ -291,12 +401,157 @@
     private string? domainError;
     private string? domainSuccess;
 
+    // Developer Mode
+    private bool developerMode = false;
+    private string activeTab = "web";
+    private int logLines = 200;
+    private bool showTimestamps = true;
+    private bool onlyErrors = false;
+    private bool autoRefresh = false;
+    private bool loadingLogs = false;
+    private string? logError;
+    private DateTime lastLogUpdate = DateTime.Now;
+    private System.Threading.Timer? autoRefreshTimer;
+    
+    private Dictionary<string, string> containerLogs = new();
+
     protected override async Task OnInitializedAsync()
     {
         await LoadVersion();
         await CheckForUpdates();
         await LoadHostCraftDomain();
     }
+
+    private async Task ToggleDeveloperMode()
+    {
+        if (developerMode)
+        {
+            await RefreshLogs();
+            if (autoRefresh)
+            {
+                StartAutoRefresh();
+            }
+        }
+        else
+        {
+            StopAutoRefresh();
+        }
+    }
+
+    private void StartAutoRefresh()
+    {
+        autoRefreshTimer = new System.Threading.Timer(async _ =>
+        {
+            await InvokeAsync(async () =>
+            {
+                await RefreshLogs();
+                StateHasChanged();
+            });
+        }, null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
+    }
+
+    private void StopAutoRefresh()
+    {
+        autoRefreshTimer?.Dispose();
+        autoRefreshTimer = null;
+    }
+
+    private async Task RefreshLogs()
+    {
+        if (!developerMode) return;
+
+        loadingLogs = true;
+        logError = null;
+        StateHasChanged();
+
+        try
+        {
+            // Call API to get logs from all containers
+            var response = await Http.GetFromJsonAsync<ContainerLogsResponse>($"api/systemsettings/logs?lines={logLines}");
+            
+            if (response != null)
+            {
+                containerLogs["web"] = response.WebLogs ?? "No logs available";
+                containerLogs["api"] = response.ApiLogs ?? "No logs available";
+                containerLogs["postgres"] = response.PostgresLogs ?? "No logs available";
+                lastLogUpdate = DateTime.Now;
+            }
+        }
+        catch (Exception ex)
+        {
+            logError = $"Failed to load logs: {ex.Message}";
+        }
+        finally
+        {
+            loadingLogs = false;
+            StateHasChanged();
+        }
+    }
+
+    private void ClearLogs()
+    {
+        containerLogs.Clear();
+        StateHasChanged();
+    }
+
+    private string GetFilteredLogs()
+    {
+        string logs = activeTab == "all" 
+            ? string.Join("\n\n=== API ===\n", containerLogs.Values)
+            : containerLogs.GetValueOrDefault(activeTab, "No logs available");
+
+        if (onlyErrors && !string.IsNullOrEmpty(logs))
+        {
+            var lines = logs.Split('\n');
+            var filtered = lines.Where(line => 
+                line.Contains("error", StringComparison.OrdinalIgnoreCase) ||
+                line.Contains("exception", StringComparison.OrdinalIgnoreCase) ||
+                line.Contains("fail", StringComparison.OrdinalIgnoreCase) ||
+                line.Contains("warning", StringComparison.OrdinalIgnoreCase)
+            );
+            logs = string.Join('\n', filtered);
+        }
+
+        if (!showTimestamps && !string.IsNullOrEmpty(logs))
+        {
+            // Remove timestamp patterns (basic implementation)
+            var lines = logs.Split('\n');
+            logs = string.Join('\n', lines.Select(line => 
+            {
+                // Remove common timestamp formats
+                if (line.Length > 25 && (line[0] == '[' || char.IsDigit(line[0])))
+                {
+                    var idx = line.IndexOf(']');
+                    if (idx > 0 && idx < 30) return line.Substring(idx + 1).TrimStart();
+                }
+                return line;
+            }));
+        }
+
+        return string.IsNullOrEmpty(logs) ? "No logs available" : logs;
+    }
+
+    private int GetTotalLogLines()
+    {
+        if (activeTab == "all")
+        {
+            return containerLogs.Values.Sum(log => log?.Split('\n').Length ?? 0);
+        }
+        
+        var log = containerLogs.GetValueOrDefault(activeTab, "");
+        return log.Split('\n').Length;
+    }
+
+    public void Dispose()
+    {
+        StopAutoRefresh();
+    }
+
+    private record ContainerLogsResponse(
+        string? WebLogs,
+        string? ApiLogs,
+        string? PostgresLogs
+    );
 
     private async Task LoadHostCraftDomain()
     {
@@ -520,3 +775,103 @@
         public string? HtmlUrl { get; set; }
     }
 }
+
+<style>
+    .tabs {
+        display: flex;
+        gap: 0.5rem;
+        margin-bottom: 1rem;
+        border-bottom: 2px solid #334155;
+    }
+
+    .tab-button {
+        padding: 0.75rem 1.5rem;
+        background: transparent;
+        border: none;
+        color: #94a3b8;
+        cursor: pointer;
+        font-weight: 500;
+        transition: all 0.2s;
+        border-bottom: 2px solid transparent;
+        margin-bottom: -2px;
+    }
+
+    .tab-button:hover {
+        color: #e2e8f0;
+        background: rgba(148, 163, 184, 0.1);
+    }
+
+    .tab-button.active {
+        color: #3b82f6;
+        border-bottom-color: #3b82f6;
+    }
+
+    .log-container {
+        background: #0f172a;
+        border: 1px solid #334155;
+        border-radius: 8px;
+        padding: 1rem;
+        max-height: 600px;
+        overflow-y: auto;
+        font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+    }
+
+    .log-output {
+        margin: 0;
+        color: #e2e8f0;
+        font-size: 0.875rem;
+        line-height: 1.6;
+        white-space: pre-wrap;
+        word-wrap: break-word;
+    }
+
+    .log-controls {
+        display: flex;
+        gap: 1rem;
+        align-items: center;
+        flex-wrap: wrap;
+    }
+
+    .log-controls select {
+        background: #1e293b;
+        border: 1px solid #334155;
+        color: #e2e8f0;
+        padding: 0.5rem;
+        border-radius: 6px;
+    }
+
+    .loading-state {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 3rem;
+        color: #94a3b8;
+    }
+
+    .spinner {
+        width: 40px;
+        height: 40px;
+        border: 4px solid #334155;
+        border-top-color: #3b82f6;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+        margin-bottom: 1rem;
+    }
+
+    @@keyframes spin {
+        to { transform: rotate(360deg); }
+    }
+
+    .log-info {
+        display: flex;
+        gap: 2rem;
+        padding: 0.75rem;
+        background: #1e293b;
+        border-radius: 6px;
+    }
+
+    .log-info p {
+        margin: 0;
+    }
+</style>

@@ -3,6 +3,7 @@
 @inject HttpClient Http
 @inject NavigationManager Navigation
 @inject IJSRuntime JS
+@inject ILogger<Servers> Logger
 
 <PageTitle>Servers - HostCraft</PageTitle>
 
@@ -156,6 +157,7 @@
         }
         catch (Exception ex)
         {
+            Logger.LogError(ex, "Failed to load servers list");
             servers = new List<ServerDto>();
         }
         finally
@@ -238,6 +240,7 @@
             }
             catch (Exception ex)
             {
+                Logger.LogError(ex, "Failed to initialize Docker Swarm on server {ServerId}", id);
                 await JS.InvokeVoidAsync("alert", $"❌ Error: {ex.Message}");
             }
         }
@@ -283,6 +286,7 @@
             }
             catch (Exception ex)
             {
+                Logger.LogError(ex, "Failed to delete server {ServerName}", serverName);
                 await JS.InvokeVoidAsync("alert", $"❌ Error deleting server: {ex.Message}");
             }
         }

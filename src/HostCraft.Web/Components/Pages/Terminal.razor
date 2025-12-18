@@ -3,6 +3,7 @@
 @using Microsoft.AspNetCore.SignalR.Client
 @inject HttpClient Http
 @inject NavigationManager Navigation
+@inject ILogger<Terminal> Logger
 @implements IAsyncDisposable
 
 <PageTitle>Terminal - @(server?.Name ?? "Server")</PageTitle>
@@ -113,6 +114,7 @@
         }
         catch (Exception ex)
         {
+            Logger.LogError(ex, "Failed to load server {ServerId} for terminal", ServerId);
             error = $"Failed to load server: {ex.Message}";
         }
     }

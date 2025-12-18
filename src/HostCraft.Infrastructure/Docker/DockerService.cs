@@ -792,7 +792,10 @@ public class DockerService : IDockerService, IDisposable
                     tunnel.Stop();
                 }
             }
-            catch { }
+            catch (Exception ex) 
+            { 
+                System.Diagnostics.Debug.WriteLine($"Failed to stop SSH tunnel during disposal: {ex.Message}");
+            }
         }
         _sshTunnels.Clear();
         
@@ -807,7 +810,10 @@ public class DockerService : IDockerService, IDisposable
                 }
                 sshClient.Dispose();
             }
-            catch { }
+            catch (Exception ex) 
+            { 
+                System.Diagnostics.Debug.WriteLine($"Failed to disconnect/dispose SSH client during disposal: {ex.Message}");
+            }
         }
         _sshClients.Clear();
         
@@ -818,7 +824,10 @@ public class DockerService : IDockerService, IDisposable
             {
                 client.Dispose();
             }
-            catch { }
+            catch (Exception ex) 
+            { 
+                System.Diagnostics.Debug.WriteLine($"Failed to dispose Docker client during disposal: {ex.Message}");
+            }
         }
         _clients.Clear();
     }

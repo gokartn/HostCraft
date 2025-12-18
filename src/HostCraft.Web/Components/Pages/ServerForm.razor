@@ -4,6 +4,7 @@
 @using HostCraft.Core.Enums
 @inject HttpClient Http
 @inject NavigationManager Navigation
+@inject ILogger<ServerForm> Logger
 
 <PageTitle>@(IsEditMode ? "Edit Server" : "Add Server") - HostCraft</PageTitle>
 
@@ -270,6 +271,7 @@
         }
         catch (Exception ex)
         {
+            Logger.LogError(ex, "Failed to load server {ServerId} for editing", id);
             errorMessage = "Failed to load server details";
         }
     }
@@ -375,6 +377,7 @@
         }
         catch (Exception ex)
         {
+            Logger.LogError(ex, "Failed to save server: {ErrorMessage}", ex.Message);
             errorMessage = $"❌ Failed to save server: {ex.Message}";
         }
         finally
