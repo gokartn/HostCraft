@@ -23,6 +23,29 @@ if (!apiUrl.EndsWith("/"))
 }
 
 Console.WriteLine($"[HostCraft.Web] Configured API URL: {apiUrl}");
+Console.WriteLine($"[HostCraft.Web] ASPNETCORE_ENVIRONMENT: {builder.Environment.EnvironmentName}");
+Console.WriteLine($"[HostCraft.Web] Attempting to resolve 'api' hostname...");
+
+// Try to diagnose DNS issues
+try
+{
+    var hostEntry = System.Net.Dns.GetHostEntry("api");
+    Console.WriteLine($"[HostCraft.Web] Successfully resolved 'api' to: {string.Join(", ", hostEntry.AddressList.Select(a => a.ToString()))}");
+}
+catch (Exception ex)
+{
+    Console.WriteLine($"[HostCraft.Web] FAILED to resolve 'api': {ex.Message}");
+    Console.WriteLine($"[HostCraft.Web] Trying 'hostcraft_api' instead...");
+    try
+    {
+        var hostEntry2 = System.Net.Dns.GetHostEntry("hostcraft_api");
+        Console.WriteLine($"[HostCraft.Web] Successfully resolved 'hostcraft_api' to: {string.Join(", ", hostEntry2.AddressList.Select(a => a.ToString()))}");
+    }
+    catch (Exception ex2)
+    {
+        Console.WriteLine($"[HostCraft.Web] FAILED to resolve 'hostcraft_api': {ex2.Message}");
+    }
+}
 
 builder.Services.AddHttpClient("HostCraftAPI", client =>
 {
