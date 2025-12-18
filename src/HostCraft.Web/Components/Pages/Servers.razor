@@ -44,9 +44,9 @@
                 <button class="btn btn-secondary btn-lg" @onclick="ConfigureLocalhost" disabled="@configuringLocalhost">
                     <span class="icon">🖥️</span> @(configuringLocalhost ? "Configuring..." : "Configure Localhost")
                 </button>
-                <button class="btn btn-primary btn-lg" @onclick="NavigateToAdd">
+                <a href="/servers/new" class="btn btn-primary btn-lg">
                     <span class="icon">➕</span> Add Remote Server
-                </button>
+                </a>
             </div>
         </div>
     }

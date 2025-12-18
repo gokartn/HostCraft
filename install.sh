@@ -575,11 +575,8 @@ EOF
                 if [ $? -eq 0 ]; then
                     echo "✅ Traefik labels applied successfully"
                     
-                    # Read Let's Encrypt email for HTTPS
-                    letsencrypt_email=""
-                    if [ "$enable_https" = "yes" ]; then
-                        read -p "Enter Let's Encrypt email for SSL certificate notifications: " letsencrypt_email
-                    fi
+                    # Use Traefik email for Let's Encrypt (already collected earlier)
+                    letsencrypt_email="$TRAEFIK_EMAIL"
                     
                     echo ""
                     echo "✅ Traefik routing configured successfully!"
