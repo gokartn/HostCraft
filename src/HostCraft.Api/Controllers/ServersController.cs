@@ -1168,6 +1168,66 @@ public class ServersController : ControllerBase
                     var isValid = await dockerService.ValidateConnectionAsync(server);
                     server.Status = isValid ? ServerStatus.Online : ServerStatus.Offline;
                     await context.SaveChangesAsync();
+                    
+                    // If server is now online and marked as SwarmWorker, try to join it to an existing swarm
+                    if (isValid && server.Type == ServerType.SwarmWorker)
+                    {
+                        logger.LogInformation("Server {ServerName} marked as SwarmWorker, attempting to join swarm after auto-configure", server.Name);
+                        
+                        try
+                        {
+                            // Find an active swarm manager
+                            var swarmManager = await context.Servers
+                                .Include(s => s.PrivateKey)
+                                .Where(s => s.Type == ServerType.SwarmManager && s.Status == ServerStatus.Online)
+                                .FirstOrDefaultAsync();
+                            
+                            if (swarmManager != null)
+                            {
+                                logger.LogInformation("Found swarm manager: {ManagerName}", swarmManager.Name);
+                                
+                                // Get join tokens from the manager
+                                var (workerToken, _) = await dockerService.GetJoinTokensAsync(swarmManager);
+                                
+                                if (!string.IsNullOrEmpty(workerToken))
+                                {
+                                    // Get manager's IP address
+                                    var managerAddress = $"{swarmManager.Host}:2377";
+                                    var joinCommand = $"docker swarm join --token {workerToken} {managerAddress}";
+                                    
+                                    logger.LogInformation("Joining {ServerName} to swarm at {ManagerAddress}", server.Name, managerAddress);
+                                    
+                                    var result = await sshService.ExecuteCommandAsync(server, joinCommand);
+                                    
+                                    if (result.ExitCode == 0 || result.Output.Contains("This node joined a swarm"))
+                                    {
+                                        logger.LogInformation("Successfully joined {ServerName} to swarm after auto-configure", server.Name);
+                                    }
+                                    else if (result.Output.Contains("This node is already part of a swarm"))
+                                    {
+                                        logger.LogInformation("{ServerName} is already part of the swarm", server.Name);
+                                    }
+                                    else
+                                    {
+                                        logger.LogError("Failed to join swarm after auto-configure: {Output}", result.Output + result.Error);
+                                    }
+                                }
+                                else
+                                {
+                                    logger.LogWarning("Could not retrieve worker join token from swarm manager");
+                                }
+                            }
+                            else
+                            {
+                                logger.LogWarning("No active swarm manager found to join {ServerName} to swarm", server.Name);
+                            }
+                        }
+                        catch (Exception joinEx)
+                        {
+                            logger.LogError(joinEx, "Error joining server {ServerName} to swarm after auto-configure", server.Name);
+                            // Don't fail the auto-configure if swarm join fails
+                        }
+                    }
                 }
                 catch (Exception ex)
                 {
