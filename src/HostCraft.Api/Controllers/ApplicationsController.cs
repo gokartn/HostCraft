@@ -119,7 +119,11 @@ public class ApplicationsController : ControllerBase
     [HttpGet("servers/{serverId}")]
     public async Task<ActionResult<IEnumerable<ServerResponseDto>>> GetServers()
     {
-        var servers = await _context.Servers.ToListAsync();
+        // Docker Swarm Best Practice: Services must be deployed to manager nodes only
+        // Filter out worker nodes - they cannot accept service deployments
+        var servers = await _context.Servers
+            .Where(s => s.Type != ServerType.SwarmWorker)
+            .ToListAsync();
         return Ok(servers.Select(s => new ServerResponseDto(s.Id, s.Name, s.Host, s.Port, s.Username, s.IsSwarm, s.Status.ToString())));
     }
     
@@ -137,9 +141,19 @@ public class ApplicationsController : ControllerBase
         if (server == null)
             return BadRequest(new { error = "Server not found" });
         
+        // Docker Swarm Best Practice: Services must be deployed to manager nodes
+        if (server.Type == ServerType.SwarmWorker)
+            return BadRequest(new { error = "Cannot deploy applications to worker nodes. Please select a manager node or standalone server." });
+        
         var project = await _context.Projects.FindAsync(request.ProjectId);
         if (project == null)
             return BadRequest(new { error = "Project not found" });
+        
+        // Check for duplicate application name on the same server
+        var existingApp = await _context.Applications
+            .FirstOrDefaultAsync(a => a.ServerId == request.ServerId && a.Name == request.Name);
+        if (existingApp != null)
+            return BadRequest(new { error = $"An application named '{request.Name}' already exists on this server. Please choose a different name." });
         
         var app = new Application
         {
@@ -190,6 +204,50 @@ public class ApplicationsController : ControllerBase
             Status = DeploymentStatus.Queued,
             CreatedAt = app.CreatedAt
         });
+    }
+    
+    [HttpPost("{id}/scale")]
+    public async Task<ActionResult> ScaleApplication(int id, [FromQuery] int replicas)
+    {
+        if (replicas < 1)
+            return BadRequest(new { error = "Replicas must be at least 1" });
+        
+        var app = await _context.Applications
+            .Include(a => a.Server)
+                .ThenInclude(s => s.PrivateKey)
+            .Include(a => a.Deployments.OrderByDescending(d => d.StartedAt))
+            .FirstOrDefaultAsync(a => a.Id == id);
+        
+        if (app == null)
+            return NotFound();
+        
+        // Only Swarm services can be scaled
+        if (!app.Server.IsSwarm)
+            return BadRequest(new { error = "Only Swarm services can be scaled" });
+        
+        var latestDeployment = app.Deployments.OrderByDescending(d => d.StartedAt).FirstOrDefault();
+        if (latestDeployment == null || string.IsNullOrEmpty(latestDeployment.ServiceId))
+            return BadRequest(new { error = "No service found to scale" });
+        
+        try
+        {
+            _logger.LogInformation("Scaling application {AppName} to {Replicas} replicas", app.Name, replicas);
+            
+            // Use UpdateServiceAsync to change replica count
+            var updateRequest = new UpdateServiceRequest(Replicas: replicas);
+            await _dockerService.UpdateServiceAsync(app.Server, latestDeployment.ServiceId, updateRequest);
+            
+            // Update the application's replica count
+            app.Replicas = replicas;
+            await _context.SaveChangesAsync();
+            
+            return Ok(new { message = $"Application scaled to {replicas} replicas" });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error scaling application {AppId} to {Replicas} replicas", id, replicas);
+            return StatusCode(500, new { error = ex.Message });
+        }
     }
     
     [HttpPost("{id}/deploy")]
@@ -574,6 +632,18 @@ public class ApplicationsController : ControllerBase
         try
         {
             var app = deployment.Application;
+            
+            // Docker Swarm Best Practice: Services can only be created on manager nodes
+            if (app.Server.IsSwarm && app.Server.Type == ServerType.SwarmWorker)
+            {
+                deployment.Status = DeploymentStatus.Failed;
+                deployment.ErrorMessage = "Node is not part of a swarm. Applications must be deployed to manager nodes, not worker nodes.";
+                deployment.FinishedAt = DateTime.UtcNow;
+                await context.SaveChangesAsync();
+                logger.LogError("Attempted to deploy to worker node {ServerName}. Worker nodes cannot accept service deployments.", app.Server.Name);
+                return;
+            }
+            
             deployment.Status = DeploymentStatus.Running;
             await context.SaveChangesAsync();
             
