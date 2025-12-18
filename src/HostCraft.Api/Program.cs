@@ -105,7 +105,9 @@ if (app.Environment.IsDevelopment())
     app.UseCors("AllowAll");
 }
 
-app.UseHttpsRedirection();
+// Don't use HTTPS redirection - running behind reverse proxy
+// app.UseHttpsRedirection();
+
 app.MapControllers();
 
 // Health check endpoint

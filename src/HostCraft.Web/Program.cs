@@ -73,12 +73,20 @@ catch (Exception ex)
     }
 }
 
+// Configure typed HttpClient with proper lifetime management
 builder.Services.AddHttpClient("HostCraftAPI", client =>
 {
     client.BaseAddress = new Uri(apiUrl);
     client.Timeout = TimeSpan.FromSeconds(30);
+})
+.SetHandlerLifetime(TimeSpan.FromMinutes(5)); // Prevent socket exhaustion
+
+// Register as scoped to match Blazor component lifecycle
+builder.Services.AddScoped(sp => 
+{
+    var factory = sp.GetRequiredService<IHttpClientFactory>();
+    return factory.CreateClient("HostCraftAPI");
 });
-builder.Services.AddScoped(sp => sp.GetRequiredService<IHttpClientFactory>().CreateClient("HostCraftAPI"));
 
 var app = builder.Build();
 

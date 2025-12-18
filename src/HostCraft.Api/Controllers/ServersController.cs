@@ -198,10 +198,18 @@ public class ServersController : ControllerBase
                     {
                         _logger.LogInformation("Server {ServerName} marked as SwarmWorker, attempting to join swarm", serverToValidate.Name);
                         
-                        // Find an active swarm manager
-                        var swarmManager = await scopedContext.Servers
-                            .Include(s => s.PrivateKey)
-                            .FirstOrDefaultAsync(s => s.IsSwarmManager && s.Status == ServerStatus.Online);
+                        // Wait a bit for swarm detection to complete on other servers
+                        await Task.Delay(2000);
+                        
+                        // Find an active swarm manager (try multiple times due to race conditions)
+                        Server? swarmManager = null;
+                        for (int retry = 0; retry < 3 && swarmManager == null; retry++)
+                        {
+                            if (retry > 0) await Task.Delay(2000);
+                            swarmManager = await scopedContext.Servers
+                                .Include(s => s.PrivateKey)
+                                .FirstOrDefaultAsync(s => s.IsSwarmManager && s.Status == ServerStatus.Online);
+                        }
                         
                         if (swarmManager != null)
                         {
