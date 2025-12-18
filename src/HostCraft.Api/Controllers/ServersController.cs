@@ -1273,19 +1273,37 @@ public class ServersController : ControllerBase
                                         {
                                             logger.LogInformation("Manager is localhost, detecting external IPv4 address...");
                                             
-                                            // Try to get the external IPv4 address from the manager
-                                            var ipCommand = "hostname -I | grep -oE '\\b([0-9]{1,3}\\.){3}[0-9]{1,3}\\b' | head -n1";
-                                            var ipResult = await sshService.ExecuteCommandAsync(swarmManager, ipCommand);
-                                            
-                                            if (ipResult.ExitCode == 0 && !string.IsNullOrWhiteSpace(ipResult.Output))
+                                            // For localhost, use stored SwarmManagerAddress or query Docker locally
+                                            if (!string.IsNullOrEmpty(swarmManager.SwarmManagerAddress))
                                             {
-                                                managerHost = ipResult.Output.Trim();
-                                                logger.LogInformation("Detected manager external IP: {ManagerIp}", managerHost);
+                                                // Use the stored advertise address (without port)
+                                                managerHost = swarmManager.SwarmManagerAddress.Replace(":2377", "");
+                                                logger.LogInformation("Using stored manager address: {ManagerIp}", managerHost);
                                             }
                                             else
                                             {
-                                                logger.LogError("Failed to detect manager external IP, cannot join swarm");
-                                                managerHost = null!;
+                                                // Query Docker swarm info to get the advertise address
+                                                try
+                                                {
+                                                    var swarmInfoCommand = "docker info --format '{{.Swarm.NodeAddr}}'";
+                                                    var swarmInfoResult = await sshService.ExecuteCommandAsync(swarmManager, swarmInfoCommand);
+                                                    
+                                                    if (swarmInfoResult.ExitCode == 0 && !string.IsNullOrWhiteSpace(swarmInfoResult.Output))
+                                                    {
+                                                        managerHost = swarmInfoResult.Output.Trim();
+                                                        logger.LogInformation("Detected manager address from Docker swarm: {ManagerIp}", managerHost);
+                                                    }
+                                                    else
+                                                    {
+                                                        logger.LogError("Failed to get swarm node address from Docker info");
+                                                        managerHost = null!;
+                                                    }
+                                                }
+                                                catch (Exception ex)
+                                                {
+                                                    logger.LogError(ex, "Error getting swarm node address for localhost");
+                                                    managerHost = null!;
+                                                }
                                             }
                                         }
                                         
