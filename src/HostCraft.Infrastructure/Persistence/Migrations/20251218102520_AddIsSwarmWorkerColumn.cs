@@ -11,26 +11,17 @@ namespace HostCraft.Infrastructure.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.AlterColumn<Guid>(
-                name: "Uuid",
-                table: "Volumes",
-                type: "uuid",
-                nullable: false,
-                defaultValueSql: "gen_random_uuid()",
-                oldClrType: typeof(string),
-                oldType: "TEXT",
-                oldDefaultValueSql: "gen_random_uuid()");
+            // This migration is intentionally empty
+            // All columns are added by the subsequent AddSwarmAndGitHubColumns migration
+        }
 
-            migrationBuilder.AlterColumn<long>(
-                name: "SizeBytes",
-                table: "Volumes",
-                type: "bigint",
-                nullable: false,
-                oldClrType: typeof(int),
-                oldType: "INTEGER");
-
-            migrationBuilder.AlterColumn<int>(
-                name: "ServerId",
+        /// <inheritdoc />
+        protected override void Down(MigrationBuilder migrationBuilder)
+        {
+            // This migration is intentionally empty
+        }
+    }
+}
                 table: "Volumes",
                 type: "integer",
                 nullable: false,
