@@ -240,8 +240,6 @@
                 var response = await Http.PostAsync($"api/applications/{appId}/scale?replicas={newReplicas}", null);
                 if (response.IsSuccessStatusCode)
                 {
-        int? SwarmReplicas,
-        int? RunningReplicas,
                     await LoadApplications();
                 }
             }
@@ -285,6 +283,8 @@
         string? ContainerId,
         string? ServiceId,
         DateTime? LastDeployedAt,
-        DateTime CreatedAt
+        DateTime CreatedAt,
+        int? SwarmReplicas,
+        int? RunningReplicas
     );
 }

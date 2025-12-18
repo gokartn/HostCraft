@@ -349,10 +349,7 @@
     }
 
     private string GetAvailabilityIcon(string availability)
-    {string? SwarmNodeId { get; set; }
-        public string? SwarmNodeState { get; set; }
-        public string? SwarmNodeAvailability { get; set; }
-        public 
+    {
         return availability.ToLower() switch
         {
             "active" => "✅",
@@ -370,13 +367,16 @@
         public int Port { get; set; }
         public string Username { get; set; } = "";
         public string User => Username; // Backward compatibility
-        public ServerType Type { get; set; }
-        public ServerStatus Status { get; set; }
+        public HostCraft.Core.Enums.ServerType Type { get; set; }
+        public HostCraft.Core.Enums.ServerStatus Status { get; set; }
         public RegionDto? Region { get; set; }
         public string? SwarmId { get; set; }
+        public string? SwarmNodeId { get; set; }
+        public string? SwarmNodeState { get; set; }
+        public string? SwarmNodeAvailability { get; set; }
         public DateTime CreatedAt { get; set; }
         public DateTime? LastSeenAt { get; set; }
-        public bool IsSwarm => Type == ServerType.SwarmManager || Type == ServerType.SwarmWorker;
+        public bool IsSwarm => Type == HostCraft.Core.Enums.ServerType.SwarmManager || Type == HostCraft.Core.Enums.ServerType.SwarmWorker;
     }
 
     public class RegionDto
