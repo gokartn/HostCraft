@@ -1,4 +1,5 @@
 @page "/servers"
+@rendermode InteractiveServer
 @inject HttpClient Http
 @inject NavigationManager Navigation
 @inject IJSRuntime JS
@@ -44,9 +45,9 @@
                 <button class="btn btn-secondary btn-lg" @onclick="ConfigureLocalhost" disabled="@configuringLocalhost">
                     <span class="icon">🖥️</span> @(configuringLocalhost ? "Configuring..." : "Configure Localhost")
                 </button>
-                <a href="/servers/new" class="btn btn-primary btn-lg">
+                <button class="btn btn-primary btn-lg" @onclick="NavigateToAdd">
                     <span class="icon">➕</span> Add Remote Server
-                </a>
+                </button>
             </div>
         </div>
     }
