@@ -1169,63 +1169,107 @@ public class ServersController : ControllerBase
                     server.Status = isValid ? ServerStatus.Online : ServerStatus.Offline;
                     await context.SaveChangesAsync();
                     
-                    // If server is now online and marked as SwarmWorker, try to join it to an existing swarm
-                    if (isValid && server.Type == ServerType.SwarmWorker)
+                    // Handle swarm configuration based on server type
+                    if (isValid)
                     {
-                        logger.LogInformation("Server {ServerName} marked as SwarmWorker, attempting to join swarm after auto-configure", server.Name);
-                        
-                        try
+                        if (server.Type == ServerType.SwarmManager)
                         {
-                            // Find an active swarm manager
-                            var swarmManager = await context.Servers
-                                .Include(s => s.PrivateKey)
-                                .Where(s => s.Type == ServerType.SwarmManager && s.Status == ServerStatus.Online)
-                                .FirstOrDefaultAsync();
+                            logger.LogInformation("Server {ServerName} marked as SwarmManager, checking swarm status after auto-configure", server.Name);
                             
-                            if (swarmManager != null)
+                            try
                             {
-                                logger.LogInformation("Found swarm manager: {ManagerName}", swarmManager.Name);
+                                // Check if already part of a swarm
+                                var systemInfo = await dockerService.GetSystemInfoAsync(server);
                                 
-                                // Get join tokens from the manager
-                                var (workerToken, _) = await dockerService.GetJoinTokensAsync(swarmManager);
-                                
-                                if (!string.IsNullOrEmpty(workerToken))
+                                if (systemInfo?.SwarmActive == true)
                                 {
-                                    // Get manager's IP address
-                                    var managerAddress = $"{swarmManager.Host}:2377";
-                                    var joinCommand = $"docker swarm join --token {workerToken} {managerAddress}";
+                                    logger.LogInformation("{ServerName} is already part of an active swarm", server.Name);
+                                }
+                                else
+                                {
+                                    // Initialize swarm on this manager
+                                    logger.LogInformation("Initializing Docker Swarm on {ServerName}", server.Name);
+                                    var initCommand = "docker swarm init --advertise-addr $(hostname -I | awk '{print $1}')";
+                                    var result = await sshService.ExecuteCommandAsync(server, initCommand);
                                     
-                                    logger.LogInformation("Joining {ServerName} to swarm at {ManagerAddress}", server.Name, managerAddress);
-                                    
-                                    var result = await sshService.ExecuteCommandAsync(server, joinCommand);
-                                    
-                                    if (result.ExitCode == 0 || result.Output.Contains("This node joined a swarm"))
+                                    if (result.ExitCode == 0 || result.Output.Contains("Swarm initialized"))
                                     {
-                                        logger.LogInformation("Successfully joined {ServerName} to swarm after auto-configure", server.Name);
-                                    }
-                                    else if (result.Output.Contains("This node is already part of a swarm"))
-                                    {
-                                        logger.LogInformation("{ServerName} is already part of the swarm", server.Name);
+                                        logger.LogInformation("Successfully initialized swarm on {ServerName}", server.Name);
+                                        server.IsSwarmManager = true;
+                                        await context.SaveChangesAsync();
                                     }
                                     else
                                     {
-                                        logger.LogError("Failed to join swarm after auto-configure: {Output}", result.Output + result.Error);
+                                        logger.LogError("Failed to initialize swarm on {ServerName}: {Output}", server.Name, result.Output + result.Error);
+                                    }
+                                }
+                            }
+                            catch (Exception swarmEx)
+                            {
+                                logger.LogError(swarmEx, "Error initializing swarm on {ServerName} after auto-configure", server.Name);
+                            }
+                        }
+                        else if (server.Type == ServerType.SwarmWorker)
+                        {
+                            logger.LogInformation("Server {ServerName} marked as SwarmWorker, attempting to join swarm after auto-configure", server.Name);
+                            
+                            try
+                            {
+                                // Find an active swarm manager
+                                var swarmManager = await context.Servers
+                                    .Include(s => s.PrivateKey)
+                                    .Where(s => s.Type == ServerType.SwarmManager && s.Status == ServerStatus.Online)
+                                    .FirstOrDefaultAsync();
+                                
+                                if (swarmManager != null)
+                                {
+                                    logger.LogInformation("Found swarm manager: {ManagerName}", swarmManager.Name);
+                                    
+                                    // Get join tokens from the manager
+                                    var (workerToken, _) = await dockerService.GetJoinTokensAsync(swarmManager);
+                                    
+                                    if (!string.IsNullOrEmpty(workerToken))
+                                    {
+                                        // Get manager's IP address
+                                        var managerAddress = $"{swarmManager.Host}:2377";
+                                        var joinCommand = $"docker swarm join --token {workerToken} {managerAddress}";
+                                        
+                                        logger.LogInformation("Joining {ServerName} to swarm at {ManagerAddress}", server.Name, managerAddress);
+                                        
+                                        var result = await sshService.ExecuteCommandAsync(server, joinCommand);
+                                        
+                                        if (result.ExitCode == 0 || result.Output.Contains("This node joined a swarm"))
+                                        {
+                                            logger.LogInformation("Successfully joined {ServerName} to swarm after auto-configure", server.Name);
+                                        }
+                                        else if (result.Output.Contains("This node is already part of a swarm"))
+                                        {
+                                            logger.LogInformation("{ServerName} is already part of the swarm", server.Name);
+                                        }
+                                        else
+                                        {
+                                            logger.LogError("Failed to join swarm after auto-configure: {Output}", result.Output + result.Error);
+                                        }
+                                    }
+                                    else
+                                    {
+                                        logger.LogWarning("Could not retrieve worker join token from swarm manager");
                                     }
                                 }
                                 else
                                 {
-                                    logger.LogWarning("Could not retrieve worker join token from swarm manager");
+                                    logger.LogWarning("No active swarm manager found to join {ServerName} to swarm", server.Name);
                                 }
                             }
-                            else
+                            catch (Exception joinEx)
                             {
-                                logger.LogWarning("No active swarm manager found to join {ServerName} to swarm", server.Name);
+                                logger.LogError(joinEx, "Error joining server {ServerName} to swarm after auto-configure", server.Name);
+                                // Don't fail the auto-configure if swarm join fails
                             }
                         }
-                        catch (Exception joinEx)
+                        else
                         {
-                            logger.LogError(joinEx, "Error joining server {ServerName} to swarm after auto-configure", server.Name);
-                            // Don't fail the auto-configure if swarm join fails
+                            logger.LogInformation("Server {ServerName} marked as Standalone, Docker installed without swarm configuration", server.Name);
                         }
                     }
                 }
