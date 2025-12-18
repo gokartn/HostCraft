@@ -1189,13 +1189,46 @@ public class ServersController : ControllerBase
                                 {
                                     // Initialize swarm on this manager
                                     logger.LogInformation("Initializing Docker Swarm on {ServerName}", server.Name);
-                                    var initCommand = "docker swarm init --advertise-addr $(hostname -I | awk '{print $1}')";
+                                    
+                                    // Determine the advertise address
+                                    string advertiseAddr;
+                                    if (server.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase) || 
+                                        server.Host == "127.0.0.1" || 
+                                        server.Host == "::1")
+                                    {
+                                        // For localhost, detect the external IPv4 address only
+                                        advertiseAddr = "$(hostname -I | grep -oE '\\b([0-9]{1,3}\\.){3}[0-9]{1,3}\\b' | head -n1)";
+                                    }
+                                    else
+                                    {
+                                        // Use the configured Host as advertise address
+                                        advertiseAddr = server.Host;
+                                    }
+                                    
+                                    var initCommand = $"docker swarm init --advertise-addr {advertiseAddr}";
                                     var result = await sshService.ExecuteCommandAsync(server, initCommand);
                                     
                                     if (result.ExitCode == 0 || result.Output.Contains("Swarm initialized"))
                                     {
                                         logger.LogInformation("Successfully initialized swarm on {ServerName}", server.Name);
                                         server.IsSwarmManager = true;
+                                        
+                                        // Store the manager address for workers to join
+                                        if (advertiseAddr.StartsWith("$("))
+                                        {
+                                            // Extract the actual IPv4 address
+                                            var ipCommand = "hostname -I | grep -oE '\\b([0-9]{1,3}\\.){3}[0-9]{1,3}\\b' | head -n1";
+                                            var ipResult = await sshService.ExecuteCommandAsync(server, ipCommand);
+                                            if (ipResult.ExitCode == 0 && !string.IsNullOrWhiteSpace(ipResult.Output))
+                                            {
+                                                server.SwarmManagerAddress = $"{ipResult.Output.Trim()}:2377";
+                                            }
+                                        }
+                                        else
+                                        {
+                                            server.SwarmManagerAddress = $"{advertiseAddr}:2377";
+                                        }
+                                        
                                         await context.SaveChangesAsync();
                                     }
                                     else
@@ -1230,25 +1263,57 @@ public class ServersController : ControllerBase
                                     
                                     if (!string.IsNullOrEmpty(workerToken))
                                     {
-                                        // Get manager's IP address
-                                        var managerAddress = $"{swarmManager.Host}:2377";
-                                        var joinCommand = $"docker swarm join --token {workerToken} {managerAddress}";
+                                        // Determine the manager's reachable address
+                                        string managerHost = swarmManager.Host;
                                         
-                                        logger.LogInformation("Joining {ServerName} to swarm at {ManagerAddress}", server.Name, managerAddress);
-                                        
-                                        var result = await sshService.ExecuteCommandAsync(server, joinCommand);
-                                        
-                                        if (result.ExitCode == 0 || result.Output.Contains("This node joined a swarm"))
+                                        // If manager Host is localhost, we need to get its actual external IP
+                                        if (managerHost.Equals("localhost", StringComparison.OrdinalIgnoreCase) || 
+                                            managerHost == "127.0.0.1" || 
+                                            managerHost == "::1")
                                         {
-                                            logger.LogInformation("Successfully joined {ServerName} to swarm after auto-configure", server.Name);
+                                            logger.LogInformation("Manager is localhost, detecting external IPv4 address...");
+                                            
+                                            // Try to get the external IPv4 address from the manager
+                                            var ipCommand = "hostname -I | grep -oE '\\b([0-9]{1,3}\\.){3}[0-9]{1,3}\\b' | head -n1";
+                                            var ipResult = await sshService.ExecuteCommandAsync(swarmManager, ipCommand);
+                                            
+                                            if (ipResult.ExitCode == 0 && !string.IsNullOrWhiteSpace(ipResult.Output))
+                                            {
+                                                managerHost = ipResult.Output.Trim();
+                                                logger.LogInformation("Detected manager external IP: {ManagerIp}", managerHost);
+                                            }
+                                            else
+                                            {
+                                                logger.LogError("Failed to detect manager external IP, cannot join swarm");
+                                                managerHost = null!;
+                                            }
                                         }
-                                        else if (result.Output.Contains("This node is already part of a swarm"))
+                                        
+                                        if (!string.IsNullOrEmpty(managerHost))
                                         {
-                                            logger.LogInformation("{ServerName} is already part of the swarm", server.Name);
-                                        }
-                                        else
-                                        {
-                                            logger.LogError("Failed to join swarm after auto-configure: {Output}", result.Output + result.Error);
+                                            var managerAddress = $"{managerHost}:2377";
+                                            var joinCommand = $"docker swarm join --token {workerToken} {managerAddress}";
+                                            
+                                            logger.LogInformation("Joining {ServerName} to swarm at {ManagerAddress}", server.Name, managerAddress);
+                                            
+                                            var result = await sshService.ExecuteCommandAsync(server, joinCommand);
+                                            
+                                            if (result.ExitCode == 0 || result.Output.Contains("This node joined a swarm"))
+                                            {
+                                                logger.LogInformation("Successfully joined {ServerName} to swarm after auto-configure", server.Name);
+                                                
+                                                // Store the manager address for future reference
+                                                server.SwarmManagerAddress = managerAddress;
+                                                await context.SaveChangesAsync();
+                                            }
+                                            else if (result.Output.Contains("This node is already part of a swarm"))
+                                            {
+                                                logger.LogInformation("{ServerName} is already part of the swarm", server.Name);
+                                            }
+                                            else
+                                            {
+                                                logger.LogError("Failed to join swarm after auto-configure: {Output}", result.Output + result.Error);
+                                            }
                                         }
                                     }
                                     else
