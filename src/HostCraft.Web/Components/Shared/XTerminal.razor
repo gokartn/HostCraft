@@ -24,7 +24,14 @@
                 dotNetRef = DotNetObjectReference.Create(this);
                 jsModule = await JS.InvokeAsync<IJSObjectReference>("import", "./Components/Shared/XTerminal.razor.js");
                 terminalInstance = await jsModule.InvokeAsync<IJSObjectReference>("initTerminal", TerminalId, dotNetRef);
-                await OnReady.InvokeAsync();
+                if (OnReady.HasDelegate)
+                {
+                    await OnReady.InvokeAsync();
+                }
+            }
+            catch (ObjectDisposedException ex)
+            {
+                Console.WriteLine($"Failed to initialize XTerm (component disposed): {ex.Message}");
             }
             catch (Exception ex)
             {
@@ -35,9 +42,16 @@
 
     public async Task WriteOutput(string data)
     {
-        if (jsModule != null && terminalInstance != null)
+        try
         {
-            await jsModule.InvokeVoidAsync("writeOutput", terminalInstance, data);
+            if (jsModule != null && terminalInstance != null)
+            {
+                await jsModule.InvokeVoidAsync("writeOutput", terminalInstance, data);
+            }
+        }
+        catch (ObjectDisposedException)
+        {
+            // Terminal was disposed, ignore
         }
     }
 

@@ -3,7 +3,7 @@
 @rendermode InteractiveServer
 
 @using System.Net.Http.Json
-@inject HttpClient Http
+@inject IHttpClientFactory HttpClientFactory
 @inject NavigationManager Navigation
 @inject ILogger<SwarmNodes> Logger
 
@@ -268,6 +268,8 @@
     private int selectedServerId = 0;
     private bool isLoading = false;
     private bool isSwarmActive = false;
+    
+    private HttpClient CreateHttpClient() => HttpClientFactory.CreateClient("HostCraftAPI");
     private bool showJoinTokensModal = false;
     private JoinTokensDto? joinTokens;
     private string? workerJoinCommand;
@@ -313,7 +315,7 @@
         try
         {
             Logger.LogInformation("Configuring localhost server");
-            var response = await Http.PostAsync("api/servers/configure-localhost", null);
+            var response = await CreateHttpClient().PostAsync("api/servers/configure-localhost", null);
             if (response.IsSuccessStatusCode)
             {
                 Logger.LogInformation("Localhost configured successfully");
@@ -373,7 +375,7 @@
             try
             {
                 Logger.LogInformation("Checking swarm status for server {ServerName} (ID: {ServerId})", server.Name, server.Id);
-                var response = await Http.PostAsync($"api/servers/{server.Id}/refresh-swarm-status", null);
+                var response = await CreateHttpClient().PostAsync($"api/servers/{server.Id}/refresh-swarm-status", null);
                 if (response.IsSuccessStatusCode)
                 {
                     var result = await response.Content.ReadAsStringAsync();
@@ -397,7 +399,7 @@
     {
         try
         {
-            servers = await Http.GetFromJsonAsync<List<ServerDto>>("api/servers");
+            servers = await CreateHttpClient().GetFromJsonAsync<List<ServerDto>>("api/servers");
         }
         catch (Exception ex)
         {
@@ -429,7 +431,7 @@
             // First, refresh the server's swarm status to ensure it's up to date
             try
             {
-                await Http.PostAsync($"api/servers/{selectedServerId}/refresh-swarm-status", null);
+                await CreateHttpClient().PostAsync($"api/servers/{selectedServerId}/refresh-swarm-status", null);
             }
             catch (Exception refreshEx)
             {
@@ -437,12 +439,12 @@
             }
             
             // Check if swarm is active
-            var systemInfo = await Http.GetFromJsonAsync<SystemInfoDto>($"api/servers/{selectedServerId}/info");
+            var systemInfo = await CreateHttpClient().GetFromJsonAsync<SystemInfoDto>($"api/servers/{selectedServerId}/info");
             isSwarmActive = systemInfo?.SwarmActive ?? false;
             
             if (isSwarmActive)
             {
-                nodes = await Http.GetFromJsonAsync<List<NodeDto>>($"api/servers/{selectedServerId}/nodes");
+                nodes = await CreateHttpClient().GetFromJsonAsync<List<NodeDto>>($"api/servers/{selectedServerId}/nodes");
                 
                 // Reload servers list to update IsSwarmManager property
                 await LoadServers();
@@ -469,7 +471,7 @@
     {
         try
         {
-            var response = await Http.PostAsync($"api/servers/{selectedServerId}/swarm/init", null);
+            var response = await CreateHttpClient().PostAsync($"api/servers/{selectedServerId}/swarm/init", null);
             if (response.IsSuccessStatusCode)
             {
                 await LoadNodes();
@@ -485,7 +487,7 @@
     {
         try
         {
-            var response = await Http.PutAsJsonAsync($"api/servers/{selectedServerId}/nodes/{nodeId}", 
+            var response = await CreateHttpClient().PutAsJsonAsync($"api/servers/{selectedServerId}/nodes/{nodeId}", 
                 new { Availability = "drain" });
             if (response.IsSuccessStatusCode)
             {
@@ -502,7 +504,7 @@
     {
         try
         {
-            var response = await Http.PutAsJsonAsync($"api/servers/{selectedServerId}/nodes/{nodeId}", 
+            var response = await CreateHttpClient().PutAsJsonAsync($"api/servers/{selectedServerId}/nodes/{nodeId}", 
                 new { Availability = "active" });
             if (response.IsSuccessStatusCode)
             {
@@ -519,7 +521,7 @@
     {
         try
         {
-            var response = await Http.PutAsJsonAsync($"api/servers/{selectedServerId}/nodes/{nodeId}", 
+            var response = await CreateHttpClient().PutAsJsonAsync($"api/servers/{selectedServerId}/nodes/{nodeId}", 
                 new { Role = "manager" });
             if (response.IsSuccessStatusCode)
             {
@@ -536,7 +538,7 @@
     {
         try
         {
-            var response = await Http.PutAsJsonAsync($"api/servers/{selectedServerId}/nodes/{nodeId}", 
+            var response = await CreateHttpClient().PutAsJsonAsync($"api/servers/{selectedServerId}/nodes/{nodeId}", 
                 new { Role = "worker" });
             if (response.IsSuccessStatusCode)
             {
@@ -553,7 +555,7 @@
     {
         try
         {
-            var response = await Http.DeleteAsync($"api/servers/{selectedServerId}/nodes/{nodeId}?force=true");
+            var response = await CreateHttpClient().DeleteAsync($"api/servers/{selectedServerId}/nodes/{nodeId}?force=true");
             if (response.IsSuccessStatusCode)
             {
                 await LoadNodes();
@@ -572,7 +574,7 @@
         
         try
         {
-            joinTokens = await Http.GetFromJsonAsync<JoinTokensDto>($"api/servers/{selectedServerId}/swarm/tokens");
+            joinTokens = await CreateHttpClient().GetFromJsonAsync<JoinTokensDto>($"api/servers/{selectedServerId}/swarm/tokens");
             
             if (joinTokens != null)
             {

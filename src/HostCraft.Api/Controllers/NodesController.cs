@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using HostCraft.Core.Interfaces;
+using HostCraft.Core.Enums;
 using HostCraft.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 
@@ -36,7 +37,7 @@ public class NodesController : ControllerBase
             return NotFound(new { error = $"Server {serverId} not found" });
         }
         
-        if (!server.IsSwarmManager)
+        if (server.Type != ServerType.SwarmManager)
         {
             return BadRequest(new { error = "Server is not a swarm manager" });
         }
