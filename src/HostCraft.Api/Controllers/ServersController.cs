@@ -298,7 +298,9 @@ public class ServersController : ControllerBase
     [HttpPut("{id}")]
     public async Task<IActionResult> UpdateServer(int id, UpdateServerRequest request)
     {
-        var server = await _context.Servers.FindAsync(id);
+        var server = await _context.Servers
+            .Include(s => s.PrivateKey)
+            .FirstOrDefaultAsync(s => s.Id == id);
         
         if (server == null)
         {
@@ -745,7 +747,9 @@ public class ServersController : ControllerBase
     [HttpGet("{id}/containers")]
     public async Task<ActionResult<IEnumerable<ContainerInfo>>> GetContainers(int id)
     {
-        var server = await _context.Servers.FindAsync(id);
+        var server = await _context.Servers
+            .Include(s => s.PrivateKey)
+            .FirstOrDefaultAsync(s => s.Id == id);
         
         if (server == null)
         {
@@ -767,7 +771,9 @@ public class ServersController : ControllerBase
     [HttpGet("{id}/services")]
     public async Task<ActionResult<IEnumerable<ServiceInfo>>> GetServices(int id)
     {
-        var server = await _context.Servers.FindAsync(id);
+        var server = await _context.Servers
+            .Include(s => s.PrivateKey)
+            .FirstOrDefaultAsync(s => s.Id == id);
         
         if (server == null)
         {
@@ -913,7 +919,9 @@ public class ServersController : ControllerBase
     [HttpPost("{id}/swarm/init")]
     public async Task<IActionResult> InitializeSwarm(int id)
     {
-        var server = await _context.Servers.FindAsync(id);
+        var server = await _context.Servers
+            .Include(s => s.PrivateKey)
+            .FirstOrDefaultAsync(s => s.Id == id);
         
         if (server == null)
         {
@@ -946,7 +954,9 @@ public class ServersController : ControllerBase
     [HttpGet("{id}/swarm/tokens")]
     public async Task<ActionResult> GetJoinTokens(int id)
     {
-        var server = await _context.Servers.FindAsync(id);
+        var server = await _context.Servers
+            .Include(s => s.PrivateKey)
+            .FirstOrDefaultAsync(s => s.Id == id);
         
         if (server == null)
         {
@@ -981,7 +991,9 @@ public class ServersController : ControllerBase
     [HttpGet("{id}/info")]
     public async Task<ActionResult<SystemInfo>> GetSystemInfo(int id)
     {
-        var server = await _context.Servers.FindAsync(id);
+        var server = await _context.Servers
+            .Include(s => s.PrivateKey)
+            .FirstOrDefaultAsync(s => s.Id == id);
         
         if (server == null)
         {

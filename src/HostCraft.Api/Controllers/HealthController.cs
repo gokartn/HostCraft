@@ -32,7 +32,9 @@ public class HealthController : ControllerBase
     {
         try
         {
-            var servers = await _context.Servers.ToListAsync();
+            var servers = await _context.Servers
+                .Include(s => s.PrivateKey)
+                .ToListAsync();
             var serverMetrics = new List<ServerHealthMetrics>();
 
             foreach (var server in servers)
@@ -117,7 +119,9 @@ public class HealthController : ControllerBase
 
     private async Task<ServerHealthMetrics> GetServerMetrics(int serverId, CancellationToken cancellationToken = default)
     {
-        var server = await _context.Servers.FindAsync(new object[] { serverId }, cancellationToken);
+        var server = await _context.Servers
+            .Include(s => s.PrivateKey)
+            .FirstOrDefaultAsync(s => s.Id == serverId, cancellationToken);
         if (server == null)
         {
             throw new Exception($"Server {serverId} not found");

@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using HostCraft.Core.Interfaces;
 using HostCraft.Infrastructure.Persistence;
 
@@ -25,7 +26,9 @@ public class ImagesController : ControllerBase
     [HttpGet]
     public async Task<ActionResult<IEnumerable<ImageInfo>>> ListImages(int serverId)
     {
-        var server = await _context.Servers.FindAsync(serverId);
+        var server = await _context.Servers
+            .Include(s => s.PrivateKey)
+            .FirstOrDefaultAsync(s => s.Id == serverId);
         if (server == null)
             return NotFound(new { error = "Server not found" });
         
@@ -46,7 +49,9 @@ public class ImagesController : ControllerBase
         int serverId,
         [FromBody] PullImageRequest request)
     {
-        var server = await _context.Servers.FindAsync(serverId);
+        var server = await _context.Servers
+            .Include(s => s.PrivateKey)
+            .FirstOrDefaultAsync(s => s.Id == serverId);
         if (server == null)
             return NotFound(new { error = "Server not found" });
         

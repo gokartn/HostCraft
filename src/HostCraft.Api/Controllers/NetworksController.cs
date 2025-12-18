@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using HostCraft.Core.Interfaces;
 using HostCraft.Infrastructure.Persistence;
 
@@ -25,7 +26,9 @@ public class NetworksController : ControllerBase
     [HttpGet]
     public async Task<ActionResult<IEnumerable<NetworkInfo>>> ListNetworks(int serverId)
     {
-        var server = await _context.Servers.FindAsync(serverId);
+        var server = await _context.Servers
+            .Include(s => s.PrivateKey)
+            .FirstOrDefaultAsync(s => s.Id == serverId);
         if (server == null)
             return NotFound(new { error = "Server not found" });
         
@@ -46,7 +49,9 @@ public class NetworksController : ControllerBase
         int serverId,
         [FromBody] CreateNetworkRequest request)
     {
-        var server = await _context.Servers.FindAsync(serverId);
+        var server = await _context.Servers
+            .Include(s => s.PrivateKey)
+            .FirstOrDefaultAsync(s => s.Id == serverId);
         if (server == null)
             return NotFound(new { error = "Server not found" });
         
@@ -65,7 +70,9 @@ public class NetworksController : ControllerBase
     [HttpDelete("{networkId}")]
     public async Task<IActionResult> RemoveNetwork(int serverId, string networkId)
     {
-        var server = await _context.Servers.FindAsync(serverId);
+        var server = await _context.Servers
+            .Include(s => s.PrivateKey)
+            .FirstOrDefaultAsync(s => s.Id == serverId);
         if (server == null)
             return NotFound(new { error = "Server not found" });
         

@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using HostCraft.Core.Interfaces;
 using HostCraft.Infrastructure.Persistence;
 
@@ -103,7 +104,9 @@ public class ContainersController : ControllerBase
     [HttpPost("{containerId}/start")]
     public async Task<IActionResult> StartContainer(int serverId, string containerId)
     {
-        var server = await _context.Servers.FindAsync(serverId);
+        var server = await _context.Servers
+            .Include(s => s.PrivateKey)
+            .FirstOrDefaultAsync(s => s.Id == serverId);
         if (server == null)
             return NotFound(new { error = "Server not found" });
         
@@ -122,7 +125,9 @@ public class ContainersController : ControllerBase
     [HttpPost("{containerId}/stop")]
     public async Task<IActionResult> StopContainer(int serverId, string containerId)
     {
-        var server = await _context.Servers.FindAsync(serverId);
+        var server = await _context.Servers
+            .Include(s => s.PrivateKey)
+            .FirstOrDefaultAsync(s => s.Id == serverId);
         if (server == null)
             return NotFound(new { error = "Server not found" });
         
@@ -141,7 +146,9 @@ public class ContainersController : ControllerBase
     [HttpPost("{containerId}/restart")]
     public async Task<IActionResult> RestartContainer(int serverId, string containerId)
     {
-        var server = await _context.Servers.FindAsync(serverId);
+        var server = await _context.Servers
+            .Include(s => s.PrivateKey)
+            .FirstOrDefaultAsync(s => s.Id == serverId);
         if (server == null)
             return NotFound(new { error = "Server not found" });
         
@@ -165,7 +172,9 @@ public class ContainersController : ControllerBase
         string containerId,
         [FromQuery] bool force = false)
     {
-        var server = await _context.Servers.FindAsync(serverId);
+        var server = await _context.Servers
+            .Include(s => s.PrivateKey)
+            .FirstOrDefaultAsync(s => s.Id == serverId);
         if (server == null)
             return NotFound(new { error = "Server not found" });
         
@@ -199,7 +208,9 @@ public class ContainersController : ControllerBase
         string containerId,
         [FromQuery] bool follow = false)
     {
-        var server = await _context.Servers.FindAsync(serverId);
+        var server = await _context.Servers
+            .Include(s => s.PrivateKey)
+            .FirstOrDefaultAsync(s => s.Id == serverId);
         if (server == null)
             return NotFound(new { error = "Server not found" });
         

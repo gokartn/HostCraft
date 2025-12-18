@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using HostCraft.Core.Interfaces;
 using HostCraft.Infrastructure.Persistence;
 
@@ -25,7 +26,9 @@ public class ServicesController : ControllerBase
     [HttpGet]
     public async Task<ActionResult<IEnumerable<ServiceInfo>>> ListServices(int serverId)
     {
-        var server = await _context.Servers.FindAsync(serverId);
+        var server = await _context.Servers
+            .Include(s => s.PrivateKey)
+            .FirstOrDefaultAsync(s => s.Id == serverId);
         if (server == null)
             return NotFound(new { error = "Server not found" });
         
@@ -49,7 +52,9 @@ public class ServicesController : ControllerBase
         int serverId,
         string serviceId)
     {
-        var server = await _context.Servers.FindAsync(serverId);
+        var server = await _context.Servers
+            .Include(s => s.PrivateKey)
+            .FirstOrDefaultAsync(s => s.Id == serverId);
         if (server == null)
             return NotFound(new { error = "Server not found" });
         
@@ -73,7 +78,9 @@ public class ServicesController : ControllerBase
         int serverId,
         [FromBody] CreateServiceRequest request)
     {
-        var server = await _context.Servers.FindAsync(serverId);
+        var server = await _context.Servers
+            .Include(s => s.PrivateKey)
+            .FirstOrDefaultAsync(s => s.Id == serverId);
         if (server == null)
             return NotFound(new { error = "Server not found" });
         
@@ -116,7 +123,9 @@ public class ServicesController : ControllerBase
         string serviceId,
         [FromBody] UpdateServiceRequest request)
     {
-        var server = await _context.Servers.FindAsync(serverId);
+        var server = await _context.Servers
+            .Include(s => s.PrivateKey)
+            .FirstOrDefaultAsync(s => s.Id == serverId);
         if (server == null)
             return NotFound(new { error = "Server not found" });
         
@@ -142,7 +151,9 @@ public class ServicesController : ControllerBase
     [HttpDelete("{serviceId}")]
     public async Task<IActionResult> RemoveService(int serverId, string serviceId)
     {
-        var server = await _context.Servers.FindAsync(serverId);
+        var server = await _context.Servers
+            .Include(s => s.PrivateKey)
+            .FirstOrDefaultAsync(s => s.Id == serverId);
         if (server == null)
             return NotFound(new { error = "Server not found" });
         
@@ -164,7 +175,9 @@ public class ServicesController : ControllerBase
         string serviceId,
         [FromBody] ScaleServiceRequest request)
     {
-        var server = await _context.Servers.FindAsync(serverId);
+        var server = await _context.Servers
+            .Include(s => s.PrivateKey)
+            .FirstOrDefaultAsync(s => s.Id == serverId);
         if (server == null)
             return NotFound(new { error = "Server not found" });
         
@@ -190,7 +203,9 @@ public class ServicesController : ControllerBase
         string serviceId,
         [FromQuery] bool follow = false)
     {
-        var server = await _context.Servers.FindAsync(serverId);
+        var server = await _context.Servers
+            .Include(s => s.PrivateKey)
+            .FirstOrDefaultAsync(s => s.Id == serverId);
         if (server == null)
             return NotFound(new { error = "Server not found" });
         

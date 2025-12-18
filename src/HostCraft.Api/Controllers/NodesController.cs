@@ -30,7 +30,9 @@ public class NodesController : ControllerBase
     [HttpGet]
     public async Task<ActionResult<IEnumerable<NodeDto>>> ListNodes(int serverId)
     {
-        var server = await _context.Servers.FindAsync(serverId);
+        var server = await _context.Servers
+            .Include(s => s.PrivateKey)
+            .FirstOrDefaultAsync(s => s.Id == serverId);
         
         if (server == null)
         {
@@ -75,7 +77,9 @@ public class NodesController : ControllerBase
     [HttpGet("{nodeId}")]
     public async Task<ActionResult<NodeDto>> GetNode(int serverId, string nodeId)
     {
-        var server = await _context.Servers.FindAsync(serverId);
+        var server = await _context.Servers
+            .Include(s => s.PrivateKey)
+            .FirstOrDefaultAsync(s => s.Id == serverId);
         
         if (server == null)
         {
@@ -120,7 +124,9 @@ public class NodesController : ControllerBase
     [HttpPut("{nodeId}")]
     public async Task<IActionResult> UpdateNode(int serverId, string nodeId, [FromBody] NodeUpdateDto update)
     {
-        var server = await _context.Servers.FindAsync(serverId);
+        var server = await _context.Servers
+            .Include(s => s.PrivateKey)
+            .FirstOrDefaultAsync(s => s.Id == serverId);
         
         if (server == null)
         {
@@ -154,7 +160,9 @@ public class NodesController : ControllerBase
     [HttpDelete("{nodeId}")]
     public async Task<IActionResult> RemoveNode(int serverId, string nodeId, [FromQuery] bool force = false)
     {
-        var server = await _context.Servers.FindAsync(serverId);
+        var server = await _context.Servers
+            .Include(s => s.PrivateKey)
+            .FirstOrDefaultAsync(s => s.Id == serverId);
         
         if (server == null)
         {
