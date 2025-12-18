@@ -155,37 +155,22 @@ public class SystemSettingsController : ControllerBase
     {
         try
         {
+            using var dockerClient = new Docker.DotNet.DockerClientConfiguration(
+                new Uri("unix:///var/run/docker.sock"))
+                .CreateClient();
+
             string? webLogs = null;
             string? apiLogs = null;
             string? postgresLogs = null;
 
-            // Execute docker logs commands for each container
+            // Get logs from each container using Docker.DotNet
             var tasks = new List<Task>
             {
                 Task.Run(async () =>
                 {
                     try
                     {
-                        var process = new System.Diagnostics.Process
-                        {
-                            StartInfo = new System.Diagnostics.ProcessStartInfo
-                            {
-                                FileName = "/bin/sh",
-                                Arguments = $"-c \"docker logs --tail {lines} $(docker ps --filter name=hostcraft_web --format '{{{{.Names}}}}' | head -1)\"",
-                                RedirectStandardOutput = true,
-                                RedirectStandardError = true,
-                                UseShellExecute = false,
-                                CreateNoWindow = true
-                            }
-                        };
-                        process.Start();
-                        webLogs = await process.StandardOutput.ReadToEndAsync();
-                        var errors = await process.StandardError.ReadToEndAsync();
-                        if (!string.IsNullOrEmpty(errors))
-                        {
-                            webLogs += "\n" + errors;
-                        }
-                        await process.WaitForExitAsync();
+                        webLogs = await GetContainerLogsByName(dockerClient, "hostcraft_web", lines);
                     }
                     catch (Exception ex)
                     {
@@ -197,26 +182,7 @@ public class SystemSettingsController : ControllerBase
                 {
                     try
                     {
-                        var process = new System.Diagnostics.Process
-                        {
-                            StartInfo = new System.Diagnostics.ProcessStartInfo
-                            {
-                                FileName = "/bin/sh",
-                                Arguments = $"-c \"docker logs --tail {lines} $(docker ps --filter name=hostcraft_api --format '{{{{.Names}}}}' | head -1)\"",
-                                RedirectStandardOutput = true,
-                                RedirectStandardError = true,
-                                UseShellExecute = false,
-                                CreateNoWindow = true
-                            }
-                        };
-                        process.Start();
-                        apiLogs = await process.StandardOutput.ReadToEndAsync();
-                        var errors = await process.StandardError.ReadToEndAsync();
-                        if (!string.IsNullOrEmpty(errors))
-                        {
-                            apiLogs += "\n" + errors;
-                        }
-                        await process.WaitForExitAsync();
+                        apiLogs = await GetContainerLogsByName(dockerClient, "hostcraft_api", lines);
                     }
                     catch (Exception ex)
                     {
@@ -228,26 +194,7 @@ public class SystemSettingsController : ControllerBase
                 {
                     try
                     {
-                        var process = new System.Diagnostics.Process
-                        {
-                            StartInfo = new System.Diagnostics.ProcessStartInfo
-                            {
-                                FileName = "/bin/sh",
-                                Arguments = $"-c \"docker logs --tail {lines} $(docker ps --filter name=hostcraft_postgres --format '{{{{.Names}}}}' | head -1)\"",
-                                RedirectStandardOutput = true,
-                                RedirectStandardError = true,
-                                UseShellExecute = false,
-                                CreateNoWindow = true
-                            }
-                        };
-                        process.Start();
-                        postgresLogs = await process.StandardOutput.ReadToEndAsync();
-                        var errors = await process.StandardError.ReadToEndAsync();
-                        if (!string.IsNullOrEmpty(errors))
-                        {
-                            postgresLogs += "\n" + errors;
-                        }
-                        await process.WaitForExitAsync();
+                        postgresLogs = await GetContainerLogsByName(dockerClient, "hostcraft_postgres", lines);
                     }
                     catch (Exception ex)
                     {
@@ -271,6 +218,49 @@ public class SystemSettingsController : ControllerBase
             _logger.LogError(ex, "Failed to get container logs");
             return StatusCode(500, new { error = $"Failed to get container logs: {ex.Message}" });
         }
+    }
+
+    private async Task<string> GetContainerLogsByName(Docker.DotNet.IDockerClient client, string nameFilter, int lines)
+    {
+        // Find container by name filter
+        var containers = await client.Containers.ListContainersAsync(
+            new Docker.DotNet.Models.ContainersListParameters
+            {
+                All = true,
+                Filters = new Dictionary<string, IDictionary<string, bool>>
+                {
+                    ["name"] = new Dictionary<string, bool> { [nameFilter] = true }
+                }
+            });
+
+        var container = containers.FirstOrDefault();
+        if (container == null)
+        {
+            return $"Container matching '{nameFilter}' not found";
+        }
+
+        // Get logs from container
+        var logsParameters = new Docker.DotNet.Models.ContainerLogsParameters
+        {
+            ShowStdout = true,
+            ShowStderr = true,
+            Tail = lines.ToString(),
+            Timestamps = false
+        };
+
+        var multiplexedStream = await client.Containers.GetContainerLogsAsync(
+            container.ID,
+            false,
+            logsParameters,
+            CancellationToken.None);
+
+        // Read from multiplexed stream
+        using var memoryStream = new MemoryStream();
+        await multiplexedStream.CopyOutputToAsync(Stream.Null, memoryStream, memoryStream, CancellationToken.None);
+        memoryStream.Position = 0;
+        
+        using var reader = new StreamReader(memoryStream);
+        return await reader.ReadToEndAsync();
     }
 }
 
