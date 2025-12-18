@@ -221,8 +221,13 @@ public class TerminalHub : Hub
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to establish SSH connection to {Host}:{Port}", server.Host, server.Port);
-            throw new Exception($"SSH connection failed: {ex.Message}. Please verify the server is reachable and SSH key is correct.");
+            // Log with full exception details including inner exceptions
+            var innerEx = ex.InnerException;
+            var innerDetails = innerEx != null ? $" Inner: {innerEx.GetType().Name}: {innerEx.Message}" : "";
+            _logger.LogError(ex, "Failed to establish SSH connection to {Host}:{Port}. Type: {ExceptionType}{InnerDetails}", 
+                server.Host, server.Port, ex.GetType().Name, innerDetails);
+            
+            throw new Exception($"SSH connection failed: {ex.Message}.{innerDetails} Please verify the server is reachable and SSH key is correct.");
         }
     }
 

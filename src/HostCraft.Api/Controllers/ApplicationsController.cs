@@ -451,8 +451,8 @@ public class ApplicationsController : ControllerBase
                         }
                     }
                     
-                    // Check services if Swarm
-                    if (server.IsSwarm)
+                    // Check services if Swarm Manager (only managers can list services)
+                    if (server.Type == ServerType.SwarmManager)
                     {
                         var services = await _dockerService.ListServicesAsync(server);
                         foreach (var service in services)

@@ -1,7 +1,7 @@
 ﻿@page "/"
 @rendermode InteractiveServer
 @using HostCraft.Core.Enums
-@inject HttpClient Http
+@inject IHttpClientFactory HttpClientFactory
 
 <PageTitle>HostCraft Dashboard</PageTitle>
 
@@ -284,11 +284,14 @@
     {
         errorMessage = null;
         
+        // Create a new HttpClient for this request to avoid disposal issues
+        var httpClient = HttpClientFactory.CreateClient("HostCraftAPI");
+        
         // Load servers first (critical data)
         try
         {
-            Console.WriteLine($"[Dashboard] Calling API at: {Http.BaseAddress}api/servers");
-            servers = await Http.GetFromJsonAsync<List<ServerDto>>("api/servers");
+            Console.WriteLine($"[Dashboard] Calling API at: {httpClient.BaseAddress}api/servers");
+            servers = await httpClient.GetFromJsonAsync<List<ServerDto>>("api/servers");
             Console.WriteLine($"[Dashboard] Loaded {servers?.Count ?? 0} servers from API");
             
             if (servers == null)
@@ -299,7 +302,7 @@
         }
         catch (HttpRequestException ex)
         {
-            errorMessage = $"Failed to connect to API: {ex.Message}. API URL: {Http.BaseAddress}";
+            errorMessage = $"Failed to connect to API: {ex.Message}. API URL: {httpClient.BaseAddress}";
             Console.WriteLine($"[Dashboard] HTTP Error loading servers: {ex.Message}");
             servers = new List<ServerDto>();
         }
@@ -315,7 +318,7 @@
         {
             Console.WriteLine($"[Dashboard] Calling health endpoint...");
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-            healthData = await Http.GetFromJsonAsync<DashboardHealth>("api/health/dashboard", cts.Token);
+            healthData = await httpClient.GetFromJsonAsync<DashboardHealth>("api/health/dashboard", cts.Token);
             Console.WriteLine($"[Dashboard] Health data loaded successfully");
         }
         catch (OperationCanceledException)
