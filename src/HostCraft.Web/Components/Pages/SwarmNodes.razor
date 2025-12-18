@@ -7,16 +7,18 @@
 @inject NavigationManager Navigation
 @inject ILogger<SwarmNodes> Logger
 
-<div class="page-container">
+<PageTitle>Swarm Nodes - HostCraft</PageTitle>
+
+<div class="swarm-nodes-page">
     <div class="page-header">
-        <div class="header-left">
-            <h1>⚡ Docker Swarm Nodes</h1>
-            <p class="subtitle">Manage your swarm cluster nodes</p>
+        <div>
+            <h1>Swarm Nodes</h1>
+            <p class="subtitle">Manage your Docker Swarm cluster nodes</p>
         </div>
-        <div class="header-actions">
-            @if (servers != null && servers.Any())
+        <div style="display: flex; gap: 0.75rem; align-items: center;">
+            @if (servers != null && servers.Any(s => s.IsSwarmManager))
             {
-                <select class="server-selector" @onchange="OnServerSelected" value="@selectedServerId">
+                <select class="form-select" style="width: auto;" @onchange="OnServerSelected" value="@selectedServerId">
                     <option value="0">Select Server...</option>
                     @foreach (var server in servers.Where(s => s.IsSwarmManager))
                     {
@@ -25,34 +27,37 @@
                 </select>
             }
             <button class="btn btn-secondary" @onclick="RefreshNodes" disabled="@(selectedServerId == 0)">
-                🔄 Refresh
+                <span class="icon">🔄</span> Refresh
             </button>
             <button class="btn btn-primary" @onclick="ShowJoinTokens" disabled="@(selectedServerId == 0)">
-                ➕ Add Node
+                <span class="icon">➕</span> Add Node
             </button>
         </div>
     </div>
 
     @if (selectedServerId == 0)
     {
-        <div class="info-message">
-            <p>👆 Select a swarm manager server to view and manage nodes</p>
+        <div class="empty-state">
+            <div class="empty-icon">⚡</div>
+            <h2>No Swarm Manager Selected</h2>
+            <p>Select a swarm manager server from the dropdown above to view and manage nodes</p>
         </div>
     }
     else if (isLoading)
     {
-        <div class="loading-spinner">
+        <div class="loading-state">
             <div class="spinner"></div>
             <p>Loading nodes...</p>
         </div>
     }
     else if (!isSwarmActive)
     {
-        <div class="warning-message">
-            <h3>⚠️ Swarm Not Active</h3>
-            <p>Docker Swarm is not initialized on this server.</p>
-            <button class="btn btn-primary" @onclick="InitializeSwarm">
-                Initialize Swarm
+        <div class="empty-state">
+            <div class="empty-icon">⚠️</div>
+            <h2>Swarm Not Active</h2>
+            <p>Docker Swarm is not initialized on this server</p>
+            <button class="btn btn-primary btn-lg" @onclick="InitializeSwarm">
+                <span class="icon">🐝</span> Initialize Swarm
             </button>
         </div>
     }
@@ -62,6 +67,9 @@
             <div class="empty-icon">⚡</div>
             <h2>No Nodes Found</h2>
             <p>No swarm nodes detected on this server</p>
+            <button class="btn btn-primary btn-lg" @onclick="RefreshNodes">
+                <span class="icon">🔄</span> Refresh
+            </button>
         </div>
     }
     else
@@ -146,34 +154,34 @@
                     <div class="node-actions">
                         @if (node.Availability == "active")
                         {
-                            <button class="btn btn-sm btn-warning" @onclick="() => DrainNode(node.Id)">
-                                ⏸️ Drain
+                            <button class="btn-icon btn-warning" @onclick="() => DrainNode(node.Id)" title="Drain Node">
+                                ⏸️
                             </button>
                         }
                         else if (node.Availability == "drain")
                         {
-                            <button class="btn btn-sm btn-success" @onclick="() => ActivateNode(node.Id)">
-                                ▶️ Activate
+                            <button class="btn-icon btn-success" @onclick="() => ActivateNode(node.Id)" title="Activate Node">
+                                ▶️
                             </button>
                         }
                         
                         @if (node.Role == "worker" && node.State == "ready")
                         {
-                            <button class="btn btn-sm btn-primary" @onclick="() => PromoteNode(node.Id)">
-                                ⬆️ Promote
+                            <button class="btn-icon btn-primary" @onclick="() => PromoteNode(node.Id)" title="Promote to Manager">
+                                ⬆️
                             </button>
                         }
                         else if (node.Role == "manager" && !node.IsLeader)
                         {
-                            <button class="btn btn-sm btn-secondary" @onclick="() => DemoteNode(node.Id)">
-                                ⬇️ Demote
+                            <button class="btn-icon" @onclick="() => DemoteNode(node.Id)" title="Demote to Worker">
+                                ⬇️
                             </button>
                         }
                         
                         @if (node.State != "ready" && !node.IsLeader)
                         {
-                            <button class="btn btn-sm btn-danger" @onclick="() => RemoveNode(node.Id)">
-                                🗑️ Remove
+                            <button class="btn-icon btn-danger" @onclick="() => RemoveNode(node.Id)" title="Remove Node">
+                                🗑️
                             </button>
                         }
                     </div>
@@ -254,6 +262,13 @@
         if (ServerId > 0)
         {
             selectedServerId = ServerId;
+            await LoadNodes();
+        }
+        else if (servers?.Any(s => s.IsSwarmManager) == true)
+        {
+            // Auto-select first swarm manager if none specified
+            var firstManager = servers.First(s => s.IsSwarmManager);
+            selectedServerId = firstManager.Id;
             await LoadNodes();
         }
     }
@@ -471,7 +486,15 @@
     private string FormatCPU(long nanoCPUs) => $"{nanoCPUs / 1_000_000_000.0:F2}";
     private string FormatMemory(long bytes) => $"{bytes / 1024.0 / 1024.0 / 1024.0:F2} GB";
     
-    private record ServerDto(int Id, string Name, string Host, bool IsSwarmManager);
+    public class ServerDto
+    {
+        public int Id { get; set; }
+        public string Name { get; set; } = "";
+        public string Host { get; set; } = "";
+        public HostCraft.Core.Enums.ServerType Type { get; set; }
+        public bool IsSwarmManager { get; set; }
+    }
+    
     private record NodeDto(string Id, string Hostname, string Role, string State, string Availability, 
         bool IsLeader, string Address, long NanoCPUs, long MemoryBytes, string EngineVersion, string Platform);
     private record SystemInfoDto(bool SwarmActive);
