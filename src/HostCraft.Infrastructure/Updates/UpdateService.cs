@@ -41,7 +41,15 @@ public class UpdateService : IUpdateService
             
             if (!response.IsSuccessStatusCode)
             {
-                _logger.LogWarning("Failed to check for updates: {StatusCode}", response.StatusCode);
+                // Only log warning for server errors, not 404 (repo might not exist yet)
+                if ((int)response.StatusCode >= 500)
+                {
+                    _logger.LogWarning("Failed to check for updates: {StatusCode}", response.StatusCode);
+                }
+                else
+                {
+                    _logger.LogDebug("Update check returned {StatusCode} - repository may not exist yet", response.StatusCode);
+                }
                 return new UpdateInfo
                 {
                     CurrentVersion = currentVersion,

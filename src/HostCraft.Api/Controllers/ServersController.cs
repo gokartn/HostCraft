@@ -207,18 +207,24 @@ public class ServersController : ControllerBase
                         {
                             try
                             {
+                                // Get manager's advertise address from swarm nodes
+                                var nodes = await scopedDockerService.ListNodesAsync(swarmManager);
+                                var managerNode = nodes.FirstOrDefault(n => n.Role == "manager" && n.Availability == "active");
+                                var managerAddress = managerNode?.Address ?? $"{swarmManager.Host}:2377";
+                                
+                                _logger.LogInformation("Using swarm manager address: {Address} for {ManagerName}", 
+                                    managerAddress, swarmManager.Name);
+                                
                                 // Get worker join token from manager
                                 var (workerToken, _) = await scopedDockerService.GetJoinTokensAsync(swarmManager);
                                 
                                 if (!string.IsNullOrEmpty(workerToken))
                                 {
-                                    // Get manager's IP address
-                                    var managerAddress = $"{swarmManager.Host}:2377";
-                                    
                                     // Execute join command on the worker
                                     var joinCommand = $"docker swarm join --token {workerToken} {managerAddress}";
                                     
-                                    _logger.LogInformation("Executing swarm join on {ServerName}", serverToValidate.Name);
+                                    _logger.LogInformation("Executing swarm join on {ServerName} to manager {ManagerAddress}", 
+                                        serverToValidate.Name, managerAddress);
                                     var result = await scopedSshService.ExecuteCommandAsync(serverToValidate, joinCommand);
                                     
                                     if (result.ExitCode == 0)

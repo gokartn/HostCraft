@@ -25,6 +25,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock  # Access to Docker daemon
       - /proc:/host/proc:ro  # Access host processes for nsenter
       - hostcraft-data:/app/data
+      - dataprotection-keys:/root/.aspnet/DataProtection-Keys  # Persist data protection keys
     cap_add:
       - SYS_ADMIN  # Required for nsenter to access host namespace
       - SYS_PTRACE  # Required for process inspection
@@ -78,6 +79,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock  # Access to Docker daemon
       - /proc:/host/proc:ro  # Read host system metrics
       - /sys:/host/sys:ro    # Read host system info
+      - dataprotection-keys:/root/.aspnet/DataProtection-Keys  # Persist data protection keys
     # Swarm mode configuration
     deploy:
       mode: replicated
@@ -150,6 +152,8 @@ volumes:
   postgres-data:
     driver: local
   hostcraft-data:
+    driver: local
+  dataprotection-keys:
     driver: local
 
 networks:
