@@ -4,7 +4,7 @@ x-common-variables: &common-variables
   API_PORT: 5100
 
 services:
-  hostcraft-web:
+  web:
     build:
       context: .
       dockerfile: src/HostCraft.Web/Dockerfile
@@ -15,10 +15,10 @@ services:
       <<: *common-variables
       ASPNETCORE_ENVIRONMENT: Production
       ASPNETCORE_URLS: http://+:8080
-      ApiUrl: http://hostcraft-api:8080
+      ApiUrl: http://api:8080
       ConnectionStrings__DefaultConnection: Host=postgres;Database=hostcraft;Username=hostcraft;Password=your_secure_password_here
     depends_on:
-      - hostcraft-api
+      - api
       - postgres
     restart: unless-stopped  # For standalone mode
     volumes:
@@ -52,7 +52,7 @@ services:
     networks:
       - hostcraft-network
 
-  hostcraft-api:
+  api:
     build:
       context: .
       dockerfile: src/HostCraft.Api/Dockerfile

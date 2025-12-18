@@ -401,12 +401,12 @@ echo ""
 # Restart API to ensure everything is picked up
 echo "🔄 Restarting API..."
 if [ "$SWARM_ACTIVE" = "true" ]; then
-    docker service update --detach --force hostcraft_hostcraft-api > /dev/null 2>&1
+    docker service update --detach --force hostcraft_api > /dev/null 2>&1
     echo "   ✅ API service restarted"
     echo "   ⏳ Waiting for API to become healthy..."
     sleep 5
 else
-    docker restart hostcraft-hostcraft-api-1 > /dev/null
+    docker restart hostcraft-api-1 > /dev/null 2>&1 || docker restart api-1 > /dev/null
     echo "   ✅ API container restarted"
     sleep 3
 fi
@@ -520,7 +520,7 @@ EOF
         
         # Connect HostCraft services to Traefik network
         echo "🔗 Connecting HostCraft services to Traefik network..."
-        docker service update --network-add traefik-public hostcraft_hostcraft-web 2>/dev/null || true
+        docker service update --network-add traefik-public hostcraft_web 2>/dev/null || true
         echo "✅ HostCraft web service connected to Traefik"
         echo ""
         
@@ -559,7 +559,7 @@ EOF
                         --label-add "traefik.http.routers.hostcraft-web-http.middlewares=redirect-to-https" \
                         --label-add "traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https" \
                         --label-add "traefik.http.middlewares.redirect-to-https.redirectscheme.permanent=true" \
-                        --force hostcraft_hostcraft-web
+                        --force hostcraft_web
                 else
                     # HTTP only configuration
                     docker service update \
@@ -569,7 +569,7 @@ EOF
                         --label-add "traefik.http.routers.hostcraft-web.entrypoints=web" \
                         --label-add "traefik.http.routers.hostcraft-web.service=hostcraft-web" \
                         --label-add "traefik.http.services.hostcraft-web.loadbalancer.server.port=8080" \
-                        --force hostcraft_hostcraft-web
+                        --force hostcraft_web
                 fi
                 
                 if [ $? -eq 0 ]; then
@@ -663,8 +663,8 @@ if [ "$SWARM_ACTIVE" = "true" ]; then
     echo "🐝 Deployment Mode: Docker Swarm Stack"
     echo "   📊 Monitor services: docker service ls"
     echo "   📋 View tasks: docker stack ps hostcraft"
-    echo "   📝 Service logs: docker service logs hostcraft_hostcraft-web"
-    echo "   🔄 Update service: docker service update hostcraft_hostcraft-web"
+    echo "   📝 Service logs: docker service logs hostcraft_web"
+    echo "   🔄 Update service: docker service update hostcraft_web"
     echo ""
     if [ "$CONFIGURE_LOCALHOST" = "true" ]; then
         if [ "$LOCALHOST_SWARM_MANAGER" = "true" ]; then
