@@ -42,6 +42,10 @@ builder.Services.AddScoped<IBuildService, BuildService>();
 
 // Docker Swarm services
 builder.Services.AddScoped<ISwarmDeploymentService, SwarmDeploymentService>();
+builder.Services.AddScoped<IStackService, StackService>();
+
+// Deployment orchestration
+builder.Services.AddScoped<IDeploymentService, DeploymentService>();
 
 // CORS for development
 builder.Services.AddCors(options =>
