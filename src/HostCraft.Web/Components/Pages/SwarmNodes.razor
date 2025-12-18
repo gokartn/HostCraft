@@ -306,6 +306,16 @@
         
         try
         {
+            // First, refresh the server's swarm status to ensure it's up to date
+            try
+            {
+                await Http.PostAsync($"api/servers/{selectedServerId}/refresh-swarm-status", null);
+            }
+            catch (Exception refreshEx)
+            {
+                Logger.LogWarning(refreshEx, "Could not refresh swarm status");
+            }
+            
             // Check if swarm is active
             var systemInfo = await Http.GetFromJsonAsync<SystemInfoDto>($"api/servers/{selectedServerId}/info");
             isSwarmActive = systemInfo?.SwarmActive ?? false;
@@ -313,6 +323,9 @@
             if (isSwarmActive)
             {
                 nodes = await Http.GetFromJsonAsync<List<NodeDto>>($"api/servers/{selectedServerId}/nodes");
+                
+                // Reload servers list to update IsSwarmManager property
+                await LoadServers();
             }
         }
         catch (Exception ex)

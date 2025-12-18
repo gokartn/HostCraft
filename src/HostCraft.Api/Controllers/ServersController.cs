@@ -407,6 +407,24 @@ public class ServersController : ControllerBase
         
         if (existingLocalhost != null)
         {
+            // Update swarm status if it exists
+            try
+            {
+                var systemInfo = await _dockerService.GetSystemInfoAsync(existingLocalhost);
+                if (systemInfo.SwarmActive)
+                {
+                    existingLocalhost.Type = ServerType.SwarmManager;
+                    existingLocalhost.IsSwarmManager = true;
+                    existingLocalhost.Status = ServerStatus.Online;
+                    await _context.SaveChangesAsync();
+                    _logger.LogInformation("Updated existing localhost to SwarmManager");
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Could not detect swarm on existing localhost");
+            }
+            
             return Ok(existingLocalhost);
         }
         
@@ -436,7 +454,7 @@ public class ServersController : ControllerBase
         // Create localhost server
         var localhostServer = new Server
         {
-            Name = "Local Server",
+            Name = "localhost",
             Host = "localhost",
             Port = 22, // Not actually used for localhost
             Username = Environment.UserName,
@@ -445,8 +463,25 @@ public class ServersController : ControllerBase
             ProxyType = ProxyType.None,
             RegionId = primaryRegion.Id,
             PrivateKeyId = null,
+            IsSwarmManager = false,
             CreatedAt = DateTime.UtcNow
         };
+        
+        // Detect swarm immediately after creation
+        try
+        {
+            var systemInfo = await _dockerService.GetSystemInfoAsync(localhostServer);
+            if (systemInfo.SwarmActive)
+            {
+                localhostServer.Type = ServerType.SwarmManager;
+                localhostServer.IsSwarmManager = true;
+                _logger.LogInformation("Detected swarm on localhost during creation");
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not detect swarm on localhost during creation");
+        }
         
         _context.Servers.Add(localhostServer);
         await _context.SaveChangesAsync();
@@ -746,6 +781,58 @@ public class ServersController : ControllerBase
         {
             _logger.LogError(ex, "Error extracting public key for server {ServerId}", id);
             return StatusCode(500, new { error = ex.Message });
+        }
+    }
+    
+    /// <summary>
+    /// Refresh server's swarm status detection
+    /// </summary>
+    [HttpPost("{id}/refresh-swarm-status")]
+    public async Task<IActionResult> RefreshSwarmStatus(int id)
+    {
+        var server = await _context.Servers
+            .Include(s => s.PrivateKey)
+            .FirstOrDefaultAsync(s => s.Id == id);
+        
+        if (server == null)
+        {
+            return NotFound(new { error = $"Server {id} not found" });
+        }
+        
+        try
+        {
+            var systemInfo = await _dockerService.GetSystemInfoAsync(server);
+            
+            if (systemInfo.SwarmActive)
+            {
+                if (!server.IsSwarmManager)
+                {
+                    _logger.LogInformation("Detected swarm on server {ServerName}, updating to SwarmManager", server.Name);
+                    server.Type = ServerType.SwarmManager;
+                    server.IsSwarmManager = true;
+                    server.Status = ServerStatus.Online;
+                    await _context.SaveChangesAsync();
+                    return Ok(new { message = "Server updated to SwarmManager", swarmActive = true });
+                }
+                return Ok(new { message = "Server is already a SwarmManager", swarmActive = true });
+            }
+            else
+            {
+                if (server.IsSwarmManager)
+                {
+                    _logger.LogInformation("Swarm no longer active on server {ServerName}, updating to Standalone", server.Name);
+                    server.Type = ServerType.Standalone;
+                    server.IsSwarmManager = false;
+                    await _context.SaveChangesAsync();
+                    return Ok(new { message = "Server updated to Standalone", swarmActive = false });
+                }
+                return Ok(new { message = "Server is Standalone", swarmActive = false });
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error refreshing swarm status for server {ServerId}", id);
+            return StatusCode(500, new { error = "Failed to refresh swarm status", message = ex.Message });
         }
     }
     
