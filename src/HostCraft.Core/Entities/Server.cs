@@ -52,6 +52,26 @@ public class Server
     
     public int? SwarmWorkerCount { get; set; } // Total workers in cluster
     
+    /// <summary>
+    /// Docker Swarm node ID (unique identifier in the swarm cluster)
+    /// </summary>
+    public string? SwarmNodeId { get; set; }
+    
+    /// <summary>
+    /// Whether this node is a swarm worker
+    /// </summary>
+    public bool IsSwarmWorker { get; set; }
+    
+    /// <summary>
+    /// Current swarm node state (ready, down, unknown)
+    /// </summary>
+    public string? SwarmNodeState { get; set; }
+    
+    /// <summary>
+    /// Current swarm node availability (active, pause, drain)
+    /// </summary>
+    public string? SwarmNodeAvailability { get; set; }
+    
     public DateTime CreatedAt { get; set; }
     
     public DateTime? LastHealthCheck { get; set; }

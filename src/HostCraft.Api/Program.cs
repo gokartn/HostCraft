@@ -40,6 +40,9 @@ builder.Services.AddScoped<IGitProviderService, HostCraft.Infrastructure.Git.Git
 builder.Services.AddScoped<IGitService, HostCraft.Infrastructure.Git.GitService>();
 builder.Services.AddScoped<IBuildService, BuildService>();
 
+// Docker Swarm services
+builder.Services.AddScoped<ISwarmDeploymentService, SwarmDeploymentService>();
+
 // CORS for development
 builder.Services.AddCors(options =>
 {

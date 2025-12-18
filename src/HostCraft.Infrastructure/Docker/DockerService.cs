@@ -555,6 +555,99 @@ public class DockerService : IDockerService, IDisposable
             workers);
     }
     
+    public async Task<bool> IsSwarmActiveAsync(Server server, CancellationToken cancellationToken = default)
+    {
+        var info = await GetSystemInfoAsync(server, cancellationToken);
+        return info.SwarmActive;
+    }
+    
+    // Swarm node management
+    public async Task<IEnumerable<NodeInfo>> ListNodesAsync(Server server, CancellationToken cancellationToken = default)
+    {
+        var client = GetClient(server);
+        var nodes = await client.Swarm.ListNodesAsync(cancellationToken: cancellationToken);
+        
+        return nodes.Select(n => new NodeInfo(
+            n.ID,
+            n.Description?.Hostname ?? "Unknown",
+            n.Spec?.Role ?? "unknown",
+            n.Status?.State?.ToString() ?? "unknown",
+            n.Spec?.Availability ?? "unknown",
+            n.ManagerStatus?.Leader ?? false,
+            n.Status?.Addr ?? "unknown",
+            n.Description?.Resources?.NanoCPUs ?? 0,
+            n.Description?.Resources?.MemoryBytes ?? 0,
+            n.Description?.Engine?.EngineVersion ?? "Unknown",
+            $"{n.Description?.Platform?.OS}/{n.Description?.Platform?.Architecture}"
+        ));
+    }
+    
+    public async Task<NodeInfo?> InspectNodeAsync(Server server, string nodeId, CancellationToken cancellationToken = default)
+    {
+        var client = GetClient(server);
+        var node = await client.Swarm.InspectNodeAsync(nodeId, cancellationToken);
+        
+        if (node == null)
+        {
+            return null;
+        }
+        
+        return new NodeInfo(
+            node.ID,
+            node.Description?.Hostname ?? "Unknown",
+            node.Spec?.Role ?? "unknown",
+            node.Status?.State?.ToString() ?? "unknown",
+            node.Spec?.Availability ?? "unknown",
+            node.ManagerStatus?.Leader ?? false,
+            node.Status?.Addr ?? "unknown",
+            node.Description?.Resources?.NanoCPUs ?? 0,
+            node.Description?.Resources?.MemoryBytes ?? 0,
+            node.Description?.Engine?.EngineVersion ?? "Unknown",
+            $"{node.Description?.Platform?.OS}/{node.Description?.Platform?.Architecture}"
+        );
+    }
+    
+    public async Task<bool> UpdateNodeAsync(Server server, string nodeId, NodeUpdateRequest request, CancellationToken cancellationToken = default)
+    {
+        var client = GetClient(server);
+        
+        // Get current node spec
+        var node = await client.Swarm.InspectNodeAsync(nodeId, cancellationToken);
+        if (node == null)
+        {
+            return false;
+        }
+        
+        // Update the spec with requested changes
+        var spec = node.Spec;
+        if (request.Role != null)
+        {
+            spec.Role = request.Role;
+        }
+        if (request.Availability != null)
+        {
+            spec.Availability = request.Availability;
+        }
+        
+        await client.Swarm.UpdateNodeAsync(nodeId, node.Version.Index, spec, cancellationToken);
+        return true;
+    }
+    
+    public async Task<bool> RemoveNodeAsync(Server server, string nodeId, bool force = false, CancellationToken cancellationToken = default)
+    {
+        var client = GetClient(server);
+        await client.Swarm.RemoveNodeAsync(nodeId, force, cancellationToken);
+        return true;
+    }
+    
+    public async Task<(string WorkerToken, string ManagerToken)> GetJoinTokensAsync(Server server, CancellationToken cancellationToken = default)
+    {
+        var client = GetClient(server);
+        var swarm = await client.Swarm.InspectSwarmAsync(cancellationToken);
+        
+        return (swarm.JoinTokens.Worker, swarm.JoinTokens.Manager);
+    }
+    
     // Server validation
     public async Task<bool> ValidateConnectionAsync(Server server, CancellationToken cancellationToken = default)
     {

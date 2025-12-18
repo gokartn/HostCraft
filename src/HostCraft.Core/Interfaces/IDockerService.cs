@@ -46,6 +46,14 @@ public interface IDockerService : IDisposable
     Task<bool> JoinSwarmAsync(Server server, string managerAddress, string joinToken, CancellationToken cancellationToken = default);
     Task<bool> LeaveSwarmAsync(Server server, bool force = false, CancellationToken cancellationToken = default);
     Task<SwarmInfo?> InspectSwarmAsync(Server server, CancellationToken cancellationToken = default);
+    Task<bool> IsSwarmActiveAsync(Server server, CancellationToken cancellationToken = default);
+    
+    // Swarm node management
+    Task<IEnumerable<NodeInfo>> ListNodesAsync(Server server, CancellationToken cancellationToken = default);
+    Task<NodeInfo?> InspectNodeAsync(Server server, string nodeId, CancellationToken cancellationToken = default);
+    Task<bool> UpdateNodeAsync(Server server, string nodeId, NodeUpdateRequest request, CancellationToken cancellationToken = default);
+    Task<bool> RemoveNodeAsync(Server server, string nodeId, bool force = false, CancellationToken cancellationToken = default);
+    Task<(string WorkerToken, string ManagerToken)> GetJoinTokensAsync(Server server, CancellationToken cancellationToken = default);
     
     // Server validation
     Task<bool> ValidateConnectionAsync(Server server, CancellationToken cancellationToken = default);
@@ -100,3 +108,16 @@ public record ServiceInspectInfo(string Id, string Name, int Replicas, Dictionar
 public record SwarmInfo(string Id, bool IsManager, bool IsWorker, int Managers, int Workers);
 public record SystemInfo(string OperatingSystem, string Architecture, bool SwarmActive, string DockerVersion);
 public record ImageInfo(string Id, string Tag, long Size, DateTime Created);
+public record NodeInfo(
+    string Id, 
+    string Hostname, 
+    string Role, 
+    string State, 
+    string Availability, 
+    bool IsLeader,
+    string Address,
+    long NanoCPUs,
+    long MemoryBytes,
+    string EngineVersion,
+    string Platform);
+public record NodeUpdateRequest(string? Role = null, string? Availability = null);

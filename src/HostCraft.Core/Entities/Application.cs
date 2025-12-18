@@ -142,6 +142,57 @@ public class Application
     
     public int? BackupRetentionDays { get; set; } = 30;
     
+    // Docker Swarm configuration
+    /// <summary>
+    /// Number of service replicas (overrides Replicas for swarm mode)
+    /// </summary>
+    public int? SwarmReplicas { get; set; }
+    
+    /// <summary>
+    /// Placement constraints for swarm services (JSON array of strings)
+    /// Example: ["node.role==manager", "node.labels.region==us-east"]
+    /// </summary>
+    public string? SwarmPlacementConstraints { get; set; }
+    
+    /// <summary>
+    /// Update configuration for swarm services (JSON object)
+    /// Controls rolling update behavior
+    /// </summary>
+    public string? SwarmUpdateConfig { get; set; }
+    
+    /// <summary>
+    /// Rollback configuration for swarm services (JSON object)
+    /// Controls automatic rollback on failure
+    /// </summary>
+    public string? SwarmRollbackConfig { get; set; }
+    
+    /// <summary>
+    /// Service mode: "replicated" or "global"
+    /// </summary>
+    public string? SwarmMode { get; set; } = "replicated";
+    
+    /// <summary>
+    /// Endpoint specification for swarm services (JSON object)
+    /// Controls port publishing mode (ingress, host)
+    /// </summary>
+    public string? SwarmEndpointSpec { get; set; }
+    
+    /// <summary>
+    /// Network configuration for swarm services (JSON array)
+    /// </summary>
+    public string? SwarmNetworks { get; set; }
+    
+    /// <summary>
+    /// Stop grace period in nanoseconds for swarm services
+    /// Time to wait before force-killing a container
+    /// </summary>
+    public long? SwarmStopGracePeriod { get; set; }
+    
+    /// <summary>
+    /// Docker Swarm service ID (if deployed as a service)
+    /// </summary>
+    public string? SwarmServiceId { get; set; }
+    
     public DateTime CreatedAt { get; set; }
     
     public DateTime? LastDeployedAt { get; set; }
