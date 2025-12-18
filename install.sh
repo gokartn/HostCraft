@@ -531,12 +531,27 @@ EOF
         echo "This will make HostCraft accessible via your domain with HTTPS."
         echo ""
         echo "You can also configure this later in the Web UI (Settings → HostCraft Domain & SSL)"
-        read -p "Configure domain now? (yes/no): " configure_domain
+        while true; do
+            read -p "Configure domain now? (yes/no): " configure_domain
+            case $configure_domain in
+                yes|y|Y|YES) configure_domain="yes"; break;;
+                no|n|N|NO) configure_domain="no"; break;;
+                *) echo "❌ Invalid input. Please enter 'yes' or 'no'.";;
+            esac
+        done
         
         if [ "$configure_domain" = "yes" ]; then
             echo ""
             read -p "Enter your domain (e.g., hostcraft.example.com): " hostcraft_domain
-            read -p "Enable HTTPS with Let's Encrypt? (yes/no): " enable_https
+            
+            while true; do
+                read -p "Enable HTTPS with Let's Encrypt? (yes/no): " enable_https
+                case $enable_https in
+                    yes|y|Y|YES) enable_https="yes"; break;;
+                    no|n|N|NO) enable_https="no"; break;;
+                    *) echo "❌ Invalid input. Please enter 'yes' or 'no'.";;
+                esac
+            done
             
             if [ -n "$hostcraft_domain" ]; then
                 echo ""
