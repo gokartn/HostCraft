@@ -61,8 +61,13 @@ public class GitProvidersController : ControllerBase
         {
             var redirectUri = $"{Request.Scheme}://{Request.Host}/api/gitproviders/callback";
             var authUrl = await _gitProviderService.GetAuthorizationUrlAsync(type, redirectUri, apiUrl);
-            
+
             return new AuthUrlResponse(authUrl);
+        }
+        catch (InvalidOperationException ex) when (ex.Message.Contains("not configured"))
+        {
+            _logger.LogWarning("OAuth not configured for {Type}: {Message}", type, ex.Message);
+            return BadRequest(new { error = $"{type} OAuth credentials not configured. Please set {type}:ClientId and {type}:ClientSecret in environment variables or appsettings." });
         }
         catch (Exception ex)
         {

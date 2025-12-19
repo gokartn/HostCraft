@@ -22,6 +22,7 @@ public class HostCraftDbContext : DbContext
     public DbSet<HealthCheck> HealthChecks => Set<HealthCheck>();
     public DbSet<Volume> Volumes => Set<Volume>();
     public DbSet<GitProvider> GitProviders => Set<GitProvider>();
+    public DbSet<GitProviderSettings> GitProviderSettings => Set<GitProviderSettings>();
     public DbSet<Certificate> Certificates => Set<Certificate>();
     public DbSet<SystemSettings> SystemSettings => Set<SystemSettings>();
     
@@ -41,6 +42,7 @@ public class HostCraftDbContext : DbContext
         ConfigurePrivateKey(modelBuilder);
         ConfigureUser(modelBuilder);
         ConfigureSystemSettings(modelBuilder);
+        ConfigureGitProviderSettings(modelBuilder);
     }
     
     private void ConfigureServer(ModelBuilder modelBuilder)
@@ -284,6 +286,21 @@ public class HostCraftDbContext : DbContext
             entity.Property(e => e.CertificateStatus).HasMaxLength(100);
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
             entity.Property(e => e.UpdatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+        });
+    }
+
+    private void ConfigureGitProviderSettings(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<GitProviderSettings>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Name).IsRequired().HasMaxLength(100);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+            // Unique constraint on Type + ApiUrl (allows one config per provider type, or multiple for self-hosted)
+            entity.HasIndex(e => new { e.Type, e.ApiUrl }).IsUnique();
+
+            entity.Ignore(e => e.IsConfigured);
         });
     }
 }

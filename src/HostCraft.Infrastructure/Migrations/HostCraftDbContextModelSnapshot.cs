@@ -490,6 +490,50 @@ namespace HostCraft.Infrastructure.Migrations
                     b.ToTable("EnvironmentVariables");
                 });
 
+            modelBuilder.Entity("HostCraft.Core.Entities.GitProviderSettings", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("ApiUrl")
+                        .HasColumnType("text");
+
+                    b.Property<string>("ClientId")
+                        .HasColumnType("text");
+
+                    b.Property<string>("ClientSecret")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<bool>("IsEnabled")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<int>("Type")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Type", "ApiUrl")
+                        .IsUnique();
+
+                    b.ToTable("GitProviderSettings");
+                });
+
             modelBuilder.Entity("HostCraft.Core.Entities.GitProvider", b =>
                 {
                     b.Property<int>("Id")

@@ -153,6 +153,26 @@ namespace HostCraft.Infrastructure.Migrations
                 });
 
             migrationBuilder.CreateTable(
+                name: "GitProviderSettings",
+                columns: table => new
+                {
+                    Id = table.Column<int>(type: "integer", nullable: false)
+                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
+                    Type = table.Column<int>(type: "integer", nullable: false),
+                    Name = table.Column<string>(type: "character varying(100)", maxLength: 100, nullable: false),
+                    ClientId = table.Column<string>(type: "text", nullable: true),
+                    ClientSecret = table.Column<string>(type: "text", nullable: true),
+                    ApiUrl = table.Column<string>(type: "text", nullable: true),
+                    IsEnabled = table.Column<bool>(type: "boolean", nullable: false),
+                    CreatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false, defaultValueSql: "CURRENT_TIMESTAMP"),
+                    UpdatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: true)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_GitProviderSettings", x => x.Id);
+                });
+
+            migrationBuilder.CreateTable(
                 name: "GitProviders",
                 columns: table => new
                 {
@@ -570,6 +590,12 @@ namespace HostCraft.Infrastructure.Migrations
                 column: "UserId");
 
             migrationBuilder.CreateIndex(
+                name: "IX_GitProviderSettings_Type_ApiUrl",
+                table: "GitProviderSettings",
+                columns: new[] { "Type", "ApiUrl" },
+                unique: true);
+
+            migrationBuilder.CreateIndex(
                 name: "IX_HealthChecks_ApplicationId",
                 table: "HealthChecks",
                 column: "ApplicationId");
@@ -685,6 +711,9 @@ namespace HostCraft.Infrastructure.Migrations
 
             migrationBuilder.DropTable(
                 name: "GitProviders");
+
+            migrationBuilder.DropTable(
+                name: "GitProviderSettings");
 
             migrationBuilder.DropTable(
                 name: "Projects");

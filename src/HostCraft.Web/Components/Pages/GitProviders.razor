@@ -180,36 +180,94 @@
         </div>
     </div>
 
-    <!-- Help Section -->
+    <!-- OAuth Configuration Section -->
     <div class="card">
         <div class="card-header">
             <h2 class="card-title">
-                <span>❓</span> Setup Help
+                <span>🔐</span> OAuth Configuration
             </h2>
+            <span class="badge">Required to connect providers</span>
         </div>
         <div class="card-body">
-            <div class="help-content">
-                <h3>How to set up GitHub OAuth</h3>
-                <ol>
-                    <li>Go to <a href="https://github.com/settings/developers" target="_blank">GitHub Developer Settings</a></li>
-                    <li>Click "New OAuth App"</li>
-                    <li>Set Application name: <code>HostCraft</code></li>
-                    <li>Set Homepage URL: <code>@GetBaseUrl()</code></li>
-                    <li>Set Authorization callback URL: <code>@GetBaseUrl()/api/gitproviders/callback</code></li>
-                    <li>Copy the Client ID and Client Secret to your HostCraft configuration</li>
-                </ol>
+            @if (loadingSettings)
+            {
+                <div class="loading-state">
+                    <div class="spinner"></div>
+                    <p>Loading settings...</p>
+                </div>
+            }
+            else
+            {
+                <p class="settings-intro">Configure OAuth credentials for each Git provider you want to use. These are stored securely in the database.</p>
 
-                <div class="config-example">
-                    <h4>Configuration (appsettings.json or environment variables)</h4>
-                    <pre><code>{
-  "GitHub": {
-    "ClientId": "your-client-id",
-    "ClientSecret": "your-client-secret"
-  }
-}</code></pre>
+                <div class="oauth-settings-grid">
+                    @foreach (var setting in providerSettings ?? new List<GitProviderSettingsDto>())
+                    {
+                        <div class="oauth-setting-card @(setting.IsConfigured && setting.IsEnabled ? "configured" : "")">
+                            <div class="oauth-setting-header">
+                                <span class="provider-icon-sm">@GetProviderIcon(setting.Type)</span>
+                                <h4>@setting.Name</h4>
+                                @if (setting.IsConfigured && setting.IsEnabled)
+                                {
+                                    <span class="status-dot active" title="Configured"></span>
+                                }
+                                else if (setting.IsConfigured)
+                                {
+                                    <span class="status-dot disabled" title="Disabled"></span>
+                                }
+                                else
+                                {
+                                    <span class="status-dot unconfigured" title="Not configured"></span>
+                                }
+                            </div>
+                            <p class="oauth-status">
+                                @if (setting.IsConfigured && setting.IsEnabled)
+                                {
+                                    <span class="text-success">✓ Ready to use</span>
+                                }
+                                else if (setting.IsConfigured)
+                                {
+                                    <span class="text-warning">Disabled</span>
+                                }
+                                else
+                                {
+                                    <span class="text-muted">Not configured</span>
+                                }
+                            </p>
+                            <button class="btn btn-outline btn-sm" @onclick="() => OpenConfigModal(setting.Type)">
+                                @(setting.IsConfigured ? "Edit" : "Configure")
+                            </button>
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+    </div>
+
+    <!-- Help Section -->
+    <div class="card">
+        <div class="card-header collapsible" @onclick="() => showHelp = !showHelp">
+            <h2 class="card-title">
+                <span>❓</span> Setup Help
+            </h2>
+            <span class="collapse-icon">@(showHelp ? "▼" : "▶")</span>
+        </div>
+        @if (showHelp)
+        {
+            <div class="card-body">
+                <div class="help-content">
+                    <h3>How to set up GitHub OAuth</h3>
+                    <ol>
+                        <li>Go to <a href="https://github.com/settings/developers" target="_blank">GitHub Developer Settings</a></li>
+                        <li>Click "New OAuth App"</li>
+                        <li>Set Application name: <code>HostCraft</code></li>
+                        <li>Set Homepage URL: <code>@GetBaseUrl()</code></li>
+                        <li>Set Authorization callback URL: <code>@GetBaseUrl()/api/gitproviders/callback</code></li>
+                        <li>Click "Configure" above and enter your Client ID and Client Secret</li>
+                    </ol>
                 </div>
             </div>
-        </div>
+        }
     </div>
 </div>
 
@@ -300,9 +358,96 @@
     </div>
 }
 
+@if (showConfigModal)
+{
+    <div class="modal-backdrop" @onclick="CloseConfigModal">
+        <div class="modal-dialog" @onclick:stopPropagation="true">
+            <div class="modal-header">
+                <h3>Configure @editingProviderType OAuth</h3>
+                <button class="btn-close" @onclick="CloseConfigModal">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="clientId">Client ID <span class="required">*</span></label>
+                    <input type="text" id="clientId" @bind="configClientId" class="form-control"
+                           placeholder="Enter your OAuth Client ID" />
+                </div>
+                <div class="form-group">
+                    <label for="clientSecret">Client Secret <span class="required">*</span></label>
+                    <input type="password" id="clientSecret" @bind="configClientSecret" class="form-control"
+                           placeholder="@(string.IsNullOrEmpty(configClientSecretMasked) ? "Enter your OAuth Client Secret" : "Leave blank to keep existing")" />
+                    @if (!string.IsNullOrEmpty(configClientSecretMasked))
+                    {
+                        <small class="form-hint">Current: @configClientSecretMasked</small>
+                    }
+                </div>
+                @if (editingProviderType == GitProviderType.GitLab || editingProviderType == GitProviderType.Gitea)
+                {
+                    <div class="form-group">
+                        <label for="apiUrl">API URL (for self-hosted)</label>
+                        <input type="url" id="apiUrl" @bind="configApiUrl" class="form-control"
+                               placeholder="https://gitlab.example.com" />
+                        <small class="form-hint">Leave blank for @(editingProviderType).com</small>
+                    </div>
+                }
+                <div class="form-group">
+                    <label class="checkbox-label">
+                        <input type="checkbox" @bind="configEnabled" />
+                        <span>Enable this provider</span>
+                    </label>
+                </div>
+
+                <div class="help-box">
+                    <h4>📋 Setup Instructions</h4>
+                    @switch (editingProviderType)
+                    {
+                        case GitProviderType.GitHub:
+                            <ol>
+                                <li>Go to <a href="https://github.com/settings/developers" target="_blank">GitHub Developer Settings</a></li>
+                                <li>Click "New OAuth App"</li>
+                                <li>Set callback URL: <code>@GetBaseUrl()/api/gitproviders/callback</code></li>
+                            </ol>
+                            break;
+                        case GitProviderType.GitLab:
+                            <ol>
+                                <li>Go to GitLab → User Settings → Applications</li>
+                                <li>Create a new application</li>
+                                <li>Set callback URL: <code>@GetBaseUrl()/api/gitproviders/callback</code></li>
+                                <li>Enable scopes: <code>read_user, read_api, read_repository</code></li>
+                            </ol>
+                            break;
+                        case GitProviderType.Bitbucket:
+                            <ol>
+                                <li>Go to Bitbucket → Settings → OAuth consumers</li>
+                                <li>Add a new consumer</li>
+                                <li>Set callback URL: <code>@GetBaseUrl()/api/gitproviders/callback</code></li>
+                            </ol>
+                            break;
+                        default:
+                            <p>Follow your Git provider's documentation to create an OAuth application.</p>
+                            break;
+                    }
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-outline" @onclick="CloseConfigModal">Cancel</button>
+                <button class="btn btn-primary" @onclick="SaveConfig" disabled="@savingConfig">
+                    @if (savingConfig)
+                    {
+                        <span class="spinner-sm"></span>
+                    }
+                    Save Configuration
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
 @code {
     private List<GitProviderDto>? providers;
+    private List<GitProviderSettingsDto>? providerSettings;
     private bool loading = true;
+    private bool loadingSettings = true;
     private bool connecting = false;
     private bool disconnecting = false;
     private bool testingConnection = false;
@@ -317,6 +462,18 @@
     private bool loadingRepos = false;
     private List<GitRepositoryDto>? repositories;
     private int? selectedProviderId;
+
+    private bool showHelp = false;
+
+    // OAuth Config Modal
+    private bool showConfigModal = false;
+    private bool savingConfig = false;
+    private GitProviderType editingProviderType;
+    private string? configClientId;
+    private string? configClientSecret;
+    private string? configClientSecretMasked;
+    private string? configApiUrl;
+    private bool configEnabled = true;
 
     protected override async Task OnInitializedAsync()
     {
@@ -333,7 +490,7 @@
             errorMessage = Uri.UnescapeDataString(query["error"]!);
         }
 
-        await LoadProviders();
+        await Task.WhenAll(LoadProviders(), LoadProviderSettings());
     }
 
     private async Task LoadProviders()
@@ -351,6 +508,105 @@
         finally
         {
             loading = false;
+        }
+    }
+
+    private async Task LoadProviderSettings()
+    {
+        loadingSettings = true;
+        try
+        {
+            providerSettings = await Http.GetFromJsonAsync<List<GitProviderSettingsDto>>("api/gitprovider-settings");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to load provider settings");
+        }
+        finally
+        {
+            loadingSettings = false;
+        }
+    }
+
+    private async Task OpenConfigModal(GitProviderType type)
+    {
+        editingProviderType = type;
+        configClientId = null;
+        configClientSecret = null;
+        configClientSecretMasked = null;
+        configApiUrl = null;
+        configEnabled = true;
+
+        try
+        {
+            var details = await Http.GetFromJsonAsync<GitProviderSettingsDetailDto>($"api/gitprovider-settings/{type}");
+            if (details != null)
+            {
+                configClientId = details.ClientId;
+                configClientSecretMasked = details.ClientSecretMasked;
+                configApiUrl = details.ApiUrl;
+                configEnabled = details.IsEnabled || !details.IsConfigured; // Default to enabled if new
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to load settings for {Type}", type);
+        }
+
+        showConfigModal = true;
+    }
+
+    private void CloseConfigModal()
+    {
+        showConfigModal = false;
+    }
+
+    private async Task SaveConfig()
+    {
+        if (string.IsNullOrWhiteSpace(configClientId))
+        {
+            errorMessage = "Client ID is required";
+            return;
+        }
+
+        // If no existing secret and no new secret provided
+        if (string.IsNullOrEmpty(configClientSecretMasked) && string.IsNullOrWhiteSpace(configClientSecret))
+        {
+            errorMessage = "Client Secret is required";
+            return;
+        }
+
+        savingConfig = true;
+        errorMessage = null;
+
+        try
+        {
+            var request = new SaveGitProviderSettingsRequest(
+                editingProviderType,
+                editingProviderType.ToString(),
+                configClientId,
+                configClientSecret,
+                configApiUrl,
+                configEnabled
+            );
+
+            var response = await Http.PostAsJsonAsync("api/gitprovider-settings", request);
+            response.EnsureSuccessStatusCode();
+
+            successMessage = $"{editingProviderType} OAuth configuration saved successfully!";
+            showConfigModal = false;
+
+            // Reload settings
+            await LoadProviderSettings();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to save config for {Type}", editingProviderType);
+            errorMessage = $"Failed to save configuration: {ex.Message}";
+        }
+        finally
+        {
+            savingConfig = false;
         }
     }
 
@@ -595,6 +851,37 @@
         Bitbucket,
         Gitea
     }
+
+    // Settings DTOs
+    public class GitProviderSettingsDto
+    {
+        public int Id { get; set; }
+        public GitProviderType Type { get; set; }
+        public string Name { get; set; } = "";
+        public bool IsConfigured { get; set; }
+        public bool IsEnabled { get; set; }
+        public string? ApiUrl { get; set; }
+    }
+
+    public class GitProviderSettingsDetailDto
+    {
+        public int Id { get; set; }
+        public GitProviderType Type { get; set; }
+        public string Name { get; set; } = "";
+        public string? ClientId { get; set; }
+        public string? ClientSecretMasked { get; set; }
+        public string? ApiUrl { get; set; }
+        public bool IsEnabled { get; set; }
+        public bool IsConfigured { get; set; }
+    }
+
+    public record SaveGitProviderSettingsRequest(
+        GitProviderType Type,
+        string? Name,
+        string ClientId,
+        string? ClientSecret,
+        string? ApiUrl,
+        bool IsEnabled);
 }
 
 <style>
@@ -1153,6 +1440,148 @@
     }
 
     .repo-language {
+        color: #64748b;
+        font-size: 0.75rem;
+    }
+
+    /* OAuth Settings Grid */
+    .settings-intro {
+        color: #94a3b8;
+        margin-bottom: 1.5rem;
+    }
+
+    .oauth-settings-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+        gap: 1rem;
+    }
+
+    .oauth-setting-card {
+        background: #0f172a;
+        border: 1px solid #334155;
+        border-radius: 0.75rem;
+        padding: 1rem;
+        transition: all 0.2s;
+    }
+
+    .oauth-setting-card.configured {
+        border-color: #10b981;
+    }
+
+    .oauth-setting-header {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        margin-bottom: 0.5rem;
+    }
+
+    .provider-icon-sm {
+        font-size: 1.25rem;
+    }
+
+    .oauth-setting-header h4 {
+        flex: 1;
+        margin: 0;
+        font-size: 1rem;
+        color: #fff;
+    }
+
+    .status-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+    }
+
+    .status-dot.active {
+        background: #10b981;
+    }
+
+    .status-dot.disabled {
+        background: #f59e0b;
+    }
+
+    .status-dot.unconfigured {
+        background: #64748b;
+    }
+
+    .oauth-status {
+        font-size: 0.75rem;
+        margin: 0.5rem 0 1rem 0;
+    }
+
+    .text-success {
+        color: #10b981;
+    }
+
+    .text-warning {
+        color: #f59e0b;
+    }
+
+    .text-muted {
+        color: #64748b;
+    }
+
+    /* Help Box in Modal */
+    .help-box {
+        background: #0f172a;
+        border-radius: 0.5rem;
+        padding: 1rem;
+        margin-top: 1rem;
+    }
+
+    .help-box h4 {
+        margin: 0 0 0.75rem 0;
+        color: #fff;
+        font-size: 0.875rem;
+    }
+
+    .help-box ol {
+        margin: 0;
+        padding-left: 1.25rem;
+        color: #94a3b8;
+        font-size: 0.875rem;
+        line-height: 1.6;
+    }
+
+    .help-box code {
+        background: #1e293b;
+        padding: 0.125rem 0.375rem;
+        border-radius: 0.25rem;
+        color: #a78bfa;
+        font-size: 0.75rem;
+    }
+
+    /* Required asterisk */
+    .required {
+        color: #ef4444;
+    }
+
+    /* Checkbox label */
+    .checkbox-label {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        cursor: pointer;
+    }
+
+    .checkbox-label input[type="checkbox"] {
+        width: 1rem;
+        height: 1rem;
+        accent-color: #6366f1;
+    }
+
+    /* Collapsible card header */
+    .card-header.collapsible {
+        cursor: pointer;
+        user-select: none;
+    }
+
+    .card-header.collapsible:hover {
+        background: rgba(255, 255, 255, 0.05);
+    }
+
+    .collapse-icon {
+        margin-left: auto;
         color: #64748b;
         font-size: 0.75rem;
     }

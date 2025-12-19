@@ -33,12 +33,16 @@ public class GitProviderService : IGitProviderService
 
     public async Task<string> GetAuthorizationUrlAsync(GitProviderType type, string redirectUri, string? apiUrl = null)
     {
+        // Get credentials from database first, fall back to configuration
+        var settings = await _context.GitProviderSettings
+            .FirstOrDefaultAsync(s => s.Type == type && s.ApiUrl == apiUrl);
+
         return type switch
         {
-            GitProviderType.GitHub => GetGitHubAuthUrl(redirectUri),
-            GitProviderType.GitLab => GetGitLabAuthUrl(redirectUri, apiUrl),
-            GitProviderType.Bitbucket => GetBitbucketAuthUrl(redirectUri),
-            GitProviderType.Gitea => GetGiteaAuthUrl(redirectUri, apiUrl!),
+            GitProviderType.GitHub => GetGitHubAuthUrl(redirectUri, settings),
+            GitProviderType.GitLab => GetGitLabAuthUrl(redirectUri, apiUrl, settings),
+            GitProviderType.Bitbucket => GetBitbucketAuthUrl(redirectUri, settings),
+            GitProviderType.Gitea => GetGiteaAuthUrl(redirectUri, apiUrl!, settings),
             _ => throw new NotSupportedException($"Provider type {type} not supported")
         };
     }
@@ -50,12 +54,16 @@ public class GitProviderService : IGitProviderService
         int userId,
         string? apiUrl = null)
     {
+        // Get credentials from database first, fall back to configuration
+        var settings = await _context.GitProviderSettings
+            .FirstOrDefaultAsync(s => s.Type == type && s.ApiUrl == apiUrl);
+
         return type switch
         {
-            GitProviderType.GitHub => await ConnectGitHubAsync(code, redirectUri, userId),
-            GitProviderType.GitLab => await ConnectGitLabAsync(code, redirectUri, userId, apiUrl),
-            GitProviderType.Bitbucket => await ConnectBitbucketAsync(code, redirectUri, userId),
-            GitProviderType.Gitea => await ConnectGiteaAsync(code, redirectUri, userId, apiUrl!),
+            GitProviderType.GitHub => await ConnectGitHubAsync(code, redirectUri, userId, settings),
+            GitProviderType.GitLab => await ConnectGitLabAsync(code, redirectUri, userId, apiUrl, settings),
+            GitProviderType.Bitbucket => await ConnectBitbucketAsync(code, redirectUri, userId, settings),
+            GitProviderType.Gitea => await ConnectGiteaAsync(code, redirectUri, userId, apiUrl!, settings),
             _ => throw new NotSupportedException($"Provider type {type} not supported")
         };
     }
@@ -465,20 +473,41 @@ public class GitProviderService : IGitProviderService
         }
     }
 
-    // GitHub implementation
-    private string GetGitHubAuthUrl(string redirectUri)
+    // Helper to get credentials from database or config
+    private (string clientId, string clientSecret) GetCredentials(GitProviderSettings? settings, string providerName)
     {
-        var clientId = _configuration["GitHub:ClientId"] ?? throw new InvalidOperationException("GitHub ClientId not configured");
+        // Try database settings first
+        if (settings != null && settings.IsConfigured && settings.IsEnabled)
+        {
+            return (settings.ClientId!, settings.ClientSecret!);
+        }
+
+        // Fall back to configuration (for backwards compatibility)
+        var clientId = _configuration[$"{providerName}:ClientId"];
+        var clientSecret = _configuration[$"{providerName}:ClientSecret"];
+
+        if (string.IsNullOrEmpty(clientId) || string.IsNullOrEmpty(clientSecret))
+        {
+            throw new InvalidOperationException(
+                $"{providerName} OAuth not configured. Please configure {providerName} credentials in Settings → Git Providers.");
+        }
+
+        return (clientId, clientSecret);
+    }
+
+    // GitHub implementation
+    private string GetGitHubAuthUrl(string redirectUri, GitProviderSettings? settings)
+    {
+        var (clientId, _) = GetCredentials(settings, "GitHub");
         var scope = "repo,read:user,user:email";
         var state = "github";
-        
+
         return $"https://github.com/login/oauth/authorize?client_id={clientId}&redirect_uri={Uri.EscapeDataString(redirectUri)}&scope={scope}&state={state}";
     }
 
-    private async Task<GitProvider> ConnectGitHubAsync(string code, string redirectUri, int userId)
+    private async Task<GitProvider> ConnectGitHubAsync(string code, string redirectUri, int userId, GitProviderSettings? settings)
     {
-        var clientId = _configuration["GitHub:ClientId"] ?? throw new InvalidOperationException("GitHub ClientId not configured");
-        var clientSecret = _configuration["GitHub:ClientSecret"] ?? throw new InvalidOperationException("GitHub ClientSecret not configured");
+        var (clientId, clientSecret) = GetCredentials(settings, "GitHub");
 
         // Exchange code for token
         var client = _httpClientFactory.CreateClient();
@@ -562,13 +591,13 @@ public class GitProviderService : IGitProviderService
     }
 
     // Placeholder implementations for other providers
-    private string GetGitLabAuthUrl(string redirectUri, string? apiUrl) => throw new NotImplementedException("GitLab support coming soon");
-    private string GetBitbucketAuthUrl(string redirectUri) => throw new NotImplementedException("Bitbucket support coming soon");
-    private string GetGiteaAuthUrl(string redirectUri, string apiUrl) => throw new NotImplementedException("Gitea support coming soon");
-    
-    private Task<GitProvider> ConnectGitLabAsync(string code, string redirectUri, int userId, string? apiUrl) => throw new NotImplementedException();
-    private Task<GitProvider> ConnectBitbucketAsync(string code, string redirectUri, int userId) => throw new NotImplementedException();
-    private Task<GitProvider> ConnectGiteaAsync(string code, string redirectUri, int userId, string apiUrl) => throw new NotImplementedException();
+    private string GetGitLabAuthUrl(string redirectUri, string? apiUrl, GitProviderSettings? settings) => throw new NotImplementedException("GitLab support coming soon");
+    private string GetBitbucketAuthUrl(string redirectUri, GitProviderSettings? settings) => throw new NotImplementedException("Bitbucket support coming soon");
+    private string GetGiteaAuthUrl(string redirectUri, string apiUrl, GitProviderSettings? settings) => throw new NotImplementedException("Gitea support coming soon");
+
+    private Task<GitProvider> ConnectGitLabAsync(string code, string redirectUri, int userId, string? apiUrl, GitProviderSettings? settings) => throw new NotImplementedException();
+    private Task<GitProvider> ConnectBitbucketAsync(string code, string redirectUri, int userId, GitProviderSettings? settings) => throw new NotImplementedException();
+    private Task<GitProvider> ConnectGiteaAsync(string code, string redirectUri, int userId, string apiUrl, GitProviderSettings? settings) => throw new NotImplementedException();
     
     private Task<List<GitRepository>> GetGitLabRepositoriesAsync(GitProvider provider) => throw new NotImplementedException();
     private Task<List<GitRepository>> GetBitbucketRepositoriesAsync(GitProvider provider) => throw new NotImplementedException();
