@@ -240,6 +240,45 @@ public class ServersController : ControllerBase
                                     }
                                 }
                                 
+                                // Before joining, remove any stale nodes for this server from the swarm
+                                try
+                                {
+                                    _logger.LogInformation("Checking for stale swarm nodes for {ServerName}...", serverToValidate.Name);
+                                    
+                                    var dockerUri = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+                                        ? "npipe://./pipe/docker_engine"
+                                        : "unix:///var/run/docker.sock";
+                                    
+                                    var managerClient = new Docker.DotNet.DockerClientConfiguration(new Uri(dockerUri)).CreateClient();
+                                    var allNodes = await managerClient.Swarm.ListNodesAsync();
+                                    
+                                    // Find nodes with matching hostname or IP that are down
+                                    var staleNodes = allNodes.Where(n => 
+                                        (n.Description?.Hostname?.Equals(serverToValidate.Name, StringComparison.OrdinalIgnoreCase) == true ||
+                                         n.Status?.Addr?.Equals(serverToValidate.Host, StringComparison.OrdinalIgnoreCase) == true) &&
+                                        n.Status?.State == "down").ToList();
+                                    
+                                    foreach (var staleNode in staleNodes)
+                                    {
+                                        _logger.LogInformation("Removing stale node {NodeId} ({Hostname}) from swarm", staleNode.ID, staleNode.Description?.Hostname);
+                                        try
+                                        {
+                                            await managerClient.Swarm.RemoveNodeAsync(staleNode.ID, force: true);
+                                            _logger.LogInformation("Successfully removed stale node {NodeId}", staleNode.ID);
+                                        }
+                                        catch (Exception removeEx)
+                                        {
+                                            _logger.LogWarning(removeEx, "Failed to remove stale node {NodeId}, continuing anyway", staleNode.ID);
+                                        }
+                                    }
+                                    
+                                    managerClient.Dispose();
+                                }
+                                catch (Exception cleanupEx)
+                                {
+                                    _logger.LogWarning(cleanupEx, "Error during stale node cleanup, continuing with join");
+                                }
+                                
                                 // Get manager's advertise address from swarm nodes
                                 var nodes = await scopedDockerService.ListNodesAsync(swarmManager);
                                 var managerNode = nodes.FirstOrDefault(n => n.Role == "manager" && n.Availability == "active");
@@ -1320,6 +1359,45 @@ public class ServersController : ControllerBase
                                         
                                         if (!string.IsNullOrEmpty(managerHost))
                                         {
+                                            // Before joining, check for and remove any stale nodes with the same hostname/IP
+                                            try
+                                            {
+                                                logger.LogInformation("Checking for stale swarm nodes for {ServerName}...", server.Name);
+                                                
+                                                var dockerUri = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+                                                    ? "npipe://./pipe/docker_engine"
+                                                    : "unix:///var/run/docker.sock";
+                                                
+                                                var managerClient = new Docker.DotNet.DockerClientConfiguration(new Uri(dockerUri)).CreateClient();
+                                                var allNodes = await managerClient.Swarm.ListNodesAsync();
+                                                
+                                                // Find nodes with matching hostname or IP that are down
+                                                var staleNodes = allNodes.Where(n => 
+                                                    (n.Description?.Hostname?.Equals(server.Name, StringComparison.OrdinalIgnoreCase) == true ||
+                                                     n.Status?.Addr?.Equals(server.Host, StringComparison.OrdinalIgnoreCase) == true) &&
+                                                    n.Status?.State == "down").ToList();
+                                                
+                                                foreach (var staleNode in staleNodes)
+                                                {
+                                                    logger.LogInformation("Removing stale node {NodeId} ({Hostname}) from swarm", staleNode.ID, staleNode.Description?.Hostname);
+                                                    try
+                                                    {
+                                                        await managerClient.Swarm.RemoveNodeAsync(staleNode.ID, force: true);
+                                                        logger.LogInformation("Successfully removed stale node {NodeId}", staleNode.ID);
+                                                    }
+                                                    catch (Exception removeEx)
+                                                    {
+                                                        logger.LogWarning(removeEx, "Failed to remove stale node {NodeId}, continuing anyway", staleNode.ID);
+                                                    }
+                                                }
+                                                
+                                                managerClient.Dispose();
+                                            }
+                                            catch (Exception cleanupEx)
+                                            {
+                                                logger.LogWarning(cleanupEx, "Error during stale node cleanup, continuing with join");
+                                            }
+                                            
                                             var managerAddress = $"{managerHost}:2377";
                                             var joinCommand = $"docker swarm join --token {workerToken} {managerAddress}";
                                             
