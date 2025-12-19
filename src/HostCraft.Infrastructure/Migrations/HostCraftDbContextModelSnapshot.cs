@@ -785,6 +785,15 @@ namespace HostCraft.Infrastructure.Migrations
                     b.Property<string>("SwarmNodeState")
                         .HasColumnType("text");
 
+                    b.Property<string>("SwarmId")
+                        .HasColumnType("text");
+
+                    b.Property<string>("ActualHostname")
+                        .HasColumnType("text");
+
+                    b.Property<string>("SwarmAdvertiseAddress")
+                        .HasColumnType("text");
+
                     b.Property<int?>("SwarmWorkerCount")
                         .HasColumnType("integer");
 
