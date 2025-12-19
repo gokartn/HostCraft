@@ -421,93 +421,63 @@ if [ "$setup_traefik" = "yes" ] && [ -n "$TRAEFIK_EMAIL" ]; then
     echo "📦 Creating traefik-public network..."
     docker network create --driver=overlay traefik-public 2>/dev/null || echo "   Network already exists"
     
-    # Create Traefik compose file
+    # Create Traefik compose file using printf to avoid heredoc encoding issues
     TRAEFIK_COMPOSE="/tmp/traefik-compose.yml"
-    
-    cat > "$TRAEFIK_COMPOSE" <<EOF
-version: '3.8'
 
-services:
-  traefik:
-    image: traefik:v2.11
-    command:
-      # Docker provider
-      - --providers.docker=true
-      - --providers.docker.swarmMode=true
-      - --providers.docker.exposedByDefault=false
-      - --providers.docker.network=traefik-public
-      
-      # Entrypoints
-      - --entrypoints.web.address=:80
-      - --entrypoints.websecure.address=:443
-      
-      # HTTP to HTTPS redirect
-      - --entrypoints.web.http.redirections.entrypoint.to=websecure
-      - --entrypoints.web.http.redirections.entrypoint.scheme=https
-      
-      # API (dashboard)
-      - --api.dashboard=true
-      
-      # Let's Encrypt
-      - --certificatesresolvers.letsencrypt.acme.email=${TRAEFIK_EMAIL}
-      - --certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json
-      - --certificatesresolvers.letsencrypt.acme.httpchallenge=true
-      - --certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web
-      
-      # Logging
-      - --log.level=INFO
-      - --accesslog=true
-    
-    ports:
-      - "80:80"
-      - "443:443"
-      - "8080:8080"
-    
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - traefik-certificates:/letsencrypt
-    
-    networks:
-      - traefik-public
-    
-    deploy:
-      mode: replicated
-      replicas: 1
-      placement:
-        constraints:
-          - node.role == manager
-      restart_policy:
-        condition: any
-        delay: 5s
-        max_attempts: 3
-      labels:
-        - "traefik.enable=true"
-EOF
+    printf '%s\n' \
+"version: '3.8'" \
+"" \
+"services:" \
+"  traefik:" \
+"    image: traefik:v2.11" \
+"    command:" \
+"      - --providers.docker=true" \
+"      - --providers.docker.swarmMode=true" \
+"      - --providers.docker.exposedByDefault=false" \
+"      - --providers.docker.network=traefik-public" \
+"      - --entrypoints.web.address=:80" \
+"      - --entrypoints.websecure.address=:443" \
+"      - --entrypoints.web.http.redirections.entrypoint.to=websecure" \
+"      - --entrypoints.web.http.redirections.entrypoint.scheme=https" \
+"      - --api.dashboard=true" \
+"      - --certificatesresolvers.letsencrypt.acme.email=${TRAEFIK_EMAIL}" \
+"      - --certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json" \
+"      - --certificatesresolvers.letsencrypt.acme.httpchallenge=true" \
+"      - --certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web" \
+"      - --log.level=INFO" \
+"      - --accesslog=true" \
+"    ports:" \
+"      - \"80:80\"" \
+"      - \"443:443\"" \
+"      - \"8080:8080\"" \
+"    volumes:" \
+"      - /var/run/docker.sock:/var/run/docker.sock:ro" \
+"      - traefik-certificates:/letsencrypt" \
+"    networks:" \
+"      - traefik-public" \
+"    deploy:" \
+"      mode: replicated" \
+"      replicas: 1" \
+"      placement:" \
+"        constraints:" \
+"          - node.role == manager" \
+"      restart_policy:" \
+"        condition: any" \
+"        delay: 5s" \
+"        max_attempts: 3" \
+"      labels:" \
+"        - \"traefik.enable=true\"" \
+"" \
+"volumes:" \
+"  traefik-certificates:" \
+"    driver: local" \
+"" \
+"networks:" \
+"  traefik-public:" \
+"    external: true" \
+> "$TRAEFIK_COMPOSE"
 
-    # Add dashboard configuration if domain provided
-    if [ -n "$TRAEFIK_DASHBOARD_DOMAIN" ]; then
-        cat >> "$TRAEFIK_COMPOSE" <<EOF
-        - "traefik.http.routers.traefik-dashboard.rule=Host(\`${TRAEFIK_DASHBOARD_DOMAIN}\`)"
-        - "traefik.http.routers.traefik-dashboard.entrypoints=websecure"
-        - "traefik.http.routers.traefik-dashboard.tls.certresolver=letsencrypt"
-        - "traefik.http.routers.traefik-dashboard.service=api@internal"
-        - "traefik.http.services.traefik-dashboard.loadbalancer.server.port=8080"
-EOF
-    fi
-
-    # Complete the compose file
-    cat >> "$TRAEFIK_COMPOSE" <<EOF
-
-volumes:
-  traefik-certificates:
-    driver: local
-
-networks:
-  traefik-public:
-    external: true
-EOF
-
-    echo "🚀 Deploying Traefik..."
+    echo "Deploying Traefik..."
     docker stack deploy -c "$TRAEFIK_COMPOSE" traefik
     
     echo ""
@@ -525,12 +495,12 @@ EOF
         echo ""
         
         # Ask if user wants to configure domain now
-        echo "🌐 Domain Configuration"
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "Domain Configuration"
+        echo "============================================================="
         echo "Would you like to configure a domain for HostCraft now?"
         echo "This will make HostCraft accessible via your domain with HTTPS."
         echo ""
-        echo "You can also configure this later in the Web UI (Settings → HostCraft Domain & SSL)"
+        echo "You can also configure this later in the Web UI (Settings -> HostCraft Domain & SSL)"
         while true; do
             read -p "Configure domain now? (yes/no): " configure_domain
             case $configure_domain in
@@ -594,24 +564,24 @@ EOF
                     letsencrypt_email="$TRAEFIK_EMAIL"
                     
                     echo ""
-                    echo "✅ Traefik routing configured successfully!"
+                    echo "Traefik routing configured successfully!"
                     echo ""
-                    echo "📝 Final Configuration Step"
-                    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                    echo "Final Configuration Step"
+                    echo "============================================================="
                     echo "To complete the setup, save your domain settings in the HostCraft UI:"
                     echo ""
                     echo "   1. Open: https://$hostcraft_domain/settings"
                     echo "   2. HostCraft Domain: $hostcraft_domain"
                     if [ "$enable_https" = "yes" ]; then
-                        echo "   3. Enable HTTPS: ✓ (checked)"
+                        echo "   3. Enable HTTPS: checked"
                         echo "   4. Let's Encrypt Email: $letsencrypt_email"
                     else
-                        echo "   3. Enable HTTPS: ☐ (unchecked)"
+                        echo "   3. Enable HTTPS: unchecked"
                     fi
                     echo "   5. Click 'Save Configuration'"
                     echo ""
-                    echo "💡 The Traefik routing is already active. This step just saves the"
-                    echo "   settings to your database so they persist after restarts."
+                    echo "The Traefik routing is already active. This step just saves the"
+                    echo "settings to your database so they persist after restarts."
                     echo ""
                     
                     domain_configured=true
@@ -665,7 +635,7 @@ else
         echo ""
         echo "   💡 To enable domain access with HTTPS:"
         echo "      1. Open the Web UI above"
-        echo "      2. Go to Settings → HostCraft Domain & SSL"
+        echo "      2. Go to Settings -> HostCraft Domain & SSL"
         echo "      3. Enter your domain and enable HTTPS"
     fi
 fi
@@ -693,7 +663,7 @@ if [ "$SWARM_ACTIVE" = "true" ]; then
         echo ""
         echo "   Next steps:"
         echo "   1. Ensure your domain DNS points to this server"
-        echo "   2. Go to Settings → HostCraft Domain & SSL"
+        echo "   2. Go to Settings -> HostCraft Domain & SSL"
         echo "   3. Enter your domain and enable HTTPS"
         echo "   4. HostCraft will automatically configure and restart"
         echo ""
