@@ -71,7 +71,22 @@ public class Server
     /// Current swarm node availability (active, pause, drain)
     /// </summary>
     public string? SwarmNodeAvailability { get; set; }
-    
+
+    /// <summary>
+    /// Docker Swarm ID (cluster identifier)
+    /// </summary>
+    public string? SwarmId { get; set; }
+
+    /// <summary>
+    /// The actual hostname of the machine (from docker info or system)
+    /// </summary>
+    public string? ActualHostname { get; set; }
+
+    /// <summary>
+    /// The swarm advertise address (IP:port that other nodes use to connect)
+    /// </summary>
+    public string? SwarmAdvertiseAddress { get; set; }
+
     public DateTime CreatedAt { get; set; }
     
     public DateTime? LastHealthCheck { get; set; }

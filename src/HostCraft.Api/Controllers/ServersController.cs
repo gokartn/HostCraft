@@ -545,20 +545,15 @@ public class ServersController : ControllerBase
             try
             {
                 var systemInfo = await _dockerService.GetSystemInfoAsync(existingLocalhost);
-                if (systemInfo.SwarmActive)
-                {
-                    existingLocalhost.Type = ServerType.SwarmManager;
-                    existingLocalhost.IsSwarmManager = true;
-                    existingLocalhost.Status = ServerStatus.Online;
-                    await _context.SaveChangesAsync();
-                    _logger.LogInformation("Updated existing localhost to SwarmManager");
-                }
+                UpdateServerFromSystemInfo(existingLocalhost, systemInfo);
+                await _context.SaveChangesAsync();
+                _logger.LogInformation("Updated existing localhost with swarm info");
             }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Could not detect swarm on existing localhost");
             }
-            
+
             return Ok(existingLocalhost);
         }
         
@@ -601,22 +596,19 @@ public class ServersController : ControllerBase
             CreatedAt = DateTime.UtcNow
         };
         
-        // Detect swarm immediately after creation
+        // Detect swarm and gather system info immediately after creation
         try
         {
             var systemInfo = await _dockerService.GetSystemInfoAsync(localhostServer);
-            if (systemInfo.SwarmActive)
-            {
-                localhostServer.Type = ServerType.SwarmManager;
-                localhostServer.IsSwarmManager = true;
-                _logger.LogInformation("Detected swarm on localhost during creation");
-            }
+            UpdateServerFromSystemInfo(localhostServer, systemInfo);
+            _logger.LogInformation("Configured localhost with hostname: {Hostname}, SwarmNodeId: {NodeId}",
+                systemInfo.Hostname, systemInfo.SwarmNodeId);
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Could not detect swarm on localhost during creation");
         }
-        
+
         _context.Servers.Add(localhostServer);
         await _context.SaveChangesAsync();
         
@@ -627,7 +619,44 @@ public class ServersController : ControllerBase
         
         return Ok(server);
     }
-    
+
+    /// <summary>
+    /// Updates a Server entity with information from the Docker system info.
+    /// </summary>
+    private void UpdateServerFromSystemInfo(Server server, SystemInfo systemInfo)
+    {
+        server.Status = ServerStatus.Online;
+        server.ActualHostname = systemInfo.Hostname;
+        server.SwarmNodeId = systemInfo.SwarmNodeId;
+        server.SwarmId = systemInfo.SwarmId;
+        server.SwarmAdvertiseAddress = systemInfo.SwarmNodeAddress;
+        server.SwarmNodeState = systemInfo.SwarmNodeState;
+        server.SwarmNodeAvailability = systemInfo.SwarmNodeAvailability;
+
+        if (systemInfo.SwarmActive)
+        {
+            if (systemInfo.IsSwarmManager)
+            {
+                server.Type = ServerType.SwarmManager;
+                server.IsSwarmManager = true;
+                server.IsSwarmWorker = false;
+            }
+            else
+            {
+                server.Type = ServerType.SwarmWorker;
+                server.IsSwarmManager = false;
+                server.IsSwarmWorker = true;
+            }
+        }
+        else
+        {
+            // Not in a swarm, reset swarm fields
+            server.Type = ServerType.Standalone;
+            server.IsSwarmManager = false;
+            server.IsSwarmWorker = false;
+        }
+    }
+
     private static bool IsDockerAvailable()
     {
         try
@@ -934,41 +963,34 @@ public class ServersController : ControllerBase
         var server = await _context.Servers
             .Include(s => s.PrivateKey)
             .FirstOrDefaultAsync(s => s.Id == id);
-        
+
         if (server == null)
         {
             return NotFound(new { error = $"Server {id} not found" });
         }
-        
+
         try
         {
             var systemInfo = await _dockerService.GetSystemInfoAsync(server);
-            
-            if (systemInfo.SwarmActive)
+            var previousType = server.Type;
+
+            UpdateServerFromSystemInfo(server, systemInfo);
+            await _context.SaveChangesAsync();
+
+            _logger.LogInformation(
+                "Refreshed swarm status for server {ServerName}: Type={Type}, Hostname={Hostname}, NodeId={NodeId}, Address={Address}",
+                server.Name, server.Type, systemInfo.Hostname, systemInfo.SwarmNodeId, systemInfo.SwarmNodeAddress);
+
+            return Ok(new
             {
-                if (!server.IsSwarmManager)
-                {
-                    _logger.LogInformation("Detected swarm on server {ServerName}, updating to SwarmManager", server.Name);
-                    server.Type = ServerType.SwarmManager;
-                    server.IsSwarmManager = true;
-                    server.Status = ServerStatus.Online;
-                    await _context.SaveChangesAsync();
-                    return Ok(new { message = "Server updated to SwarmManager", swarmActive = true });
-                }
-                return Ok(new { message = "Server is already a SwarmManager", swarmActive = true });
-            }
-            else
-            {
-                if (server.IsSwarmManager)
-                {
-                    _logger.LogInformation("Swarm no longer active on server {ServerName}, updating to Standalone", server.Name);
-                    server.Type = ServerType.Standalone;
-                    server.IsSwarmManager = false;
-                    await _context.SaveChangesAsync();
-                    return Ok(new { message = "Server updated to Standalone", swarmActive = false });
-                }
-                return Ok(new { message = "Server is Standalone", swarmActive = false });
-            }
+                message = server.Type != previousType
+                    ? $"Server updated from {previousType} to {server.Type}"
+                    : $"Server is {server.Type}",
+                swarmActive = systemInfo.SwarmActive,
+                hostname = systemInfo.Hostname,
+                nodeId = systemInfo.SwarmNodeId,
+                nodeAddress = systemInfo.SwarmNodeAddress
+            });
         }
         catch (Exception ex)
         {

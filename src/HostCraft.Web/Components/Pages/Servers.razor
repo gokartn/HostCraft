@@ -71,10 +71,24 @@
                     </div>
 
                     <div class="server-info">
+                        @if (!string.IsNullOrEmpty(server.ActualHostname) && server.ActualHostname != server.Name)
+                        {
+                            <div class="info-row">
+                                <span class="label">Hostname:</span>
+                                <span class="value hostname-value">@server.ActualHostname</span>
+                            </div>
+                        }
                         <div class="info-row">
                             <span class="label">Host:</span>
                             <span class="value">@server.Host:@server.Port</span>
                         </div>
+                        @if (!string.IsNullOrEmpty(server.SwarmAdvertiseAddress))
+                        {
+                            <div class="info-row">
+                                <span class="label">Swarm IP:</span>
+                                <span class="value swarm-address">@server.SwarmAdvertiseAddress</span>
+                            </div>
+                        }
                         <div class="info-row">
                             <span class="label">User:</span>
                             <span class="value">@server.User</span>
@@ -86,18 +100,18 @@
                                 <span class="value">@server.Region.Name</span>
                             </div>
                         }
-                        @if (server.IsSwarm && !string.IsNullOrEmpty(server.SwarmId))
+                        @if (server.IsSwarm && !string.IsNullOrEmpty(server.SwarmNodeId))
                         {
                             <div class="info-row">
-                                <span class="label">Swarm:</span>
-                                <span class="value">@server.SwarmId.Substring(0, 12)</span>
+                                <span class="label">Node ID:</span>
+                                <span class="value mono">@server.SwarmNodeId.Substring(0, Math.Min(12, server.SwarmNodeId.Length))</span>
                             </div>
                         }
                         @if (!string.IsNullOrEmpty(server.SwarmNodeState))
                         {
                             <div class="info-row">
                                 <span class="label">Node State:</span>
-                                <span class="value">@GetNodeStateIcon(server.SwarmNodeState) @server.SwarmNodeState</span>
+                                <span class="value node-state-@server.SwarmNodeState.ToLower()">@GetNodeStateIcon(server.SwarmNodeState) @server.SwarmNodeState</span>
                             </div>
                         }
                         @if (!string.IsNullOrEmpty(server.SwarmNodeAvailability))
@@ -379,6 +393,8 @@
         public string? SwarmNodeId { get; set; }
         public string? SwarmNodeState { get; set; }
         public string? SwarmNodeAvailability { get; set; }
+        public string? ActualHostname { get; set; }
+        public string? SwarmAdvertiseAddress { get; set; }
         public DateTime CreatedAt { get; set; }
         public DateTime? LastSeenAt { get; set; }
         public bool IsSwarm => Type == HostCraft.Core.Enums.ServerType.SwarmManager || Type == HostCraft.Core.Enums.ServerType.SwarmWorker;
@@ -620,6 +636,34 @@
         font-size: 0.9rem;
         text-align: right;
         word-break: break-all;
+    }
+
+    .info-row .value.hostname-value {
+        color: #8b5cf6;
+        font-weight: 600;
+    }
+
+    .info-row .value.swarm-address {
+        color: #06b6d4;
+        font-family: 'Courier New', monospace;
+    }
+
+    .info-row .value.mono {
+        font-family: 'Courier New', monospace;
+        background: #0f172a;
+        padding: 0.15rem 0.4rem;
+        border-radius: 0.25rem;
+        font-size: 0.8rem;
+    }
+
+    .info-row .value.node-state-ready {
+        color: #10b981;
+        font-weight: 600;
+    }
+
+    .info-row .value.node-state-down {
+        color: #ef4444;
+        font-weight: 600;
     }
 
     .server-actions {

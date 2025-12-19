@@ -889,42 +889,95 @@ public class DockerService : IDockerService, IDisposable
     {
         var isLocalhost = IsLocalhostServer(server);
         Console.WriteLine($"[DockerService.GetSystemInfo] Server: {server.Name} ({server.Host}) - IsLocalhost: {isLocalhost}");
-        
+
         // For local servers, use Docker client directly (no SSH)
         if (isLocalhost)
         {
             Console.WriteLine($"[DockerService.GetSystemInfo] Using local Docker client for {server.Name}");
             var client = GetClient(server);
             var info = await client.System.GetSystemInfoAsync(cancellationToken);
-            
+
             var swarmActive = info.Swarm?.LocalNodeState == "active";
             Console.WriteLine($"[DockerService.GetSystemInfo] Docker info retrieved - SwarmNodeState: {info.Swarm?.LocalNodeState}, SwarmActive: {swarmActive}");
-            
+
+            // Get additional swarm info if active
+            string? swarmNodeId = null;
+            string? swarmId = null;
+            string? swarmNodeAddress = null;
+            string? swarmNodeState = null;
+            string? swarmNodeAvailability = null;
+            bool isSwarmManager = false;
+            bool isSwarmLeader = false;
+
+            if (swarmActive)
+            {
+                swarmNodeId = info.Swarm?.NodeID;
+                swarmNodeAddress = info.Swarm?.NodeAddr;
+                isSwarmManager = info.Swarm?.ControlAvailable ?? false;
+
+                // Get more details about the local node
+                try
+                {
+                    var swarm = await client.Swarm.InspectSwarmAsync(cancellationToken);
+                    swarmId = swarm?.ID;
+
+                    if (!string.IsNullOrEmpty(swarmNodeId))
+                    {
+                        var node = await client.Swarm.InspectNodeAsync(swarmNodeId, cancellationToken);
+                        swarmNodeState = node?.Status?.State?.ToString()?.ToLower();
+                        swarmNodeAvailability = node?.Spec?.Availability?.ToLower();
+                        isSwarmLeader = node?.ManagerStatus?.Leader ?? false;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[DockerService.GetSystemInfo] Could not get detailed swarm info: {ex.Message}");
+                }
+            }
+
             return new SystemInfo(
                 info.OperatingSystem,
                 info.Architecture,
                 swarmActive,
-                info.ServerVersion);
+                info.ServerVersion,
+                info.Name, // Hostname
+                swarmNodeId,
+                swarmId,
+                swarmNodeAddress,
+                swarmNodeState,
+                swarmNodeAvailability,
+                isSwarmManager,
+                isSwarmLeader);
         }
-        
-        // For remote servers, use SSH to get Docker info
+
+        // For remote servers, use SSH to get Docker info with extended format
         Console.WriteLine($"[DockerService.GetSystemInfo] Using SSH for remote server {server.Name}");
         var sshClient = GetSshClient(server);
-        var command = sshClient.CreateCommand("docker info --format '{{.OperatingSystem}}|{{.Architecture}}|{{.Swarm.LocalNodeState}}|{{.ServerVersion}}'");
+        // Extended format to get more swarm info
+        var command = sshClient.CreateCommand(
+            "docker info --format '{{.OperatingSystem}}|{{.Architecture}}|{{.Swarm.LocalNodeState}}|{{.ServerVersion}}|{{.Name}}|{{.Swarm.NodeID}}|{{.Swarm.Cluster.ID}}|{{.Swarm.NodeAddr}}|{{.Swarm.ControlAvailable}}'");
         var result = await Task.Run(() => command.Execute(), cancellationToken);
-        
+
         Console.WriteLine($"[DockerService.GetSystemInfo] SSH result: {result}");
         var parts = result.Trim().Split('|');
-        
+
         var swarmState = parts.Length > 2 ? parts[2] : "unknown";
         var isSwarmActive = swarmState == "active";
         Console.WriteLine($"[DockerService.GetSystemInfo] Swarm state: {swarmState}, Active: {isSwarmActive}");
-        
+
         return new SystemInfo(
             parts.Length > 0 ? parts[0] : "Unknown",
             parts.Length > 1 ? parts[1] : "Unknown",
             isSwarmActive,
-            parts.Length > 3 ? parts[3] : "Unknown");
+            parts.Length > 3 ? parts[3] : "Unknown",
+            parts.Length > 4 && !string.IsNullOrEmpty(parts[4]) ? parts[4] : null, // Hostname
+            parts.Length > 5 && !string.IsNullOrEmpty(parts[5]) ? parts[5] : null, // SwarmNodeId
+            parts.Length > 6 && !string.IsNullOrEmpty(parts[6]) ? parts[6] : null, // SwarmId
+            parts.Length > 7 && !string.IsNullOrEmpty(parts[7]) ? parts[7] : null, // SwarmNodeAddress
+            isSwarmActive ? "ready" : null, // SwarmNodeState (simplified for SSH)
+            isSwarmActive ? "active" : null, // SwarmNodeAvailability (simplified for SSH)
+            parts.Length > 8 && parts[8].ToLower() == "true", // IsSwarmManager
+            false); // IsSwarmLeader (would need additional query)
     }
     
     private ResourceRequirements? CreateResourceRequirements(long? memoryLimit, long? cpuLimit)

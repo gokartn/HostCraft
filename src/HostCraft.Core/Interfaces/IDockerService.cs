@@ -107,7 +107,19 @@ public record NetworkInfo(string Id, string Name, string Driver, bool Attachable
 public record ContainerInspectInfo(string Id, string Name, string State, Dictionary<string, string> Labels);
 public record ServiceInspectInfo(string Id, string Name, int Replicas, Dictionary<string, string> Labels);
 public record SwarmInfo(string Id, bool IsManager, bool IsWorker, int Managers, int Workers);
-public record SystemInfo(string OperatingSystem, string Architecture, bool SwarmActive, string DockerVersion);
+public record SystemInfo(
+    string OperatingSystem,
+    string Architecture,
+    bool SwarmActive,
+    string DockerVersion,
+    string? Hostname = null,
+    string? SwarmNodeId = null,
+    string? SwarmId = null,
+    string? SwarmNodeAddress = null,
+    string? SwarmNodeState = null,
+    string? SwarmNodeAvailability = null,
+    bool IsSwarmManager = false,
+    bool IsSwarmLeader = false);
 public record ImageInfo(string Id, string Tag, long Size, DateTime Created);
 public record NodeInfo(
     string Id, 
