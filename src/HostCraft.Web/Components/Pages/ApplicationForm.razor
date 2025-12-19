@@ -75,13 +75,123 @@
                 </div>
                 
                 <div class="form-section">
-                    <h2>Docker Configuration</h2>
-                    
+                    <h2>Source Configuration</h2>
+
                     <div class="form-group">
-                        <label for="image">Docker Image *</label>
-                        <input type="text" id="image" @bind="model.Image" class="form-control" placeholder="nginx:latest" />
-                        <small class="form-hint">Format: image:tag or registry/image:tag</small>
+                        <label>Deployment Source</label>
+                        <div class="source-type-selector">
+                            <button type="button" class="source-option @(model.SourceType == "DockerImage" ? "active" : "")"
+                                    @onclick="@(() => SetSourceType("DockerImage"))">
+                                <span class="source-icon">🐳</span>
+                                <span class="source-label">Docker Image</span>
+                                <span class="source-desc">Deploy from Docker Hub or registry</span>
+                            </button>
+                            <button type="button" class="source-option @(model.SourceType == "Git" ? "active" : "")"
+                                    @onclick="@(() => SetSourceType("Git"))">
+                                <span class="source-icon">🐙</span>
+                                <span class="source-label">Git Repository</span>
+                                <span class="source-desc">Build and deploy from source code</span>
+                            </button>
+                        </div>
                     </div>
+
+                    @if (model.SourceType == "DockerImage")
+                    {
+                        <div class="form-group">
+                            <label for="image">Docker Image *</label>
+                            <input type="text" id="image" @bind="model.Image" class="form-control" placeholder="nginx:latest" />
+                            <small class="form-hint">Format: image:tag or registry/image:tag</small>
+                        </div>
+                    }
+                    else if (model.SourceType == "Git")
+                    {
+                        <div class="form-group">
+                            <label for="gitProvider">Git Provider *</label>
+                            <select id="gitProvider" @bind="selectedGitProviderId" @bind:after="OnGitProviderChanged" class="form-control">
+                                <option value="0">-- Select Git Provider --</option>
+                                @if (gitProviders != null)
+                                {
+                                    foreach (var provider in gitProviders)
+                                    {
+                                        <option value="@provider.Id">@GetProviderIcon(provider.Type) @provider.Name (@@provider.Username)</option>
+                                    }
+                                }
+                            </select>
+                            @if (gitProviders == null || !gitProviders.Any())
+                            {
+                                <small class="form-hint">
+                                    <a href="/settings/git-providers">Connect a Git provider</a> to deploy from repositories
+                                </small>
+                            }
+                        </div>
+
+                        @if (selectedGitProviderId > 0)
+                        {
+                            <div class="form-group">
+                                <label for="repository">Repository *</label>
+                                @if (loadingRepos)
+                                {
+                                    <div class="loading-inline"><span class="spinner-sm"></span> Loading repositories...</div>
+                                }
+                                else
+                                {
+                                    <select id="repository" @bind="model.GitRepository" @bind:after="OnRepositoryChanged" class="form-control">
+                                        <option value="">-- Select Repository --</option>
+                                        @if (gitRepositories != null)
+                                        {
+                                            foreach (var repo in gitRepositories)
+                                            {
+                                                <option value="@repo.FullName">@repo.FullName @(repo.IsPrivate ? "🔒" : "")</option>
+                                            }
+                                        }
+                                    </select>
+                                }
+                            </div>
+
+                            @if (!string.IsNullOrEmpty(model.GitRepository))
+                            {
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label for="branch">Branch *</label>
+                                        @if (loadingBranches)
+                                        {
+                                            <div class="loading-inline"><span class="spinner-sm"></span> Loading branches...</div>
+                                        }
+                                        else
+                                        {
+                                            <select id="branch" @bind="model.GitBranch" class="form-control">
+                                                @if (gitBranches != null)
+                                                {
+                                                    foreach (var branch in gitBranches)
+                                                    {
+                                                        <option value="@branch">@branch</option>
+                                                    }
+                                                }
+                                            </select>
+                                        }
+                                    </div>
+
+                                    <div class="form-group">
+                                        <label for="buildPath">Dockerfile Path</label>
+                                        <input type="text" id="buildPath" @bind="model.DockerfilePath" class="form-control" placeholder="Dockerfile" />
+                                        <small class="form-hint">Path to Dockerfile (default: Dockerfile)</small>
+                                    </div>
+                                </div>
+
+                                <div class="form-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" @bind="model.AutoDeployOnPush" class="form-checkbox" />
+                                        <span>🔄 Auto-deploy on push</span>
+                                    </label>
+                                    <small class="form-hint">Automatically deploy when new commits are pushed to the selected branch</small>
+                                </div>
+                            }
+                        }
+                    }
+                </div>
+
+                <div class="form-section">
+                    <h2>Container Configuration</h2>
                     
                     <div class="form-row">
                         <div class="form-group">
@@ -262,7 +372,13 @@
     
     private List<ServerDto>? servers;
     private List<ProjectDto>? projects;
-    
+    private List<GitProviderDto>? gitProviders;
+    private List<GitRepositoryDto>? gitRepositories;
+    private List<string>? gitBranches;
+    private int selectedGitProviderId;
+    private bool loadingRepos;
+    private bool loadingBranches;
+
     private bool showCreateProjectModal = false;
     private bool isCreatingProject = false;
     private string newProjectName = "";
@@ -283,8 +399,16 @@
     {
         try
         {
-            servers = await Http.GetFromJsonAsync<List<ServerDto>>("api/applications/servers/0");
-            projects = await Http.GetFromJsonAsync<List<ProjectDto>>("api/applications/projects");
+            // Load servers, projects, and git providers in parallel
+            var serversTask = Http.GetFromJsonAsync<List<ServerDto>>("api/applications/servers/0");
+            var projectsTask = Http.GetFromJsonAsync<List<ProjectDto>>("api/applications/projects");
+            var gitProvidersTask = Http.GetFromJsonAsync<List<GitProviderDto>>("api/gitproviders");
+
+            await Task.WhenAll(serversTask, projectsTask, gitProvidersTask);
+
+            servers = serversTask.Result;
+            projects = projectsTask.Result;
+            gitProviders = gitProvidersTask.Result?.Where(p => p.IsActive).ToList();
             
             if (IsEditMode && Id.HasValue)
             {
@@ -357,7 +481,105 @@
     {
         networks.RemoveAt(index);
     }
-    
+
+    private void SetSourceType(string type)
+    {
+        model.SourceType = type;
+        if (type == "DockerImage")
+        {
+            // Clear Git-related fields
+            selectedGitProviderId = 0;
+            model.GitProviderId = null;
+            model.GitRepository = null;
+            model.GitBranch = null;
+            model.DockerfilePath = null;
+            gitRepositories = null;
+            gitBranches = null;
+        }
+        else
+        {
+            // Clear Docker image field
+            model.Image = "";
+        }
+    }
+
+    private async Task OnGitProviderChanged()
+    {
+        model.GitProviderId = selectedGitProviderId > 0 ? selectedGitProviderId : null;
+        model.GitRepository = null;
+        model.GitBranch = null;
+        gitRepositories = null;
+        gitBranches = null;
+
+        if (selectedGitProviderId > 0)
+        {
+            loadingRepos = true;
+            StateHasChanged();
+
+            try
+            {
+                gitRepositories = await Http.GetFromJsonAsync<List<GitRepositoryDto>>($"api/gitproviders/{selectedGitProviderId}/repositories");
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Error loading repositories");
+            }
+            finally
+            {
+                loadingRepos = false;
+                StateHasChanged();
+            }
+        }
+    }
+
+    private async Task OnRepositoryChanged()
+    {
+        gitBranches = null;
+        model.GitBranch = null;
+
+        if (!string.IsNullOrEmpty(model.GitRepository) && selectedGitProviderId > 0)
+        {
+            loadingBranches = true;
+            StateHasChanged();
+
+            try
+            {
+                // Repository is in "owner/repo" format, split it for the API
+                var repoParts = model.GitRepository.Split('/');
+                var owner = repoParts.Length > 1 ? repoParts[0] : model.GitRepository;
+                var repo = repoParts.Length > 1 ? repoParts[1] : model.GitRepository;
+                gitBranches = await Http.GetFromJsonAsync<List<string>>($"api/gitproviders/{selectedGitProviderId}/repositories/{owner}/{repo}/branches");
+
+                // Auto-select first branch (usually main/master)
+                if (gitBranches?.Any() == true)
+                {
+                    model.GitBranch = gitBranches.First();
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Error loading branches");
+            }
+            finally
+            {
+                loadingBranches = false;
+                StateHasChanged();
+            }
+        }
+    }
+
+    private string GetProviderIcon(string type)
+    {
+        return type.ToLowerInvariant() switch
+        {
+            "github" => "🐙",
+            "gitlab" => "🦊",
+            "bitbucket" => "🪣",
+            "gitea" => "🍵",
+            _ => "📦"
+        };
+    }
+
     private async Task Deploy()
     {
         errorMessage = null;
@@ -380,13 +602,35 @@
             errorMessage = "Please select a project";
             return;
         }
-        
-        if (string.IsNullOrWhiteSpace(model.Image))
+
+        // Source-specific validation
+        if (model.SourceType == "DockerImage")
         {
-            errorMessage = "Docker image is required";
-            return;
+            if (string.IsNullOrWhiteSpace(model.Image))
+            {
+                errorMessage = "Docker image is required";
+                return;
+            }
         }
-        
+        else if (model.SourceType == "Git")
+        {
+            if (selectedGitProviderId == 0)
+            {
+                errorMessage = "Please select a Git provider";
+                return;
+            }
+            if (string.IsNullOrWhiteSpace(model.GitRepository))
+            {
+                errorMessage = "Please select a repository";
+                return;
+            }
+            if (string.IsNullOrWhiteSpace(model.GitBranch))
+            {
+                errorMessage = "Please select a branch";
+                return;
+            }
+        }
+
         isSubmitting = true;
         StateHasChanged();
         
@@ -404,7 +648,7 @@
                 model.Name,
                 model.ServerId,
                 model.ProjectId,
-                model.Image,
+                model.SourceType == "DockerImage" ? model.Image : null,
                 model.Replicas,
                 envVars.Where(e => !string.IsNullOrWhiteSpace(e.Key)).ToDictionary(e => e.Key, e => e.Value),
                 networks.Where(n => !string.IsNullOrWhiteSpace(n)).ToList(),
@@ -413,9 +657,15 @@
                 model.AdditionalDomains,
                 model.EnableHttps,
                 model.ForceHttps,
-                model.LetsEncryptEmail
+                model.LetsEncryptEmail,
+                model.SourceType,
+                model.GitProviderId,
+                model.GitRepository,
+                model.GitBranch,
+                model.DockerfilePath ?? "Dockerfile",
+                model.AutoDeployOnPush
             );
-            
+
             var response = await Http.PostAsJsonAsync("api/applications", request);
             
             if (response.IsSuccessStatusCode)
@@ -516,7 +766,13 @@
         public string? Description { get; set; }
         public int ServerId { get; set; }
         public int ProjectId { get; set; }
+        public string SourceType { get; set; } = "DockerImage";
         public string Image { get; set; } = "";
+        public int? GitProviderId { get; set; }
+        public string? GitRepository { get; set; }
+        public string? GitBranch { get; set; }
+        public string? DockerfilePath { get; set; }
+        public bool AutoDeployOnPush { get; set; } = true;
         public int? Port { get; set; }
         public int Replicas { get; set; } = 1;
         public string? Domain { get; set; }
@@ -538,7 +794,7 @@
         string Name,
         int ServerId,
         int ProjectId,
-        string Image,
+        string? Image,
         int? Replicas,
         Dictionary<string, string>? EnvironmentVariables,
         List<string>? Networks,
@@ -547,7 +803,13 @@
         string? AdditionalDomains = null,
         bool EnableHttps = true,
         bool ForceHttps = true,
-        string? LetsEncryptEmail = null);
+        string? LetsEncryptEmail = null,
+        string? SourceType = "DockerImage",
+        int? GitProviderId = null,
+        string? GitRepository = null,
+        string? GitBranch = null,
+        string? DockerfilePath = null,
+        bool AutoDeployOnPush = true);
     private record ApplicationWithDeploymentsDto(
         int Id,
         string Name,
@@ -572,4 +834,6 @@
         DateTime CreatedAt,
         List<DeploymentInfo> Deployments);
     private record DeploymentInfo(int Id, DeploymentStatus Status, string? ContainerId, string? ServiceId, DateTime StartedAt, DateTime? FinishedAt, string? ErrorMessage);
+    private record GitProviderDto(int Id, string Name, string Type, string? Username, bool IsActive);
+    private record GitRepositoryDto(string Owner, string Name, string FullName, string? Description, string DefaultBranch, string CloneUrl, bool IsPrivate, DateTime? UpdatedAt);
 }

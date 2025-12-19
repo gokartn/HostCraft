@@ -926,11 +926,21 @@ body {
     gap: var(--space-md);
 }
 
-.form-text {
+.form-text,
+.form-hint {
     display: block;
     font-size: 0.75rem;
     color: var(--text-secondary);
     margin-top: var(--space-xs);
+}
+
+.form-hint a {
+    color: var(--accent-primary);
+    text-decoration: none;
+}
+
+.form-hint a:hover {
+    text-decoration: underline;
 }
 
 /* Radio Card Options */
@@ -1071,6 +1081,69 @@ body {
 
 .alert strong {
     font-weight: 600;
+}
+
+/* Source Type Selector */
+.source-type-selector {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-md);
+}
+
+.source-option {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-sm);
+    padding: var(--space-lg);
+    background: var(--bg-tertiary);
+    border: 2px solid rgba(255, 255, 255, 0.1);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    color: var(--text-secondary);
+}
+
+.source-option:hover {
+    border-color: rgba(99, 102, 241, 0.3);
+    background: var(--bg-elevated);
+}
+
+.source-option.active {
+    border-color: var(--accent-primary);
+    background: rgba(99, 102, 241, 0.1);
+    color: var(--text-primary);
+}
+
+.source-icon {
+    font-size: 2rem;
+}
+
+.source-label {
+    font-weight: 600;
+    font-size: 1rem;
+}
+
+.source-desc {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    text-align: center;
+}
+
+.source-option.active .source-desc {
+    color: var(--text-secondary);
+}
+
+/* Loading Inline */
+.loading-inline {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    padding: var(--space-md);
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-md);
+    color: var(--text-secondary);
+    font-size: 0.875rem;
 }
 
 /* Spinner */
