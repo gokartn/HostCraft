@@ -1,7 +1,11 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.IdentityModel.Tokens;
+using System.Text;
 using HostCraft.Infrastructure.Persistence;
 using HostCraft.Core.Interfaces;
 using HostCraft.Infrastructure.Docker;
+using HostCraft.Infrastructure.Auth;
 using Serilog;
 using Serilog.Events;
 
@@ -73,6 +77,49 @@ builder.Services.AddScoped<IStackService, StackService>();
 // Deployment orchestration
 builder.Services.AddScoped<IDeploymentService, DeploymentService>();
 
+// Authentication service
+builder.Services.AddScoped<IAuthService, AuthService>();
+
+// Health monitoring service
+builder.Services.AddHttpClient<IHealthMonitorService, HostCraft.Infrastructure.Health.HealthMonitorService>();
+
+// Backup service
+builder.Services.AddScoped<IBackupService, HostCraft.Infrastructure.Backups.BackupService>();
+
+// Certificate/SSL service
+builder.Services.AddHttpClient<ICertificateService, HostCraft.Infrastructure.Certificates.CertificateService>();
+
+// Security services (encryption and secret management)
+builder.Services.AddSingleton<IEncryptionService, HostCraft.Infrastructure.Security.EncryptionService>();
+builder.Services.AddScoped<ISecretManager, HostCraft.Infrastructure.Security.SecretManager>();
+
+// JWT Authentication
+var jwtSecret = builder.Configuration["Jwt:Secret"] ?? GenerateDefaultJwtSecret();
+var jwtIssuer = builder.Configuration["Jwt:Issuer"] ?? "HostCraft";
+var jwtAudience = builder.Configuration["Jwt:Audience"] ?? "HostCraft";
+
+builder.Services.AddAuthentication(options =>
+{
+    options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
+    options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
+})
+.AddJwtBearer(options =>
+{
+    options.TokenValidationParameters = new TokenValidationParameters
+    {
+        ValidateIssuerSigningKey = true,
+        IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSecret)),
+        ValidateIssuer = true,
+        ValidIssuer = jwtIssuer,
+        ValidateAudience = true,
+        ValidAudience = jwtAudience,
+        ValidateLifetime = true,
+        ClockSkew = TimeSpan.Zero
+    };
+});
+
+builder.Services.AddAuthorization();
+
 // CORS for development
 builder.Services.AddCors(options =>
 {
@@ -108,6 +155,10 @@ if (app.Environment.IsDevelopment())
 // Don't use HTTPS redirection - running behind reverse proxy
 // app.UseHttpsRedirection();
 
+// Authentication & Authorization middleware
+app.UseAuthentication();
+app.UseAuthorization();
+
 app.MapControllers();
 
 // Health check endpoint
@@ -124,4 +175,13 @@ catch (Exception ex)
 finally
 {
     Log.CloseAndFlush();
+}
+
+// Helper to generate a secure JWT secret if not configured
+static string GenerateDefaultJwtSecret()
+{
+    var bytes = new byte[64];
+    using var rng = System.Security.Cryptography.RandomNumberGenerator.Create();
+    rng.GetBytes(bytes);
+    return Convert.ToBase64String(bytes);
 }

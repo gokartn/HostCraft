@@ -11,7 +11,10 @@
       "Bash(del docsFEATURE-PARITY-COMPARISON.md)",
       "Bash(rm:*)",
       "Bash(rmdir:*)",
-      "Bash(dotnet build:*)"
+      "Bash(dotnet build:*)",
+      "Bash(dotnet add package:*)",
+      "Bash(dotnet add:*)",
+      "Bash(ren:*)"
     ]
   }
 }

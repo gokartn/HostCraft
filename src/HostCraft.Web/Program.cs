@@ -107,8 +107,9 @@ app.MapStaticAssets();
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 
-// Map SignalR hub for terminal
+// Map SignalR hubs
 app.MapHub<TerminalHub>("/terminalhub");
+app.MapHub<LogStreamHub>("/logstreamhub");
 
     app.Run();
 }

@@ -169,7 +169,7 @@ public class SwarmDeploymentService : ISwarmDeploymentService
     }
     
     public async Task<bool> RollbackServiceAsync(
-        Application application, 
+        Application application,
         CancellationToken cancellationToken = default)
     {
         try
@@ -179,15 +179,26 @@ public class SwarmDeploymentService : ISwarmDeploymentService
                 _logger.LogWarning("No service ID found for {AppName}", application.Name);
                 return false;
             }
-            
-            _logger.LogInformation("Rolling back service {ServiceName}", application.Name);
-            
-            // Docker Swarm services support automatic rollback through UpdateConfig
-            // For manual rollback, we need to get the previous spec and apply it
-            // This is a simplified version - in production, you'd store previous specs
-            
-            _logger.LogWarning("Rollback not fully implemented - requires previous spec storage");
-            return false;
+
+            _logger.LogInformation("Rolling back service {ServiceName} (ID: {ServiceId})",
+                application.Name, application.SwarmServiceId);
+
+            var result = await _dockerService.RollbackServiceAsync(
+                application.Server,
+                application.SwarmServiceId,
+                cancellationToken);
+
+            if (result)
+            {
+                _logger.LogInformation("Successfully rolled back service {ServiceName}", application.Name);
+            }
+            else
+            {
+                _logger.LogWarning("Rollback failed for service {ServiceName} - no previous spec available",
+                    application.Name);
+            }
+
+            return result;
         }
         catch (Exception ex)
         {

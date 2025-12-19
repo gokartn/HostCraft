@@ -23,6 +23,7 @@ public interface IDockerService : IDisposable
     // Service operations (Swarm mode)
     Task<string> CreateServiceAsync(Server server, CreateServiceRequest request, CancellationToken cancellationToken = default);
     Task<bool> UpdateServiceAsync(Server server, string serviceId, UpdateServiceRequest request, CancellationToken cancellationToken = default);
+    Task<bool> RollbackServiceAsync(Server server, string serviceId, CancellationToken cancellationToken = default);
     Task<bool> RemoveServiceAsync(Server server, string serviceId, CancellationToken cancellationToken = default);
     Task<IEnumerable<ServiceInfo>> ListServicesAsync(Server server, CancellationToken cancellationToken = default);
     Task<ServiceInspectInfo?> InspectServiceAsync(Server server, string serviceId, CancellationToken cancellationToken = default);

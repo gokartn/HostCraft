@@ -387,7 +387,32 @@ public class DockerService : IDockerService, IDisposable
         await client.Swarm.UpdateServiceAsync(serviceId, new ServiceUpdateParameters { Service = spec, Version = Convert.ToInt64(service.Version.Index) }, cancellationToken);
         return true;
     }
-    
+
+    public async Task<bool> RollbackServiceAsync(Server server, string serviceId, CancellationToken cancellationToken = default)
+    {
+        var client = GetClient(server);
+        var service = await client.Swarm.InspectServiceAsync(serviceId, cancellationToken);
+
+        // Check if there is a previous spec to rollback to
+        if (service.PreviousSpec == null)
+        {
+            // No previous spec available - cannot rollback
+            return false;
+        }
+
+        // Update the service with the previous spec, triggering a rollback
+        var updateParams = new ServiceUpdateParameters
+        {
+            Service = service.PreviousSpec,
+            Version = Convert.ToInt64(service.Version.Index),
+            Rollback = "previous" // Signal Docker to use rollback logic
+        };
+
+        await client.Swarm.UpdateServiceAsync(serviceId, updateParams, cancellationToken);
+
+        return true;
+    }
+
     public async Task<bool> RemoveServiceAsync(Server server, string serviceId, CancellationToken cancellationToken = default)
     {
         var client = GetClient(server);
