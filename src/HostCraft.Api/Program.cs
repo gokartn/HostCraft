@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.IdentityModel.Tokens;
 using System.Text;
 using HostCraft.Infrastructure.Persistence;
@@ -131,7 +132,19 @@ builder.Services.AddCors(options =>
     });
 });
 
+// Configure forwarded headers for reverse proxy support
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto | ForwardedHeaders.XForwardedHost;
+    // Trust all proxies in Docker/Swarm environment
+    options.KnownIPNetworks.Clear();
+    options.KnownProxies.Clear();
+});
+
 var app = builder.Build();
+
+// Use forwarded headers (must be first in pipeline for reverse proxy)
+app.UseForwardedHeaders();
 
 // Auto-migrate database and seed
 using (var scope = app.Services.CreateScope())

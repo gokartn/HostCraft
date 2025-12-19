@@ -59,7 +59,7 @@ public class GitProvidersController : ControllerBase
     {
         try
         {
-            var redirectUri = $"{Request.Scheme}://{Request.Host}/api/gitproviders/callback";
+            var redirectUri = await GetPublicCallbackUrl();
             var authUrl = await _gitProviderService.GetAuthorizationUrlAsync(type, redirectUri, apiUrl);
 
             return new AuthUrlResponse(authUrl);
@@ -74,6 +74,38 @@ public class GitProvidersController : ControllerBase
             _logger.LogError(ex, "Failed to generate auth URL for {Type}", type);
             return BadRequest(new { error = ex.Message });
         }
+    }
+
+    /// <summary>
+    /// Gets the public callback URL for OAuth, using SystemSettings domain or forwarded headers.
+    /// </summary>
+    private async Task<string> GetPublicCallbackUrl()
+    {
+        // First, try to get the configured HostCraft domain from SystemSettings
+        var settings = await _context.SystemSettings.FirstOrDefaultAsync();
+        if (settings != null && !string.IsNullOrEmpty(settings.HostCraftDomain))
+        {
+            var scheme = settings.HostCraftDomain.Contains("localhost") ? "http" : "https";
+            var domain = settings.HostCraftDomain.TrimEnd('/');
+            if (!domain.StartsWith("http"))
+            {
+                return $"{scheme}://{domain}/api/gitproviders/callback";
+            }
+            return $"{domain}/api/gitproviders/callback";
+        }
+
+        // Fall back to forwarded headers (X-Forwarded-Host, X-Forwarded-Proto)
+        var forwardedHost = Request.Headers["X-Forwarded-Host"].FirstOrDefault();
+        var forwardedProto = Request.Headers["X-Forwarded-Proto"].FirstOrDefault() ?? "https";
+
+        if (!string.IsNullOrEmpty(forwardedHost))
+        {
+            return $"{forwardedProto}://{forwardedHost}/api/gitproviders/callback";
+        }
+
+        // Last resort: use request info (may not work behind reverse proxy)
+        _logger.LogWarning("No HostCraft domain configured and no forwarded headers - OAuth callback URL may be incorrect");
+        return $"{Request.Scheme}://{Request.Host}/api/gitproviders/callback";
     }
 
     /// <summary>
@@ -94,11 +126,14 @@ public class GitProvidersController : ControllerBase
 
             // Get userId from authentication context (defaults to 1 for single-user mode)
             int userId = GetCurrentUserId();
-            
+
             // Parse state to get provider type and optional API URL
             var stateData = ParseState(state);
-            var redirectUri = $"{Request.Scheme}://{Request.Host}/api/gitproviders/callback";
-            
+
+            // IMPORTANT: Use the same public callback URL that was sent to the OAuth provider
+            // This must match exactly or the token exchange will fail
+            var redirectUri = await GetPublicCallbackUrl();
+
             var provider = await _gitProviderService.ConnectProviderAsync(
                 stateData.Type,
                 code,
