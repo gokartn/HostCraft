@@ -304,6 +304,11 @@ public class ServersController : ControllerBase
                                         _logger.LogInformation("Successfully joined {ServerName} to swarm", serverToValidate.Name);
                                         serverToValidate.SwarmNodeState = "ready";
                                         serverToValidate.SwarmNodeAvailability = "active";
+                                        // Store join info for auto-rejoin after reboot
+                                        serverToValidate.SwarmJoinToken = workerToken;
+                                        serverToValidate.SwarmManagerAddress = managerAddress;
+                                        serverToValidate.IsSwarmWorker = true;
+                                        serverToValidate.Type = ServerType.SwarmWorker;
                                         await scopedContext.SaveChangesAsync();
                                     }
                                     else
@@ -793,22 +798,67 @@ public class ServersController : ControllerBase
                 var systemInfo = await _dockerService.GetSystemInfoAsync(server);
                 server.Status = ServerStatus.Online;
                 server.LastHealthCheck = DateTime.UtcNow;
-                
-                // Update server type if Swarm is detected
-                if (systemInfo.SwarmActive && server.Type == ServerType.Standalone)
+                var rejoined = false;
+
+                // Check if this was a swarm worker that lost connection and needs to rejoin
+                var wasSwarmWorker = server.IsSwarmWorker || server.Type == ServerType.SwarmWorker;
+                if (!systemInfo.SwarmActive && wasSwarmWorker &&
+                    !string.IsNullOrEmpty(server.SwarmJoinToken) &&
+                    !string.IsNullOrEmpty(server.SwarmManagerAddress))
                 {
-                    _logger.LogInformation("Swarm detected on server {ServerName}, updating type to SwarmManager", server.Name);
-                    server.Type = ServerType.SwarmManager;
-                    server.IsSwarmManager = true;
+                    _logger.LogWarning(
+                        "Server {ServerName} was a swarm worker but lost connection. Attempting to rejoin...",
+                        server.Name);
+
+                    try
+                    {
+                        // Leave any stale swarm state
+                        await _sshService.ExecuteCommandAsync(server, "docker swarm leave --force");
+
+                        // Rejoin the swarm
+                        var joinCommand = $"docker swarm join --token {server.SwarmJoinToken} {server.SwarmManagerAddress}";
+                        var joinResult = await _sshService.ExecuteCommandAsync(server, joinCommand);
+
+                        if (joinResult.ExitCode == 0 || joinResult.Output.Contains("This node joined a swarm"))
+                        {
+                            _logger.LogInformation("Successfully rejoined {ServerName} to swarm", server.Name);
+                            rejoined = true;
+                            // Re-fetch system info
+                            systemInfo = await _dockerService.GetSystemInfoAsync(server);
+                        }
+                    }
+                    catch (Exception rejoinEx)
+                    {
+                        _logger.LogError(rejoinEx, "Failed to rejoin {ServerName} to swarm", server.Name);
+                    }
                 }
-                
+
+                // Update server type if Swarm is detected
+                if (systemInfo.SwarmActive)
+                {
+                    if (server.Type == ServerType.Standalone)
+                    {
+                        _logger.LogInformation("Swarm detected on server {ServerName}, updating type to SwarmManager", server.Name);
+                        server.Type = ServerType.SwarmManager;
+                        server.IsSwarmManager = true;
+                    }
+                    // Update swarm info
+                    server.SwarmNodeId = systemInfo.SwarmNodeId;
+                    server.SwarmNodeState = systemInfo.SwarmNodeState;
+                    server.SwarmNodeAvailability = systemInfo.SwarmNodeAvailability;
+                    server.ActualHostname = systemInfo.Hostname;
+                    server.SwarmAdvertiseAddress = systemInfo.SwarmNodeAddress;
+                }
+
                 await _context.SaveChangesAsync();
-                
+
                 return new ServerValidationResult
                 {
                     IsValid = true,
                     SystemInfo = systemInfo,
-                    Message = "Server is online and accessible"
+                    Message = rejoined
+                        ? "Server rejoined swarm successfully"
+                        : "Server is online and accessible"
                 };
             }
             else
@@ -955,7 +1005,7 @@ public class ServersController : ControllerBase
     }
     
     /// <summary>
-    /// Refresh server's swarm status detection
+    /// Refresh server's swarm status detection. Auto-rejoins workers that lost swarm connection.
     /// </summary>
     [HttpPost("{id}/refresh-swarm-status")]
     public async Task<IActionResult> RefreshSwarmStatus(int id)
@@ -973,6 +1023,57 @@ public class ServersController : ControllerBase
         {
             var systemInfo = await _dockerService.GetSystemInfoAsync(server);
             var previousType = server.Type;
+            var wasSwarmWorker = server.IsSwarmWorker || server.Type == ServerType.SwarmWorker;
+            var rejoined = false;
+            string? rejoinError = null;
+
+            // Check if this was a swarm worker that lost connection and needs to rejoin
+            if (!systemInfo.SwarmActive && wasSwarmWorker &&
+                !string.IsNullOrEmpty(server.SwarmJoinToken) &&
+                !string.IsNullOrEmpty(server.SwarmManagerAddress))
+            {
+                _logger.LogWarning(
+                    "Server {ServerName} was a swarm worker but lost connection. Attempting to rejoin using stored token...",
+                    server.Name);
+
+                try
+                {
+                    // First, leave any stale swarm state
+                    try
+                    {
+                        var leaveResult = await _sshService.ExecuteCommandAsync(server, "docker swarm leave --force");
+                        _logger.LogInformation("Left stale swarm state: {Output}", leaveResult.Output);
+                    }
+                    catch (Exception leaveEx)
+                    {
+                        _logger.LogDebug(leaveEx, "Swarm leave failed (may not have been in swarm)");
+                    }
+
+                    // Try to rejoin the swarm
+                    var joinCommand = $"docker swarm join --token {server.SwarmJoinToken} {server.SwarmManagerAddress}";
+                    var joinResult = await _sshService.ExecuteCommandAsync(server, joinCommand);
+
+                    if (joinResult.ExitCode == 0 || joinResult.Output.Contains("This node joined a swarm"))
+                    {
+                        _logger.LogInformation("Successfully rejoined {ServerName} to swarm at {ManagerAddress}",
+                            server.Name, server.SwarmManagerAddress);
+                        rejoined = true;
+
+                        // Re-fetch system info after rejoin
+                        systemInfo = await _dockerService.GetSystemInfoAsync(server);
+                    }
+                    else
+                    {
+                        rejoinError = joinResult.Error ?? joinResult.Output;
+                        _logger.LogError("Failed to rejoin {ServerName} to swarm: {Error}", server.Name, rejoinError);
+                    }
+                }
+                catch (Exception rejoinEx)
+                {
+                    rejoinError = rejoinEx.Message;
+                    _logger.LogError(rejoinEx, "Error during swarm rejoin for {ServerName}", server.Name);
+                }
+            }
 
             UpdateServerFromSystemInfo(server, systemInfo);
             await _context.SaveChangesAsync();
@@ -983,13 +1084,17 @@ public class ServersController : ControllerBase
 
             return Ok(new
             {
-                message = server.Type != previousType
-                    ? $"Server updated from {previousType} to {server.Type}"
-                    : $"Server is {server.Type}",
+                message = rejoined
+                    ? $"Server rejoined swarm successfully"
+                    : server.Type != previousType
+                        ? $"Server updated from {previousType} to {server.Type}"
+                        : $"Server is {server.Type}",
                 swarmActive = systemInfo.SwarmActive,
                 hostname = systemInfo.Hostname,
                 nodeId = systemInfo.SwarmNodeId,
-                nodeAddress = systemInfo.SwarmNodeAddress
+                nodeAddress = systemInfo.SwarmNodeAddress,
+                rejoined,
+                rejoinError
             });
         }
         catch (Exception ex)
@@ -1430,9 +1535,12 @@ public class ServersController : ControllerBase
                                             if (result.ExitCode == 0 || result.Output.Contains("This node joined a swarm"))
                                             {
                                                 logger.LogInformation("Successfully joined {ServerName} to swarm after auto-configure", server.Name);
-                                                
-                                                // Store the manager address for future reference
+
+                                                // Store the manager address and join token for future auto-rejoin
                                                 server.SwarmManagerAddress = managerAddress;
+                                                server.SwarmJoinToken = workerToken;
+                                                server.IsSwarmWorker = true;
+                                                server.Type = ServerType.SwarmWorker;
                                                 await context.SaveChangesAsync();
                                             }
                                             else if (result.Output.Contains("This node is already part of a swarm"))
