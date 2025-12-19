@@ -6,12 +6,18 @@ namespace HostCraft.Core.Entities;
 public class SystemSettings
 {
     public int Id { get; set; }
-    
+
     /// <summary>
-    /// Domain for accessing the HostCraft control panel
+    /// Domain for accessing the HostCraft control panel (Web UI)
     /// </summary>
     public string? HostCraftDomain { get; set; }
-    
+
+    /// <summary>
+    /// Domain for accessing the HostCraft API (for OAuth callbacks, webhooks, etc.)
+    /// If not set, defaults to HostCraftDomain with port 5100 or assumes API is at same domain /api path
+    /// </summary>
+    public string? HostCraftApiDomain { get; set; }
+
     /// <summary>
     /// Enable HTTPS for HostCraft UI with Let's Encrypt
     /// </summary>

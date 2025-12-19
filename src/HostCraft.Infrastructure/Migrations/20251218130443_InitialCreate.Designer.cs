@@ -827,6 +827,10 @@ namespace HostCraft.Infrastructure.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasDefaultValueSql("CURRENT_TIMESTAMP");
 
+                    b.Property<string>("HostCraftApiDomain")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
                     b.Property<string>("HostCraftDomain")
                         .HasMaxLength(255)
                         .HasColumnType("character varying(255)");

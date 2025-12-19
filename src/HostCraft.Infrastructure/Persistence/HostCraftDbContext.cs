@@ -282,6 +282,7 @@ public class HostCraftDbContext : DbContext
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Id).ValueGeneratedNever(); // We'll use Id = 1 always (singleton)
             entity.Property(e => e.HostCraftDomain).HasMaxLength(255);
+            entity.Property(e => e.HostCraftApiDomain).HasMaxLength(255);
             entity.Property(e => e.HostCraftLetsEncryptEmail).HasMaxLength(255);
             entity.Property(e => e.CertificateStatus).HasMaxLength(100);
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");

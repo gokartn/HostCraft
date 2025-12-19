@@ -216,7 +216,7 @@ namespace HostCraft.Infrastructure.Migrations
                     b.HasIndex("ServerId", "Name")
                         .IsUnique();
 
-                    b.ToTable("Applications");
+                    b.ToTable("Applications", (string)null);
                 });
 
             modelBuilder.Entity("HostCraft.Core.Entities.Backup", b =>
@@ -286,7 +286,7 @@ namespace HostCraft.Infrastructure.Migrations
 
                     b.HasIndex("VolumeId");
 
-                    b.ToTable("Backups");
+                    b.ToTable("Backups", (string)null);
                 });
 
             modelBuilder.Entity("HostCraft.Core.Entities.Certificate", b =>
@@ -342,7 +342,7 @@ namespace HostCraft.Infrastructure.Migrations
 
                     b.HasIndex("ApplicationId");
 
-                    b.ToTable("Certificates");
+                    b.ToTable("Certificates", (string)null);
                 });
 
             modelBuilder.Entity("HostCraft.Core.Entities.Deployment", b =>
@@ -420,7 +420,7 @@ namespace HostCraft.Infrastructure.Migrations
                     b.HasIndex("Uuid")
                         .IsUnique();
 
-                    b.ToTable("Deployments");
+                    b.ToTable("Deployments", (string)null);
                 });
 
             modelBuilder.Entity("HostCraft.Core.Entities.DeploymentLog", b =>
@@ -451,7 +451,7 @@ namespace HostCraft.Infrastructure.Migrations
 
                     b.HasIndex("DeploymentId");
 
-                    b.ToTable("DeploymentLogs");
+                    b.ToTable("DeploymentLogs", (string)null);
                 });
 
             modelBuilder.Entity("HostCraft.Core.Entities.EnvironmentVariable", b =>
@@ -487,51 +487,7 @@ namespace HostCraft.Infrastructure.Migrations
                     b.HasIndex("ApplicationId", "Key")
                         .IsUnique();
 
-                    b.ToTable("EnvironmentVariables");
-                });
-
-            modelBuilder.Entity("HostCraft.Core.Entities.GitProviderSettings", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<string>("ApiUrl")
-                        .HasColumnType("text");
-
-                    b.Property<string>("ClientId")
-                        .HasColumnType("text");
-
-                    b.Property<string>("ClientSecret")
-                        .HasColumnType("text");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("timestamp with time zone")
-                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
-
-                    b.Property<bool>("IsEnabled")
-                        .HasColumnType("boolean");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.Property<int>("Type")
-                        .HasColumnType("integer");
-
-                    b.Property<DateTime?>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("Type", "ApiUrl")
-                        .IsUnique();
-
-                    b.ToTable("GitProviderSettings");
+                    b.ToTable("EnvironmentVariables", (string)null);
                 });
 
             modelBuilder.Entity("HostCraft.Core.Entities.GitProvider", b =>
@@ -594,7 +550,7 @@ namespace HostCraft.Infrastructure.Migrations
 
                     b.HasIndex("UserId");
 
-                    b.ToTable("GitProviders");
+                    b.ToTable("GitProviders", (string)null);
                 });
 
             modelBuilder.Entity("HostCraft.Core.Entities.HealthCheck", b =>
@@ -636,7 +592,7 @@ namespace HostCraft.Infrastructure.Migrations
 
                     b.HasIndex("ServerId");
 
-                    b.ToTable("HealthChecks");
+                    b.ToTable("HealthChecks", (string)null);
                 });
 
             modelBuilder.Entity("HostCraft.Core.Entities.PrivateKey", b =>
@@ -669,7 +625,7 @@ namespace HostCraft.Infrastructure.Migrations
                     b.HasIndex("Name")
                         .IsUnique();
 
-                    b.ToTable("PrivateKeys");
+                    b.ToTable("PrivateKeys", (string)null);
                 });
 
             modelBuilder.Entity("HostCraft.Core.Entities.Project", b =>
@@ -706,7 +662,7 @@ namespace HostCraft.Infrastructure.Migrations
                     b.HasIndex("Uuid")
                         .IsUnique();
 
-                    b.ToTable("Projects");
+                    b.ToTable("Projects", (string)null);
                 });
 
             modelBuilder.Entity("HostCraft.Core.Entities.Region", b =>
@@ -746,7 +702,7 @@ namespace HostCraft.Infrastructure.Migrations
                     b.HasIndex("Code")
                         .IsUnique();
 
-                    b.ToTable("Regions");
+                    b.ToTable("Regions", (string)null);
                 });
 
             modelBuilder.Entity("HostCraft.Core.Entities.Server", b =>
@@ -829,15 +785,6 @@ namespace HostCraft.Infrastructure.Migrations
                     b.Property<string>("SwarmNodeState")
                         .HasColumnType("text");
 
-                    b.Property<string>("SwarmId")
-                        .HasColumnType("text");
-
-                    b.Property<string>("ActualHostname")
-                        .HasColumnType("text");
-
-                    b.Property<string>("SwarmAdvertiseAddress")
-                        .HasColumnType("text");
-
                     b.Property<int?>("SwarmWorkerCount")
                         .HasColumnType("integer");
 
@@ -857,7 +804,7 @@ namespace HostCraft.Infrastructure.Migrations
 
                     b.HasIndex("RegionId");
 
-                    b.ToTable("Servers");
+                    b.ToTable("Servers", (string)null);
                 });
 
             modelBuilder.Entity("HostCraft.Core.Entities.SystemSettings", b =>
@@ -876,6 +823,10 @@ namespace HostCraft.Infrastructure.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("timestamp with time zone")
                         .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<string>("HostCraftApiDomain")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
 
                     b.Property<string>("HostCraftDomain")
                         .HasMaxLength(255)
@@ -898,7 +849,7 @@ namespace HostCraft.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("SystemSettings");
+                    b.ToTable("SystemSettings", (string)null);
                 });
 
             modelBuilder.Entity("HostCraft.Core.Entities.User", b =>
@@ -945,7 +896,7 @@ namespace HostCraft.Infrastructure.Migrations
                     b.HasIndex("Uuid")
                         .IsUnique();
 
-                    b.ToTable("Users");
+                    b.ToTable("Users", (string)null);
                 });
 
             modelBuilder.Entity("HostCraft.Core.Entities.Volume", b =>
@@ -1002,7 +953,7 @@ namespace HostCraft.Infrastructure.Migrations
                     b.HasIndex("ServerId", "Name")
                         .IsUnique();
 
-                    b.ToTable("Volumes");
+                    b.ToTable("Volumes", (string)null);
                 });
 
             modelBuilder.Entity("HostCraft.Core.Entities.Application", b =>

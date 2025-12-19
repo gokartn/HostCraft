@@ -77,21 +77,55 @@ public class GitProvidersController : ControllerBase
     }
 
     /// <summary>
-    /// Gets the public callback URL for OAuth, using SystemSettings domain or forwarded headers.
+    /// Gets the public callback URL for OAuth, using SystemSettings API domain or forwarded headers.
     /// </summary>
     private async Task<string> GetPublicCallbackUrl()
     {
-        // First, try to get the configured HostCraft domain from SystemSettings
         var settings = await _context.SystemSettings.FirstOrDefaultAsync();
+
+        // First priority: Use explicitly configured API domain
+        if (settings != null && !string.IsNullOrEmpty(settings.HostCraftApiDomain))
+        {
+            var apiDomain = settings.HostCraftApiDomain.TrimEnd('/');
+            var scheme = apiDomain.Contains("localhost") ? "http" : "https";
+
+            if (apiDomain.StartsWith("http://") || apiDomain.StartsWith("https://"))
+            {
+                return $"{apiDomain}/api/gitproviders/callback";
+            }
+            return $"{scheme}://{apiDomain}/api/gitproviders/callback";
+        }
+
+        // Second priority: Derive API domain from Web domain (assume same host, port 5100)
         if (settings != null && !string.IsNullOrEmpty(settings.HostCraftDomain))
         {
-            var scheme = settings.HostCraftDomain.Contains("localhost") ? "http" : "https";
-            var domain = settings.HostCraftDomain.TrimEnd('/');
-            if (!domain.StartsWith("http"))
+            var webDomain = settings.HostCraftDomain.TrimEnd('/');
+            var scheme = webDomain.Contains("localhost") ? "http" : "https";
+
+            // Remove any existing scheme
+            if (webDomain.StartsWith("http://"))
             {
-                return $"{scheme}://{domain}/api/gitproviders/callback";
+                webDomain = webDomain.Substring(7);
             }
-            return $"{domain}/api/gitproviders/callback";
+            else if (webDomain.StartsWith("https://"))
+            {
+                webDomain = webDomain.Substring(8);
+                scheme = "https";
+            }
+
+            // Replace port 5000 with 5100, or add port 5100 if no port specified
+            if (webDomain.Contains(":5000"))
+            {
+                webDomain = webDomain.Replace(":5000", ":5100");
+            }
+            else if (!webDomain.Contains(":"))
+            {
+                // If using a domain without port (e.g., hostcraft.example.com),
+                // assume API is at same domain (routed via reverse proxy)
+                // Don't add port - let reverse proxy handle routing
+            }
+
+            return $"{scheme}://{webDomain}/api/gitproviders/callback";
         }
 
         // Fall back to forwarded headers (X-Forwarded-Host, X-Forwarded-Proto)
@@ -104,7 +138,8 @@ public class GitProvidersController : ControllerBase
         }
 
         // Last resort: use request info (may not work behind reverse proxy)
-        _logger.LogWarning("No HostCraft domain configured and no forwarded headers - OAuth callback URL may be incorrect");
+        _logger.LogWarning("No HostCraft API domain configured and no forwarded headers - OAuth callback URL may be incorrect. " +
+            "Configure HostCraft API Domain in Settings for OAuth to work correctly.");
         return $"{Request.Scheme}://{Request.Host}/api/gitproviders/callback";
     }
 

@@ -38,6 +38,7 @@ public class SystemSettingsController : ControllerBase
             return new SystemSettingsDto
             {
                 HostCraftDomain = null,
+                HostCraftApiDomain = null,
                 HostCraftEnableHttps = true,
                 HostCraftLetsEncryptEmail = null,
                 CertificateStatus = null
@@ -47,6 +48,7 @@ public class SystemSettingsController : ControllerBase
         return new SystemSettingsDto
         {
             HostCraftDomain = settings.HostCraftDomain,
+            HostCraftApiDomain = settings.HostCraftApiDomain,
             HostCraftEnableHttps = settings.HostCraftEnableHttps,
             HostCraftLetsEncryptEmail = settings.HostCraftLetsEncryptEmail,
             CertificateStatus = settings.CertificateStatus,
@@ -97,6 +99,7 @@ public class SystemSettingsController : ControllerBase
 
             // Update settings
             settings.HostCraftDomain = request.Domain;
+            settings.HostCraftApiDomain = request.ApiDomain;
             settings.HostCraftEnableHttps = request.EnableHttps;
             settings.HostCraftLetsEncryptEmail = request.LetsEncryptEmail;
             settings.ConfiguredAt = DateTime.UtcNow;
@@ -266,6 +269,7 @@ public class SystemSettingsController : ControllerBase
 
 public record ConfigureHostCraftRequest(
     string Domain,
+    string? ApiDomain,
     bool EnableHttps,
     string? LetsEncryptEmail);
 
@@ -280,6 +284,7 @@ public record ConfigureHostCraftResponse
 public record SystemSettingsDto
 {
     public string? HostCraftDomain { get; init; }
+    public string? HostCraftApiDomain { get; init; }
     public bool HostCraftEnableHttps { get; init; }
     public string? HostCraftLetsEncryptEmail { get; init; }
     public string? CertificateStatus { get; init; }

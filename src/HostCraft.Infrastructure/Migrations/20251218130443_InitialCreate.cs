@@ -68,6 +68,7 @@ namespace HostCraft.Infrastructure.Migrations
                 {
                     Id = table.Column<int>(type: "integer", nullable: false),
                     HostCraftDomain = table.Column<string>(type: "character varying(255)", maxLength: 255, nullable: true),
+                    HostCraftApiDomain = table.Column<string>(type: "character varying(255)", maxLength: 255, nullable: true),
                     HostCraftEnableHttps = table.Column<bool>(type: "boolean", nullable: false),
                     HostCraftLetsEncryptEmail = table.Column<string>(type: "character varying(255)", maxLength: 255, nullable: true),
                     ConfiguredAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: true),
