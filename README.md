@@ -127,8 +127,11 @@ HostCraft/
 │   ├── HostCraft.Core/          # Domain layer (entities, interfaces, enums)
 │   ├── HostCraft.Infrastructure/ # External integrations (Docker, SSH, Git)
 │   ├── HostCraft.Api/           # ASP.NET Core Web API
-│   ├── HostCraft.Web/           # Blazor Server UI (TODO)
-│   └── HostCraft.Shared/        # Shared DTOs (TODO)
+│   ├── HostCraft.Web/           # Blazor Server UI
+│   └── HostCraft.Shared/        # Shared DTOs
+├── tests/
+│   ├── HostCraft.Infrastructure.Tests/
+│   └── HostCraft.Api.Tests/
 ```
 
 ## 🔑 Key Features Implemented
@@ -150,10 +153,10 @@ HostCraft/
 - **DR Testing** - Dry-run failover testing without affecting production
 
 ### 🔧 Network Management (CRITICAL)
-- **Proper bridge vs overlay detection** - fixes Coolify's critical bug
+- **Proper bridge vs overlay detection** - ensures correct network types for Swarm vs standalone
 - Automatic network type selection based on server mode
 - Validation of existing networks
-- Prevents deplo
+- Prevents deployment with wrong network type
 
 ### Phase 2 - Deployment Engine
 - [ ] Deployment orchestration service implementation
@@ -246,27 +249,22 @@ HostCraft requires PostgreSQL. Configure the connection string in `appsettings.j
 ## 🐛 Known Limitations
 
 - Log streaming not yet fully implemented (MultiplexedStream handling needs work)
-- ResEnterprise HA/DR** - Built-in high availability and disaster recovery from day one
-3. **Type safety** - Strong typing prevents configuration mistakes  
-4. **Better performance** - C# is faster than PHP
-5. **Single language stack** - Blazor + ASP.NET Core
-6. **Integration potential** - Easy to integrate with existing C# projects
-7. **Production-ready** - Designed for self-hosted production deployments with real HA/DR needs
+- Real-time log streaming via WebSocket/SignalR in progress
+
+## 📝 Why HostCraft?
+
+HostCraft was built from scratch in C#/.NET to provide a modern, type-safe PaaS solution:
+
+1. **Correct network handling** - Swarm uses overlay networks, standalone uses bridge networks
+2. **Type safety** - Strong typing in C# prevents configuration mistakes
+3. **High performance** - Native .NET performance with efficient Docker.DotNet integration
+4. **Single language stack** - Blazor Server + ASP.NET Core for full-stack C#
+5. **Enterprise ready** - Built-in HA/DR architecture for production deployments
+6. **Integration friendly** - Easy to integrate with existing .NET ecosystems
 
 ## 📚 Documentation
 
-- [HA/DR Architecture](docs/HA-DR-ARCHITECTURE.md) - Comprehensive HA/DR design and best practices
-- [API Documentation](docs/API.md) - Complete API endpoint reference (coming soon)
-- [Deployment Guide](docs/DEPLOYMENT.md) - Production deployment instructions (coming soon)
-## 📝 Why HostCraft?
-
-After discovering fundamental bugs in Coolify's Docker Swarm implementation (network type mismatches, incorrect Swarm detection), we decided to build a proper solution from scratch in C#/.NET with:
-
-1. **Correct network handling** - Swarm uses overlay, standalone uses bridge
-2. **Type safety** - Strong typing prevents configuration mistakes  
-3. **Better performance** - C# is faster than PHP
-4. **Single language stack** - Blazor + ASP.NET Core
-5. **Integration potential** - Easy to integrate with existing C# projects
+Full documentation is available in the codebase. See the `CLAUDE.md` file for technical details and architecture overview.
 
 ## 📄 License
 
@@ -274,4 +272,4 @@ TBD
 
 ---
 
-*Last updated: December 13, 2025*
+*HostCraft - Self-hosted PaaS for Docker Swarm deployments*

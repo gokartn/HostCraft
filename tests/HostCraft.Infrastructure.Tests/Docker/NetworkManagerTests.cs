@@ -76,10 +76,10 @@ public class NetworkManagerTests
     }
 
     [Fact]
-    public void NetworkTypeValidation_IntegrationScenario_CoolifyBugFix()
+    public void NetworkTypeValidation_SwarmRequiresOverlay()
     {
-        // This test documents the exact bug we're fixing from Coolify
-        // Coolify creates bridge network but requires overlay for Swarm
+        // This test verifies the critical requirement that Swarm services use overlay networks
+        // Using bridge networks for Swarm services would cause cross-node communication failures
 
         // Arrange
         var swarmServer = new Server
@@ -89,12 +89,12 @@ public class NetworkManagerTests
             Type = ServerType.SwarmManager
         };
 
-        // Coolify incorrectly creates bridge network
-        var coolifyCreatedNetworkType = NetworkType.Bridge; // WRONG!
+        // A common misconfiguration is using bridge network for Swarm
+        var incorrectNetworkType = NetworkType.Bridge; // Won't work across nodes!
         var correctNetworkType = _networkManager.GetRequiredNetworkType(swarmServer);
 
         // Assert - Our logic returns the correct type
         Assert.Equal(NetworkType.Overlay, correctNetworkType);
-        Assert.NotEqual(correctNetworkType, coolifyCreatedNetworkType);
+        Assert.NotEqual(correctNetworkType, incorrectNetworkType);
     }
 }

@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(del INSTALLATION.md)",
+      "Bash(del scriptsREADME.md)",
+      "Bash(del docsSECURITY-BEST-PRACTICES.md)",
+      "Bash(del docsTRAEFIK-SETUP.md)",
+      "Bash(del docsGITHUB-INTEGRATION.md)",
+      "Bash(del docsHA-DR-ARCHITECTURE.md)",
+      "Bash(del docsDOCKER-SWARM-FEATURE-COMPARISON.md)",
+      "Bash(del docsFEATURE-PARITY-COMPARISON.md)",
+      "Bash(rm:*)",
+      "Bash(rmdir:*)",
+      "Bash(dotnet build:*)"
+    ]
+  }
+}

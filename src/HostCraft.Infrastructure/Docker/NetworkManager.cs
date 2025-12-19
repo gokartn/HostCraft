@@ -8,7 +8,7 @@ namespace HostCraft.Infrastructure.Docker;
 
 /// <summary>
 /// Network management with proper handling of bridge vs overlay networks.
-/// This is where we fix Coolify's critical mistakes.
+/// Ensures Swarm services use overlay networks and standalone containers use bridge networks.
 /// </summary>
 public class NetworkManager : INetworkManager
 {

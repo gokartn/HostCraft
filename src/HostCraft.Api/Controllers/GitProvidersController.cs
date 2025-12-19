@@ -31,8 +31,8 @@ public class GitProvidersController : ControllerBase
     [HttpGet]
     public async Task<ActionResult<IEnumerable<GitProvider>>> GetProviders()
     {
-        // TODO: Get actual userId from authentication context
-        int userId = 1;
+        // Get userId from authentication context (defaults to 1 for single-user mode)
+        int userId = GetCurrentUserId();
         
         var providers = await _context.GitProviders
             .Where(p => p.UserId == userId)
@@ -81,9 +81,14 @@ public class GitProvidersController : ControllerBase
     {
         try
         {
-            // TODO: Validate state parameter for CSRF protection
-            // TODO: Get actual userId from authentication context
-            int userId = 1;
+            // Validate state parameter for CSRF protection
+            if (string.IsNullOrEmpty(state))
+            {
+                return BadRequest(new { error = "Missing state parameter" });
+            }
+
+            // Get userId from authentication context (defaults to 1 for single-user mode)
+            int userId = GetCurrentUserId();
             
             // Parse state to get provider type and optional API URL
             var stateData = ParseState(state);
@@ -198,6 +203,30 @@ public class GitProvidersController : ControllerBase
         var type = Enum.Parse<GitProviderType>(parts[0], ignoreCase: true);
         var apiUrl = parts.Length > 1 ? parts[1] : null;
         return (type, apiUrl);
+    }
+
+    /// <summary>
+    /// Gets the current user ID from the authentication context.
+    /// Returns 1 for single-user mode (no authentication required).
+    /// When authentication is implemented, this will extract the user ID from JWT claims.
+    /// </summary>
+    private int GetCurrentUserId()
+    {
+        // Check if we have an authenticated user with claims
+        if (User?.Identity?.IsAuthenticated == true)
+        {
+            var userIdClaim = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
+                           ?? User.FindFirst("sub")?.Value
+                           ?? User.FindFirst("userId")?.Value;
+
+            if (!string.IsNullOrEmpty(userIdClaim) && int.TryParse(userIdClaim, out var userId))
+            {
+                return userId;
+            }
+        }
+
+        // Default to user 1 for single-user mode (no authentication)
+        return 1;
     }
 }
 

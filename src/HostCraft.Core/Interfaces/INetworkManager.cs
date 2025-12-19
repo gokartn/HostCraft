@@ -5,7 +5,7 @@ namespace HostCraft.Core.Interfaces;
 
 /// <summary>
 /// Network management service with proper handling of bridge vs overlay networks.
-/// CRITICAL: This is where we fix Coolify's mistakes.
+/// CRITICAL: Ensures Swarm services use overlay networks and standalone containers use bridge networks.
 /// </summary>
 public interface INetworkManager
 {

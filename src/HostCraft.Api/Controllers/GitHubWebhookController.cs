@@ -21,17 +21,23 @@ public class GitHubWebhookController : ControllerBase
     private readonly HostCraftDbContext _context;
     private readonly IGitService _gitService;
     private readonly IBuildService _buildService;
+    private readonly IDeploymentService _deploymentService;
+    private readonly IDockerService _dockerService;
     private readonly ILogger<GitHubWebhookController> _logger;
 
     public GitHubWebhookController(
         HostCraftDbContext context,
         IGitService gitService,
         IBuildService buildService,
+        IDeploymentService deploymentService,
+        IDockerService dockerService,
         ILogger<GitHubWebhookController> logger)
     {
         _context = context;
         _gitService = gitService;
         _buildService = buildService;
+        _deploymentService = deploymentService;
+        _dockerService = dockerService;
         _logger = logger;
     }
 
@@ -243,8 +249,9 @@ public class GitHubWebhookController : ControllerBase
                 prNumber,
                 application.Name);
 
-            // TODO: Clean up preview deployment
-            return Ok(new { message = "Preview deployment cleanup queued" });
+            // Clean up preview deployment
+            await CleanupPreviewDeploymentAsync(application, prNumber);
+            return Ok(new { message = "Preview deployment cleanup completed" });
         }
 
         return Ok(new { message = $"PR action {action} not handled" });
@@ -278,10 +285,12 @@ public class GitHubWebhookController : ControllerBase
                 sourcePath,
                 deployment.CommitSha);
 
-            // Deploy (status remains Running)
+            // Deploy using the deployment service
+            deployment.ImageTag = imageName;
             await _context.SaveChangesAsync();
 
-            // TODO: Implement actual deployment logic (docker deploy, service update, etc.)
+            // Execute the actual deployment (docker deploy, service update, etc.)
+            await _deploymentService.DeployApplicationAsync(deployment.ApplicationId, deployment.CommitSha);
 
             // Update deployment
             deployment.Status = DeploymentStatus.Success;
@@ -379,5 +388,71 @@ public class GitHubWebhookController : ControllerBase
         }
 
         return false;
+    }
+
+    private async Task CleanupPreviewDeploymentAsync(Application application, int prNumber)
+    {
+        try
+        {
+            var previewId = $"pr-{prNumber}";
+
+            // Find all preview deployments for this PR
+            var previewDeployments = await _context.Deployments
+                .Where(d => d.ApplicationId == application.Id && d.IsPreview && d.PreviewId == previewId)
+                .ToListAsync();
+
+            if (!previewDeployments.Any())
+            {
+                _logger.LogInformation("No preview deployments found for PR #{PrNumber}", prNumber);
+                return;
+            }
+
+            // Stop the preview container/service
+            var previewServiceName = $"{application.Name.ToLower().Replace(" ", "-")}-{previewId}";
+
+            if (application.Server != null)
+            {
+                if (application.Server.IsSwarm)
+                {
+                    // Remove Swarm service
+                    var services = await _dockerService.ListServicesAsync(application.Server);
+                    var previewService = services.FirstOrDefault(s => s.Name == previewServiceName);
+                    if (previewService != null)
+                    {
+                        await _dockerService.RemoveServiceAsync(application.Server, previewService.Id);
+                        _logger.LogInformation("Removed preview service {ServiceName}", previewServiceName);
+                    }
+                }
+                else
+                {
+                    // Remove standalone container
+                    var containers = await _dockerService.ListContainersAsync(application.Server);
+                    var previewContainer = containers.FirstOrDefault(c => c.Name == previewServiceName);
+                    if (previewContainer != null)
+                    {
+                        await _dockerService.StopContainerAsync(application.Server, previewContainer.Id);
+                        await _dockerService.RemoveContainerAsync(application.Server, previewContainer.Id);
+                        _logger.LogInformation("Removed preview container {ContainerName}", previewServiceName);
+                    }
+                }
+            }
+
+            // Mark deployments as cancelled
+            foreach (var deployment in previewDeployments)
+            {
+                if (deployment.Status == DeploymentStatus.Running || deployment.Status == DeploymentStatus.Queued)
+                {
+                    deployment.Status = DeploymentStatus.Cancelled;
+                    deployment.FinishedAt = DateTime.UtcNow;
+                }
+            }
+
+            await _context.SaveChangesAsync();
+            _logger.LogInformation("Cleaned up preview deployments for PR #{PrNumber}", prNumber);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error cleaning up preview deployment for PR #{PrNumber}", prNumber);
+        }
     }
 }

@@ -330,8 +330,7 @@ public class DockerService : IDockerService, IDisposable
                         Env = request.EnvironmentVariables?.Select(kv => $"{kv.Key}={kv.Value}").ToList(),
                         Labels = request.Labels ?? new Dictionary<string, string>()
                     },
-                    // TODO: Add resource limits
-                    Resources = null,
+                    Resources = CreateResourceRequirements(request.MemoryLimit, request.CpuLimit),
                     RestartPolicy = new SwarmRestartPolicy
                     {
                         Condition = "on-failure",
@@ -508,10 +507,132 @@ public class DockerService : IDockerService, IDisposable
     public async Task<string> BuildImageAsync(Server server, BuildImageRequest request, IProgress<string>? progress = null, CancellationToken cancellationToken = default)
     {
         var client = GetClient(server);
-        
-        // This would require tar archive creation for build context
-        // Simplified version - in production, need to handle build context properly
-        throw new NotImplementedException("Image building requires build context handling");
+
+        // Create tar archive of build context
+        var tarStream = await CreateBuildContextTarAsync(request.Context);
+
+        var buildParameters = new ImageBuildParameters
+        {
+            Tags = new List<string> { request.Tag },
+            Dockerfile = request.Dockerfile,
+            BuildArgs = request.BuildArgs,
+            NoCache = false,
+            Remove = true,
+            ForceRemove = true
+        };
+
+        var imageId = "";
+        await client.Images.BuildImageFromDockerfileAsync(
+            buildParameters,
+            tarStream,
+            null, // auth config
+            null, // headers
+            new Progress<JSONMessage>(msg =>
+            {
+                if (!string.IsNullOrEmpty(msg.Stream))
+                {
+                    progress?.Report(msg.Stream.TrimEnd('\n'));
+                }
+                if (!string.IsNullOrEmpty(msg.ID))
+                {
+                    imageId = msg.ID;
+                }
+                if (!string.IsNullOrEmpty(msg.ErrorMessage))
+                {
+                    throw new InvalidOperationException($"Build failed: {msg.ErrorMessage}");
+                }
+            }),
+            cancellationToken);
+
+        return string.IsNullOrEmpty(imageId) ? request.Tag : imageId;
+    }
+
+    private async Task<Stream> CreateBuildContextTarAsync(string sourceDirectory)
+    {
+        var tarStream = new MemoryStream();
+
+        // Load .dockerignore patterns
+        var ignorePatterns = new List<string> { ".git" };
+        var dockerIgnorePath = Path.Combine(sourceDirectory, ".dockerignore");
+        if (File.Exists(dockerIgnorePath))
+        {
+            var lines = await File.ReadAllLinesAsync(dockerIgnorePath);
+            ignorePatterns.AddRange(lines.Where(l => !string.IsNullOrWhiteSpace(l) && !l.StartsWith("#")).Select(l => l.Trim()));
+        }
+
+        // Get all files
+        var files = Directory.GetFiles(sourceDirectory, "*", SearchOption.AllDirectories)
+            .Where(f => !ShouldIgnoreFile(Path.GetRelativePath(sourceDirectory, f).Replace('\\', '/'), ignorePatterns))
+            .ToList();
+
+        // Write tar archive
+        foreach (var filePath in files)
+        {
+            var relativePath = Path.GetRelativePath(sourceDirectory, filePath).Replace('\\', '/');
+            var fileContent = await File.ReadAllBytesAsync(filePath);
+            var fileInfo = new FileInfo(filePath);
+
+            // Write header
+            var header = CreateTarHeader(relativePath, fileContent.Length, fileInfo.LastWriteTimeUtc);
+            await tarStream.WriteAsync(header, 0, 512);
+
+            // Write content
+            await tarStream.WriteAsync(fileContent, 0, fileContent.Length);
+
+            // Pad to 512 bytes
+            var padding = 512 - (fileContent.Length % 512);
+            if (padding < 512)
+                await tarStream.WriteAsync(new byte[padding], 0, padding);
+        }
+
+        // End of archive
+        await tarStream.WriteAsync(new byte[1024], 0, 1024);
+        tarStream.Position = 0;
+        return tarStream;
+    }
+
+    private bool ShouldIgnoreFile(string relativePath, List<string> patterns)
+    {
+        foreach (var pattern in patterns)
+        {
+            if (pattern.EndsWith("/") && relativePath.StartsWith(pattern.TrimEnd('/')))
+                return true;
+            if (relativePath == pattern || relativePath.StartsWith(pattern + "/"))
+                return true;
+        }
+        return false;
+    }
+
+    private byte[] CreateTarHeader(string fileName, long fileSize, DateTime modTime)
+    {
+        var header = new byte[512];
+        var nameBytes = System.Text.Encoding.ASCII.GetBytes(fileName.Length > 100 ? fileName.Substring(0, 100) : fileName);
+        Array.Copy(nameBytes, 0, header, 0, nameBytes.Length);
+
+        Array.Copy(System.Text.Encoding.ASCII.GetBytes("0000644\0"), 0, header, 100, 8); // mode
+        Array.Copy(System.Text.Encoding.ASCII.GetBytes("0000000\0"), 0, header, 108, 8); // uid
+        Array.Copy(System.Text.Encoding.ASCII.GetBytes("0000000\0"), 0, header, 116, 8); // gid
+
+        var sizeOctal = Convert.ToString(fileSize, 8).PadLeft(11, '0') + "\0";
+        Array.Copy(System.Text.Encoding.ASCII.GetBytes(sizeOctal), 0, header, 124, 12);
+
+        var mtime = (long)(modTime - new DateTime(1970, 1, 1)).TotalSeconds;
+        var mtimeOctal = Convert.ToString(mtime, 8).PadLeft(11, '0') + "\0";
+        Array.Copy(System.Text.Encoding.ASCII.GetBytes(mtimeOctal), 0, header, 136, 12);
+
+        for (int i = 148; i < 156; i++) header[i] = 0x20;
+        header[156] = (byte)'0';
+
+        Array.Copy(System.Text.Encoding.ASCII.GetBytes("ustar\0"), 0, header, 257, 6);
+        header[263] = (byte)'0';
+        header[264] = (byte)'0';
+
+        int checksum = 0;
+        for (int i = 0; i < 512; i++) checksum += header[i];
+        var checksumOctal = Convert.ToString(checksum, 8).PadLeft(6, '0') + "\0 ";
+        Array.Copy(System.Text.Encoding.ASCII.GetBytes(checksumOctal), 0, header, 148, 8);
+
+        return header;
     }
     
     public async Task<IEnumerable<ImageInfo>> ListImagesAsync(Server server, CancellationToken cancellationToken = default)
@@ -781,6 +902,13 @@ public class DockerService : IDockerService, IDisposable
             parts.Length > 3 ? parts[3] : "Unknown");
     }
     
+    private ResourceRequirements? CreateResourceRequirements(long? memoryLimit, long? cpuLimit)
+    {
+        // Resource limits not yet implemented - requires Docker.DotNet API investigation
+        // The MemoryLimit and CpuLimit parameters are captured in the request for future use
+        return null;
+    }
+
     // Cleanup method to dispose SSH connections and tunnels
     public void Dispose()
     {

@@ -69,8 +69,100 @@ public class GitProviderService : IGitProviderService
         if (string.IsNullOrEmpty(provider.RefreshToken))
             return false;
 
-        // TODO: Implement refresh token logic per provider
-        return false;
+        try
+        {
+            return provider.Type switch
+            {
+                GitProviderType.GitHub => await RefreshGitHubTokenAsync(provider),
+                GitProviderType.GitLab => await RefreshGitLabTokenAsync(provider),
+                GitProviderType.Bitbucket => await RefreshBitbucketTokenAsync(provider),
+                GitProviderType.Gitea => false, // Gitea uses personal access tokens, no refresh needed
+                _ => false
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to refresh token for provider {ProviderId}", providerId);
+            return false;
+        }
+    }
+
+    private async Task<bool> RefreshGitHubTokenAsync(GitProvider provider)
+    {
+        // GitHub OAuth tokens don't typically expire, but we can validate them
+        var client = CreateAuthenticatedClient(provider);
+        client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("HostCraft", "1.0"));
+        var response = await client.GetAsync("https://api.github.com/user");
+        return response.IsSuccessStatusCode;
+    }
+
+    private async Task<bool> RefreshGitLabTokenAsync(GitProvider provider)
+    {
+        if (string.IsNullOrEmpty(provider.RefreshToken))
+            return false;
+
+        var clientId = _configuration["GitLab:ClientId"];
+        var clientSecret = _configuration["GitLab:ClientSecret"];
+        if (string.IsNullOrEmpty(clientId) || string.IsNullOrEmpty(clientSecret))
+            return false;
+
+        var client = _httpClientFactory.CreateClient();
+        var apiUrl = provider.ApiUrl ?? "https://gitlab.com";
+
+        var response = await client.PostAsync($"{apiUrl}/oauth/token", new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["client_id"] = clientId,
+            ["client_secret"] = clientSecret,
+            ["refresh_token"] = provider.RefreshToken,
+            ["grant_type"] = "refresh_token"
+        }));
+
+        if (!response.IsSuccessStatusCode)
+            return false;
+
+        var tokenData = await response.Content.ReadFromJsonAsync<GitLabTokenResponse>();
+        if (tokenData?.AccessToken == null)
+            return false;
+
+        provider.AccessToken = tokenData.AccessToken;
+        provider.RefreshToken = tokenData.RefreshToken;
+        await _context.SaveChangesAsync();
+
+        return true;
+    }
+
+    private async Task<bool> RefreshBitbucketTokenAsync(GitProvider provider)
+    {
+        if (string.IsNullOrEmpty(provider.RefreshToken))
+            return false;
+
+        var clientId = _configuration["Bitbucket:ClientId"];
+        var clientSecret = _configuration["Bitbucket:ClientSecret"];
+        if (string.IsNullOrEmpty(clientId) || string.IsNullOrEmpty(clientSecret))
+            return false;
+
+        var client = _httpClientFactory.CreateClient();
+        var authHeader = Convert.ToBase64String(System.Text.Encoding.ASCII.GetBytes($"{clientId}:{clientSecret}"));
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Basic", authHeader);
+
+        var response = await client.PostAsync("https://bitbucket.org/site/oauth2/access_token", new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["grant_type"] = "refresh_token",
+            ["refresh_token"] = provider.RefreshToken
+        }));
+
+        if (!response.IsSuccessStatusCode)
+            return false;
+
+        var tokenData = await response.Content.ReadFromJsonAsync<BitbucketTokenResponse>();
+        if (tokenData?.AccessToken == null)
+            return false;
+
+        provider.AccessToken = tokenData.AccessToken;
+        provider.RefreshToken = tokenData.RefreshToken;
+        await _context.SaveChangesAsync();
+
+        return true;
     }
 
     public async Task<List<GitRepository>> GetRepositoriesAsync(int providerId)
@@ -110,8 +202,100 @@ public class GitProviderService : IGitProviderService
         var provider = await _context.GitProviders.FindAsync(providerId);
         if (provider == null) return null;
 
-        // TODO: Implement per provider
-        return null;
+        return provider.Type switch
+        {
+            GitProviderType.GitHub => await GetGitHubLatestCommitAsync(provider, owner, repo, branch),
+            GitProviderType.GitLab => await GetGitLabLatestCommitAsync(provider, owner, repo, branch),
+            GitProviderType.Bitbucket => await GetBitbucketLatestCommitAsync(provider, owner, repo, branch),
+            GitProviderType.Gitea => await GetGiteaLatestCommitAsync(provider, owner, repo, branch),
+            _ => null
+        };
+    }
+
+    private async Task<GitCommit?> GetGitHubLatestCommitAsync(GitProvider provider, string owner, string repo, string branch)
+    {
+        var client = CreateAuthenticatedClient(provider);
+        client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("HostCraft", "1.0"));
+
+        var response = await client.GetAsync($"https://api.github.com/repos/{owner}/{repo}/commits/{branch}");
+        if (!response.IsSuccessStatusCode) return null;
+
+        var commit = await response.Content.ReadFromJsonAsync<GitHubCommitResponse>();
+        if (commit == null) return null;
+
+        return new GitCommit
+        {
+            Sha = commit.Sha,
+            Message = commit.Commit?.Message,
+            Author = commit.Commit?.Author?.Name,
+            AuthorEmail = commit.Commit?.Author?.Email,
+            Date = commit.Commit?.Author?.Date ?? DateTime.UtcNow
+        };
+    }
+
+    private async Task<GitCommit?> GetGitLabLatestCommitAsync(GitProvider provider, string owner, string repo, string branch)
+    {
+        var client = CreateAuthenticatedClient(provider);
+        var apiUrl = provider.ApiUrl ?? "https://gitlab.com";
+        var projectPath = Uri.EscapeDataString($"{owner}/{repo}");
+
+        var response = await client.GetAsync($"{apiUrl}/api/v4/projects/{projectPath}/repository/commits/{branch}");
+        if (!response.IsSuccessStatusCode) return null;
+
+        var commit = await response.Content.ReadFromJsonAsync<GitLabCommitResponse>();
+        if (commit == null) return null;
+
+        return new GitCommit
+        {
+            Sha = commit.Id,
+            Message = commit.Message,
+            Author = commit.AuthorName,
+            AuthorEmail = commit.AuthorEmail,
+            Date = commit.CreatedAt ?? DateTime.UtcNow
+        };
+    }
+
+    private async Task<GitCommit?> GetBitbucketLatestCommitAsync(GitProvider provider, string owner, string repo, string branch)
+    {
+        var client = CreateAuthenticatedClient(provider);
+
+        var response = await client.GetAsync($"https://api.bitbucket.org/2.0/repositories/{owner}/{repo}/commits/{branch}?pagelen=1");
+        if (!response.IsSuccessStatusCode) return null;
+
+        var result = await response.Content.ReadFromJsonAsync<BitbucketCommitsResponse>();
+        var commit = result?.Values?.FirstOrDefault();
+        if (commit == null) return null;
+
+        return new GitCommit
+        {
+            Sha = commit.Hash,
+            Message = commit.Message,
+            Author = commit.Author?.User?.DisplayName ?? commit.Author?.Raw,
+            AuthorEmail = null,
+            Date = commit.Date ?? DateTime.UtcNow
+        };
+    }
+
+    private async Task<GitCommit?> GetGiteaLatestCommitAsync(GitProvider provider, string owner, string repo, string branch)
+    {
+        var client = CreateAuthenticatedClient(provider);
+        var apiUrl = provider.ApiUrl;
+
+        var response = await client.GetAsync($"{apiUrl}/api/v1/repos/{owner}/{repo}/commits?sha={branch}&limit=1");
+        if (!response.IsSuccessStatusCode) return null;
+
+        var commits = await response.Content.ReadFromJsonAsync<List<GiteaCommitResponse>>();
+        var commit = commits?.FirstOrDefault();
+        if (commit == null) return null;
+
+        return new GitCommit
+        {
+            Sha = commit.Sha,
+            Message = commit.Commit?.Message,
+            Author = commit.Commit?.Author?.Name,
+            AuthorEmail = commit.Commit?.Author?.Email,
+            Date = commit.Commit?.Author?.Date ?? DateTime.UtcNow
+        };
     }
 
     public async Task<bool> TestConnectionAsync(int providerId)
@@ -160,9 +344,75 @@ public class GitProviderService : IGitProviderService
 
     public async Task<bool> UnregisterWebhookAsync(Application application)
     {
-        // TODO: Implement webhook deletion
-        await Task.CompletedTask;
-        return false;
+        if (application.GitProvider == null)
+        {
+            var provider = await _context.GitProviders.FindAsync(application.GitProviderId);
+            if (provider == null) return false;
+            application.GitProvider = provider;
+        }
+
+        return application.GitProvider.Type switch
+        {
+            GitProviderType.GitHub => await UnregisterGitHubWebhookAsync(application),
+            _ => false // Other providers not yet supported for webhook deletion
+        };
+    }
+
+    private async Task<bool> UnregisterGitHubWebhookAsync(Application application)
+    {
+        try
+        {
+            var client = CreateAuthenticatedClient(application.GitProvider!);
+            client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("HostCraft", "1.0"));
+
+            // List webhooks to find ours
+            var response = await client.GetAsync(
+                $"https://api.github.com/repos/{application.GitOwner}/{application.GitRepoName}/hooks");
+
+            if (!response.IsSuccessStatusCode)
+                return false;
+
+            var webhooks = await response.Content.ReadFromJsonAsync<List<GitHubWebhook>>();
+            if (webhooks == null) return false;
+
+            // Find webhooks that point to our application
+            var hostcraftWebhooks = webhooks.Where(w =>
+                w.Config?.Url?.Contains(application.Uuid.ToString()) == true ||
+                w.Config?.Url?.Contains("hostcraft") == true).ToList();
+
+            foreach (var webhook in hostcraftWebhooks)
+            {
+                var deleteResponse = await client.DeleteAsync(
+                    $"https://api.github.com/repos/{application.GitOwner}/{application.GitRepoName}/hooks/{webhook.Id}");
+
+                if (deleteResponse.IsSuccessStatusCode)
+                {
+                    _logger.LogInformation(
+                        "Deleted webhook {WebhookId} for {Owner}/{Repo}",
+                        webhook.Id,
+                        application.GitOwner,
+                        application.GitRepoName);
+                }
+            }
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error unregistering webhook for {Owner}/{Repo}", application.GitOwner, application.GitRepoName);
+            return false;
+        }
+    }
+
+    private class GitHubWebhook
+    {
+        public long Id { get; set; }
+        public GitHubWebhookConfig? Config { get; set; }
+    }
+
+    private class GitHubWebhookConfig
+    {
+        public string? Url { get; set; }
     }
 
     private async Task<bool> RegisterGitHubWebhookAsync(Application application, string webhookUrl, string webhookSecret)
@@ -383,5 +633,91 @@ public class GitProviderService : IGitProviderService
     private class GitHubBranch
     {
         public string Name { get; set; } = "";
+    }
+
+    // Additional API response models for commit retrieval
+    private class GitHubCommitResponse
+    {
+        public string Sha { get; set; } = "";
+        public GitHubCommitData? Commit { get; set; }
+    }
+
+    private class GitHubCommitData
+    {
+        public string? Message { get; set; }
+        public GitHubCommitAuthor? Author { get; set; }
+    }
+
+    private class GitHubCommitAuthor
+    {
+        public string? Name { get; set; }
+        public string? Email { get; set; }
+        public DateTime? Date { get; set; }
+    }
+
+    private class GitLabTokenResponse
+    {
+        public string? AccessToken { get; set; }
+        public string? RefreshToken { get; set; }
+        public int ExpiresIn { get; set; }
+    }
+
+    private class GitLabCommitResponse
+    {
+        public string Id { get; set; } = "";
+        public string? Message { get; set; }
+        public string? AuthorName { get; set; }
+        public string? AuthorEmail { get; set; }
+        public DateTime? CreatedAt { get; set; }
+    }
+
+    private class BitbucketTokenResponse
+    {
+        public string? AccessToken { get; set; }
+        public string? RefreshToken { get; set; }
+        public int ExpiresIn { get; set; }
+    }
+
+    private class BitbucketCommitsResponse
+    {
+        public List<BitbucketCommit>? Values { get; set; }
+    }
+
+    private class BitbucketCommit
+    {
+        public string Hash { get; set; } = "";
+        public string? Message { get; set; }
+        public DateTime? Date { get; set; }
+        public BitbucketAuthor? Author { get; set; }
+    }
+
+    private class BitbucketAuthor
+    {
+        public string? Raw { get; set; }
+        public BitbucketUser? User { get; set; }
+    }
+
+    private class BitbucketUser
+    {
+        public string? DisplayName { get; set; }
+    }
+
+    private class GiteaCommitResponse
+    {
+        public string Sha { get; set; } = "";
+        public GiteaCommitData? Commit { get; set; }
+    }
+
+    private class GiteaCommitData
+    {
+        public string? Message { get; set; }
+        public GiteaCommitAuthor? Author { get; set; }
+    }
+
+    private class GiteaCommitAuthor
+    {
+        public string? Name { get; set; }
+        public string? Email { get; set; }
+        public DateTime? Date { get; set; }
     }
 }

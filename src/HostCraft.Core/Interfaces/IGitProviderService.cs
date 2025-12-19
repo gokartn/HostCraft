@@ -80,7 +80,8 @@ public class GitRepository
 public class GitCommit
 {
     public required string Sha { get; set; }
-    public required string Message { get; set; }
-    public required string Author { get; set; }
-    public DateTime CommittedAt { get; set; }
+    public string? Message { get; set; }
+    public string? Author { get; set; }
+    public string? AuthorEmail { get; set; }
+    public DateTime Date { get; set; }
 }
