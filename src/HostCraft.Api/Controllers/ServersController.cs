@@ -4,6 +4,7 @@ using HostCraft.Core.Entities;
 using HostCraft.Core.Enums;
 using HostCraft.Core.Interfaces;
 using HostCraft.Infrastructure.Persistence;
+using System.Runtime.InteropServices;
 
 namespace HostCraft.Api.Controllers;
 
@@ -1282,39 +1283,36 @@ public class ServersController : ControllerBase
                                             }
                                             else
                                             {
-                                                // For localhost, get the host machine's IPv4 address
+                                                // For localhost, get the swarm advertise address from Docker API
                                                 try
                                                 {
-                                                    var systemInfo = await dockerService.GetSystemInfoAsync(swarmManager);
+                                                    // Create local Docker client to query swarm info
+                                                    var dockerUri = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+                                                        ? "npipe://./pipe/docker_engine"
+                                                        : "unix:///var/run/docker.sock";
                                                     
-                                                    if (systemInfo?.SwarmActive == true)
+                                                    var client = new Docker.DotNet.DockerClientConfiguration(new Uri(dockerUri)).CreateClient();
+                                                    
+                                                    // Get node info directly from Docker API to find the advertise address
+                                                    var nodes = await client.Swarm.ListNodesAsync();
+                                                    var managerNode = nodes.FirstOrDefault(n => n.Spec?.Role == "manager" && n.ManagerStatus?.Leader == true);
+                                                    
+                                                    if (managerNode?.Status?.Addr != null)
                                                     {
-                                                        // Get the first IPv4 address from the local machine
-                                                        var hostIp = System.Net.Dns.GetHostEntry(System.Net.Dns.GetHostName())
-                                                            .AddressList
-                                                            .FirstOrDefault(ip => ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
-                                                            ?.ToString();
-                                                        
-                                                        if (!string.IsNullOrEmpty(hostIp) && hostIp != "127.0.0.1")
-                                                        {
-                                                            managerHost = hostIp;
-                                                            logger.LogInformation("Detected local host IPv4 address: {ManagerIp}", managerHost);
-                                                        }
-                                                        else
-                                                        {
-                                                            logger.LogError("Failed to detect local host IP address (got loopback)");
-                                                            managerHost = null!;
-                                                        }
+                                                        managerHost = managerNode.Status.Addr;
+                                                        logger.LogInformation("Detected manager advertise address from Docker API: {ManagerIp}", managerHost);
                                                     }
                                                     else
                                                     {
-                                                        logger.LogError("Localhost is not part of an active swarm");
+                                                        logger.LogError("Could not determine swarm manager advertise address from Docker API");
                                                         managerHost = null!;
                                                     }
+                                                    
+                                                    client.Dispose();
                                                 }
                                                 catch (Exception ex)
                                                 {
-                                                    logger.LogError(ex, "Error getting local host IP address");
+                                                    logger.LogError(ex, "Error getting swarm advertise address from Docker API");
                                                     managerHost = null!;
                                                 }
                                             }
