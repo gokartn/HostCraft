@@ -6,18 +6,32 @@ EXPOSE 8080
 RUN apt-get update && apt-get install -y libkrb5-3 && rm -rf /var/lib/apt/lists/*
 
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+ARG BUILD_CONFIGURATION=Release
 WORKDIR /src
-COPY ["src/HostCraft.Api/HostCraft.Api.csproj", "src/HostCraft.Api/"]
-COPY ["src/HostCraft.Core/HostCraft.Core.csproj", "src/HostCraft.Core/"]
-COPY ["src/HostCraft.Infrastructure/HostCraft.Infrastructure.csproj", "src/HostCraft.Infrastructure/"]
-COPY ["src/HostCraft.Shared/HostCraft.Shared.csproj", "src/HostCraft.Shared/"]
-RUN dotnet restore "src/HostCraft.Api/HostCraft.Api.csproj"
-COPY . .
-WORKDIR "/src/src/HostCraft.Api"
-RUN dotnet build "HostCraft.Api.csproj" -c Release -o /app/build
+
+# Copy all project files first for better layer caching
+COPY ["src/HostCraft.Api/HostCraft.Api.csproj", "HostCraft.Api/"]
+COPY ["src/HostCraft.Core/HostCraft.Core.csproj", "HostCraft.Core/"]
+COPY ["src/HostCraft.Infrastructure/HostCraft.Infrastructure.csproj", "HostCraft.Infrastructure/"]
+COPY ["src/HostCraft.Shared/HostCraft.Shared.csproj", "HostCraft.Shared/"]
+
+# Restore dependencies
+RUN dotnet restore "HostCraft.Api/HostCraft.Api.csproj"
+
+# Copy source code
+COPY ["src/HostCraft.Api/", "HostCraft.Api/"]
+COPY ["src/HostCraft.Core/", "HostCraft.Core/"]
+COPY ["src/HostCraft.Infrastructure/", "HostCraft.Infrastructure/"]
+COPY ["src/HostCraft.Shared/", "HostCraft.Shared/"]
+COPY ["scripts/", "scripts/"]
+
+# Build
+WORKDIR "/src/HostCraft.Api"
+RUN dotnet build "HostCraft.Api.csproj" -c $BUILD_CONFIGURATION -o /app/build
 
 FROM build AS publish
-RUN dotnet publish "HostCraft.Api.csproj" -c Release -o /app/publish /p:UseAppHost=false
+ARG BUILD_CONFIGURATION=Release
+RUN dotnet publish "HostCraft.Api.csproj" -c $BUILD_CONFIGURATION -o /app/publish /p:UseAppHost=false
 
 FROM base AS final
 WORKDIR /app

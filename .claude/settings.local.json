@@ -14,7 +14,8 @@
       "Bash(dotnet build:*)",
       "Bash(dotnet add package:*)",
       "Bash(dotnet add:*)",
-      "Bash(ren:*)"
+      "Bash(ren:*)",
+      "Bash(dotnet restore:*)"
     ]
   }
 }

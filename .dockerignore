@@ -1,0 +1,57 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# IDE/Editor
+.vs/
+.vscode/
+.idea/
+*.sln.DotSettings.user
+
+# Build outputs
+**/bin/
+**/obj/
+**/out/
+
+# Test results
+**/TestResults/
+**/*.trx
+
+# NuGet
+**/.nuget/
+
+# Logs
+**/*.log
+**/logs/
+
+# Documentation
+docs/
+*.md
+!README.md
+
+# Local development files
+*.db
+*.sqlite
+*.sqlite3
+hostcraft.db
+.env
+.env.*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Docker files (we don't need to copy these into the build context)
+**/Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# Test projects (not needed for production build)
+tests/
+
+# Misc
+*.bak
+*.tmp
+bfg.jar
+HOSTCRAFT_PROJECT_CONTEXT.md
