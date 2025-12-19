@@ -1197,7 +1197,7 @@ public class ServersController : ControllerBase
                                         server.Host == "::1")
                                     {
                                         // For localhost, detect the external IPv4 address only
-                                        advertiseAddr = "$(hostname -I | grep -oE '\\b([0-9]{1,3}\\.){3}[0-9]{1,3}\\b' | head -n1)";
+                                        advertiseAddr = "$(hostname -I | tr ' ' '\\n' | grep -E '^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+$' | grep -v '^127\\.' | head -n1)";
                                     }
                                     else
                                     {
@@ -1217,7 +1217,7 @@ public class ServersController : ControllerBase
                                         if (advertiseAddr.StartsWith("$("))
                                         {
                                             // Extract the actual IPv4 address
-                                            var ipCommand = "hostname -I | grep -oE '\\b([0-9]{1,3}\\.){3}[0-9]{1,3}\\b' | head -n1";
+                                            var ipCommand = "hostname -I | tr ' ' '\\n' | grep -E '^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+$' | grep -v '^127\\.' | head -n1";
                                             var ipResult = await sshService.ExecuteCommandAsync(server, ipCommand);
                                             if (ipResult.ExitCode == 0 && !string.IsNullOrWhiteSpace(ipResult.Output))
                                             {
@@ -1282,26 +1282,39 @@ public class ServersController : ControllerBase
                                             }
                                             else
                                             {
-                                                // Query Docker swarm info to get the advertise address
+                                                // For localhost, get the host machine's IPv4 address
                                                 try
                                                 {
-                                                    var swarmInfoCommand = "docker info --format '{{.Swarm.NodeAddr}}'";
-                                                    var swarmInfoResult = await sshService.ExecuteCommandAsync(swarmManager, swarmInfoCommand);
+                                                    var systemInfo = await dockerService.GetSystemInfoAsync(swarmManager);
                                                     
-                                                    if (swarmInfoResult.ExitCode == 0 && !string.IsNullOrWhiteSpace(swarmInfoResult.Output))
+                                                    if (systemInfo?.SwarmActive == true)
                                                     {
-                                                        managerHost = swarmInfoResult.Output.Trim();
-                                                        logger.LogInformation("Detected manager address from Docker swarm: {ManagerIp}", managerHost);
+                                                        // Get the first IPv4 address from the local machine
+                                                        var hostIp = System.Net.Dns.GetHostEntry(System.Net.Dns.GetHostName())
+                                                            .AddressList
+                                                            .FirstOrDefault(ip => ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
+                                                            ?.ToString();
+                                                        
+                                                        if (!string.IsNullOrEmpty(hostIp) && hostIp != "127.0.0.1")
+                                                        {
+                                                            managerHost = hostIp;
+                                                            logger.LogInformation("Detected local host IPv4 address: {ManagerIp}", managerHost);
+                                                        }
+                                                        else
+                                                        {
+                                                            logger.LogError("Failed to detect local host IP address (got loopback)");
+                                                            managerHost = null!;
+                                                        }
                                                     }
                                                     else
                                                     {
-                                                        logger.LogError("Failed to get swarm node address from Docker info");
+                                                        logger.LogError("Localhost is not part of an active swarm");
                                                         managerHost = null!;
                                                     }
                                                 }
                                                 catch (Exception ex)
                                                 {
-                                                    logger.LogError(ex, "Error getting swarm node address for localhost");
+                                                    logger.LogError(ex, "Error getting local host IP address");
                                                     managerHost = null!;
                                                 }
                                             }
