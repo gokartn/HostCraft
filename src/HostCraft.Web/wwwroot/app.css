@@ -897,14 +897,179 @@ h1:focus {
     .servers-page .servers-grid {
         grid-template-columns: 1fr;
     }
-    
+
     .servers-page .page-header {
         flex-direction: column;
         align-items: flex-start;
     }
-    
+
     .logs-controls {
         flex-direction: column;
         gap: 0.75rem;
     }
+}
+
+/* ============================================
+   Blazor Reconnect Modal - Dark Theme Styles
+   ============================================ */
+
+/* Hide all state-specific content by default */
+.components-reconnect-first-attempt-visible,
+.components-reconnect-repeated-attempt-visible,
+.components-reconnect-failed-visible,
+.components-pause-visible,
+.components-resume-failed-visible,
+.components-rejoining-animation {
+    display: none !important;
+}
+
+/* Show content based on modal state */
+#components-reconnect-modal.components-reconnect-show .components-reconnect-first-attempt-visible,
+#components-reconnect-modal.components-reconnect-show .components-rejoining-animation,
+#components-reconnect-modal.components-reconnect-paused .components-pause-visible,
+#components-reconnect-modal.components-reconnect-resume-failed .components-resume-failed-visible,
+#components-reconnect-modal.components-reconnect-retrying .components-reconnect-repeated-attempt-visible,
+#components-reconnect-modal.components-reconnect-retrying .components-rejoining-animation,
+#components-reconnect-modal.components-reconnect-failed .components-reconnect-failed-visible {
+    display: block !important;
+}
+
+/* Main modal dialog styling */
+#components-reconnect-modal {
+    background: linear-gradient(145deg, #1e2538 0%, #151927 100%);
+    border: 1px solid rgba(139, 92, 246, 0.3);
+    width: 24rem;
+    max-width: 90vw;
+    margin: 20vh auto;
+    padding: 2.5rem;
+    border-radius: 1rem;
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5),
+                0 0 30px rgba(139, 92, 246, 0.15);
+    color: #e2e8f0;
+    position: fixed;
+    top: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 99999;
+}
+
+#components-reconnect-modal[open] {
+    animation: reconnect-modal-slideUp 0.6s cubic-bezier(.05, .89, .25, 1.02) forwards;
+}
+
+#components-reconnect-modal::backdrop {
+    background: rgba(15, 17, 26, 0.85);
+    backdrop-filter: blur(4px);
+}
+
+@keyframes reconnect-modal-slideUp {
+    0% {
+        opacity: 0;
+        transform: translateX(-50%) translateY(30px) scale(0.95);
+    }
+    100% {
+        opacity: 1;
+        transform: translateX(-50%) translateY(0) scale(1);
+    }
+}
+
+/* Container for modal content */
+.components-reconnect-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1.25rem;
+}
+
+/* Paragraph styling */
+#components-reconnect-modal p {
+    margin: 0;
+    text-align: center;
+    font-size: 0.95rem;
+    line-height: 1.6;
+    color: #cbd5e1;
+}
+
+/* Button styling */
+#components-reconnect-modal button {
+    border: none;
+    background: linear-gradient(135deg, #8b5cf6 0%, #6366f1 100%);
+    color: white;
+    padding: 0.75rem 2rem;
+    border-radius: 0.5rem;
+    font-weight: 600;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    box-shadow: 0 4px 14px rgba(139, 92, 246, 0.4);
+}
+
+#components-reconnect-modal button:hover {
+    background: linear-gradient(135deg, #9d74f7 0%, #7577f2 100%);
+    transform: translateY(-1px);
+    box-shadow: 0 6px 20px rgba(139, 92, 246, 0.5);
+}
+
+#components-reconnect-modal button:active {
+    transform: translateY(0);
+    box-shadow: 0 2px 10px rgba(139, 92, 246, 0.3);
+}
+
+/* Reconnecting animation */
+.components-rejoining-animation {
+    position: relative;
+    width: 80px;
+    height: 80px;
+}
+
+.components-rejoining-animation div {
+    position: absolute;
+    border: 3px solid #8b5cf6;
+    opacity: 1;
+    border-radius: 50%;
+    animation: rejoining-pulse 1.5s cubic-bezier(0, 0.2, 0.8, 1) infinite;
+}
+
+.components-rejoining-animation div:nth-child(2) {
+    animation-delay: -0.5s;
+}
+
+@keyframes rejoining-pulse {
+    0% {
+        top: 40px;
+        left: 40px;
+        width: 0;
+        height: 0;
+        opacity: 0;
+    }
+    5% {
+        top: 40px;
+        left: 40px;
+        width: 0;
+        height: 0;
+        opacity: 1;
+    }
+    100% {
+        top: 0px;
+        left: 0px;
+        width: 80px;
+        height: 80px;
+        opacity: 0;
+    }
+}
+
+/* Icon styling */
+.reconnect-icon {
+    font-size: 2.5rem;
+    display: block;
+    margin-bottom: 0.5rem;
+}
+
+/* Title styling */
+.reconnect-title {
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: #f1f5f9;
+    display: block;
+    margin-bottom: 0.5rem;
 }
