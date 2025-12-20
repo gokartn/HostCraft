@@ -2,8 +2,11 @@ FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS base
 WORKDIR /app
 EXPOSE 8080
 
-# Install Kerberos libraries for SSH.NET GSSAPI support
-RUN apt-get update && apt-get install -y libkrb5-3 && rm -rf /var/lib/apt/lists/*
+# Install Kerberos/GSSAPI libraries for SSH.NET and HTTP authentication
+RUN apt-get update && apt-get install -y \
+    libkrb5-3 \
+    libgssapi-krb5-2 \
+    && rm -rf /var/lib/apt/lists/*
 
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 ARG BUILD_CONFIGURATION=Release
