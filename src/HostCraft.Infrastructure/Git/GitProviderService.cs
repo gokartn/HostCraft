@@ -9,6 +9,7 @@ using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace HostCraft.Infrastructure.Git;
 
@@ -512,7 +513,9 @@ public class GitProviderService : IGitProviderService
         // Exchange code for token
         var client = _httpClientFactory.CreateClient();
         client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-        
+
+        _logger.LogInformation("Exchanging GitHub OAuth code for access token. RedirectUri: {RedirectUri}", redirectUri);
+
         var tokenResponse = await client.PostAsync("https://github.com/login/oauth/access_token", new FormUrlEncodedContent(new Dictionary<string, string>
         {
             ["client_id"] = clientId,
@@ -522,9 +525,24 @@ public class GitProviderService : IGitProviderService
         }));
 
         tokenResponse.EnsureSuccessStatusCode();
-        var tokenData = await tokenResponse.Content.ReadFromJsonAsync<GitHubTokenResponse>();
+
+        var responseContent = await tokenResponse.Content.ReadAsStringAsync();
+        _logger.LogDebug("GitHub token response: {Response}", responseContent);
+
+        var tokenData = JsonSerializer.Deserialize<GitHubTokenResponse>(responseContent);
+
+        // Check for GitHub error response
+        if (!string.IsNullOrEmpty(tokenData?.Error))
+        {
+            _logger.LogError("GitHub OAuth error: {Error} - {Description}", tokenData.Error, tokenData.ErrorDescription);
+            throw new InvalidOperationException($"GitHub OAuth error: {tokenData.Error}. {tokenData.ErrorDescription}");
+        }
+
         if (tokenData?.AccessToken == null)
-            throw new InvalidOperationException("Failed to obtain access token");
+        {
+            _logger.LogError("Failed to obtain access token. Response: {Response}", responseContent);
+            throw new InvalidOperationException("Failed to obtain access token from GitHub. The authorization code may have expired or been used already.");
+        }
 
         // Get user info
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", tokenData.AccessToken);
@@ -629,100 +647,177 @@ public class GitProviderService : IGitProviderService
     // GitHub API models
     private class GitHubTokenResponse
     {
+        [JsonPropertyName("access_token")]
         public string? AccessToken { get; set; }
+
+        [JsonPropertyName("scope")]
         public string? Scope { get; set; }
+
+        [JsonPropertyName("token_type")]
         public string? TokenType { get; set; }
+
+        // GitHub may return error info instead of token
+        [JsonPropertyName("error")]
+        public string? Error { get; set; }
+
+        [JsonPropertyName("error_description")]
+        public string? ErrorDescription { get; set; }
     }
 
     private class GitHubUser
     {
+        [JsonPropertyName("id")]
         public long Id { get; set; }
+
+        [JsonPropertyName("login")]
         public string Login { get; set; } = "";
+
+        [JsonPropertyName("email")]
         public string? Email { get; set; }
+
+        [JsonPropertyName("avatar_url")]
         public string? AvatarUrl { get; set; }
     }
 
     private class GitHubRepository
     {
+        [JsonPropertyName("name")]
         public string Name { get; set; } = "";
+
+        [JsonPropertyName("full_name")]
         public string FullName { get; set; } = "";
+
+        [JsonPropertyName("description")]
         public string? Description { get; set; }
+
+        [JsonPropertyName("default_branch")]
         public string DefaultBranch { get; set; } = "main";
+
+        [JsonPropertyName("clone_url")]
         public string CloneUrl { get; set; } = "";
+
+        [JsonPropertyName("private")]
         public bool Private { get; set; }
+
+        [JsonPropertyName("updated_at")]
         public DateTime? UpdatedAt { get; set; }
+
+        [JsonPropertyName("owner")]
         public GitHubOwner Owner { get; set; } = new();
     }
 
     private class GitHubOwner
     {
+        [JsonPropertyName("login")]
         public string Login { get; set; } = "";
     }
 
     private class GitHubBranch
     {
+        [JsonPropertyName("name")]
         public string Name { get; set; } = "";
     }
 
     // Additional API response models for commit retrieval
     private class GitHubCommitResponse
     {
+        [JsonPropertyName("sha")]
         public string Sha { get; set; } = "";
+
+        [JsonPropertyName("commit")]
         public GitHubCommitData? Commit { get; set; }
     }
 
     private class GitHubCommitData
     {
+        [JsonPropertyName("message")]
         public string? Message { get; set; }
+
+        [JsonPropertyName("author")]
         public GitHubCommitAuthor? Author { get; set; }
     }
 
     private class GitHubCommitAuthor
     {
+        [JsonPropertyName("name")]
         public string? Name { get; set; }
+
+        [JsonPropertyName("email")]
         public string? Email { get; set; }
+
+        [JsonPropertyName("date")]
         public DateTime? Date { get; set; }
     }
 
     private class GitLabTokenResponse
     {
+        [JsonPropertyName("access_token")]
         public string? AccessToken { get; set; }
+
+        [JsonPropertyName("refresh_token")]
         public string? RefreshToken { get; set; }
+
+        [JsonPropertyName("expires_in")]
         public int ExpiresIn { get; set; }
     }
 
     private class GitLabCommitResponse
     {
+        [JsonPropertyName("id")]
         public string Id { get; set; } = "";
+
+        [JsonPropertyName("message")]
         public string? Message { get; set; }
+
+        [JsonPropertyName("author_name")]
         public string? AuthorName { get; set; }
+
+        [JsonPropertyName("author_email")]
         public string? AuthorEmail { get; set; }
+
+        [JsonPropertyName("created_at")]
         public DateTime? CreatedAt { get; set; }
     }
 
     private class BitbucketTokenResponse
     {
+        [JsonPropertyName("access_token")]
         public string? AccessToken { get; set; }
+
+        [JsonPropertyName("refresh_token")]
         public string? RefreshToken { get; set; }
+
+        [JsonPropertyName("expires_in")]
         public int ExpiresIn { get; set; }
     }
 
     private class BitbucketCommitsResponse
     {
+        [JsonPropertyName("values")]
         public List<BitbucketCommit>? Values { get; set; }
     }
 
     private class BitbucketCommit
     {
+        [JsonPropertyName("hash")]
         public string Hash { get; set; } = "";
+
+        [JsonPropertyName("message")]
         public string? Message { get; set; }
+
+        [JsonPropertyName("date")]
         public DateTime? Date { get; set; }
+
+        [JsonPropertyName("author")]
         public BitbucketAuthor? Author { get; set; }
     }
 
     private class BitbucketAuthor
     {
+        [JsonPropertyName("raw")]
         public string? Raw { get; set; }
+
+        [JsonPropertyName("user")]
         public BitbucketUser? User { get; set; }
     }
 

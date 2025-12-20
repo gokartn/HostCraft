@@ -11,7 +11,10 @@
 </div>
 
 <div id="blazor-error-ui" data-nosnippet>
-    ⚠️ An error has occurred.
-    <a href="." class="reload">Reload</a>
-    <span class="dismiss">✖</span>
+    <div class="error-content">
+        <span class="error-icon">⚠️</span>
+        <span class="error-text">A connection error occurred. Please check your connection and try again.</span>
+        <a href="." class="reload">🔄 Reload Page</a>
+        <button type="button" class="dismiss" onclick="this.parentElement.parentElement.style.display='none'">✕</button>
+    </div>
 </div>
