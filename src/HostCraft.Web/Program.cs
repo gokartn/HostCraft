@@ -2,6 +2,7 @@ using HostCraft.Web.Components;
 using HostCraft.Web.Hubs;
 using Serilog;
 using Serilog.Events;
+using Yarp.ReverseProxy.Configuration;
 
 // Configure Serilog
 Log.Logger = new LoggerConfiguration()
@@ -82,11 +83,42 @@ builder.Services.AddHttpClient("HostCraftAPI", client =>
 .SetHandlerLifetime(TimeSpan.FromMinutes(5)); // Prevent socket exhaustion
 
 // Register as scoped to match Blazor component lifecycle
-builder.Services.AddScoped(sp => 
+builder.Services.AddScoped(sp =>
 {
     var factory = sp.GetRequiredService<IHttpClientFactory>();
     return factory.CreateClient("HostCraftAPI");
 });
+
+// Configure YARP reverse proxy to forward /api/* requests to API service
+// This enables OAuth callbacks and webhooks to work through Traefik -> Web -> API
+var apiBaseUrl = apiUrl.TrimEnd('/');
+builder.Services.AddReverseProxy()
+    .LoadFromMemory(
+        routes: new[]
+        {
+            new RouteConfig
+            {
+                RouteId = "api-route",
+                ClusterId = "api-cluster",
+                Match = new RouteMatch
+                {
+                    Path = "/api/{**catch-all}"
+                }
+            }
+        },
+        clusters: new[]
+        {
+            new ClusterConfig
+            {
+                ClusterId = "api-cluster",
+                Destinations = new Dictionary<string, DestinationConfig>
+                {
+                    { "api", new DestinationConfig { Address = apiBaseUrl } }
+                }
+            }
+        });
+
+Log.Information("Configured YARP reverse proxy to forward /api/* to {ApiUrl}", apiBaseUrl);
 
 var app = builder.Build();
 
@@ -97,11 +129,20 @@ if (!app.Environment.IsDevelopment())
     // The default HSTS value is 30 days. You may want to change this for production scenarios, see https://aka.ms/aspnetcore-hsts.
     app.UseHsts();
 }
-app.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages: true);
 // Don't use HTTPS redirection - running behind reverse proxy
 // app.UseHttpsRedirection();
 
 app.UseAntiforgery();
+
+// Map YARP reverse proxy BEFORE static assets and Razor components
+// This ensures /api/* requests are forwarded to the API service
+app.MapReverseProxy();
+
+// Only apply 404 handler for non-API routes
+app.UseWhen(context => !context.Request.Path.StartsWithSegments("/api"), appBuilder =>
+{
+    appBuilder.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages: true);
+});
 
 app.MapStaticAssets();
 app.MapRazorComponents<App>()
