@@ -4,6 +4,8 @@
 @inject AuthenticationStateProvider AuthStateProvider
 @inject IWebAuthService AuthService
 
+@using HostCraft.Web.Models
+
 <Router AppAssembly="typeof(Program).Assembly" NotFoundPage="typeof(Pages.NotFound)">
     <Found Context="routeData">
         @if (IsCheckingSetup || IsCheckingAuth)
@@ -109,13 +111,6 @@
         };
 
         return publicPages.Contains(pageType);
-    }
-}
-
-@code {
-    public class SetupStatusResponse
-    {
-        public bool SetupRequired { get; set; }
     }
 }
 

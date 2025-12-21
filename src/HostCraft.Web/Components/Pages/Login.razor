@@ -5,6 +5,8 @@
 @inject HttpClient Http
 @inject ILogger<Login> Logger
 
+@using HostCraft.Web.Models
+
 <PageTitle>Login - HostCraft</PageTitle>
 
 <div class="login-container">
@@ -197,11 +199,6 @@
         public string Password { get; set; } = string.Empty;
 
         public bool RememberMe { get; set; } = false;
-    }
-
-    public class SetupStatusResponse
-    {
-        public bool SetupRequired { get; set; }
     }
 }
 
