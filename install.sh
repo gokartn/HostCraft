@@ -237,30 +237,46 @@ echo "🐳 Starting HostCraft..."
 if [ "$SWARM_ACTIVE" = "true" ]; then
     # Deploy as Docker Swarm stack
     echo "   Deploying as Docker Swarm stack..."
+    
+    # Create temporary compose file with substituted variables
+    perl -pe "s/\\\$\\\{POSTGRES_PASSWORD\\\}/$POSTGRES_PASSWORD/g; s/\\\$\\\{ENCRYPTION_KEY\\\}/$ENCRYPTION_KEY/g" docker-compose.yml > /tmp/docker-compose-substituted.yml
+    
     if [ "$CONFIGURE_LOCALHOST" = "true" ]; then
         if [ "$LOCALHOST_SWARM_MANAGER" = "true" ]; then
-            LOCALHOST_IS_SWARM_MANAGER=true envsubst < docker-compose.yml | docker stack deploy -c - hostcraft
+            LOCALHOST_IS_SWARM_MANAGER=true docker stack deploy -c /tmp/docker-compose-substituted.yml hostcraft
         else
-            envsubst < docker-compose.yml | docker stack deploy -c - hostcraft
+            docker stack deploy -c /tmp/docker-compose-substituted.yml hostcraft
         fi
     else
-        SKIP_LOCALHOST_SEED=true envsubst < docker-compose.yml | docker stack deploy -c - hostcraft
+        SKIP_LOCALHOST_SEED=true docker stack deploy -c /tmp/docker-compose-substituted.yml hostcraft
     fi
+    
+    # Clean up temporary file
+    rm -f /tmp/docker-compose-substituted.yml
+    
     echo "   ✅ Stack deployed successfully"
     echo "   📊 Check status: docker stack ps hostcraft"
     echo "   📋 View services: docker service ls"
 else
     # Deploy with Docker Compose
     echo "   Deploying with Docker Compose..."
+    
+    # Create temporary compose file with substituted variables
+    perl -pe "s/\\\$\\\{POSTGRES_PASSWORD\\\}/$POSTGRES_PASSWORD/g; s/\\\$\\\{ENCRYPTION_KEY\\\}/$ENCRYPTION_KEY/g" docker-compose.yml > /tmp/docker-compose-substituted.yml
+    
     if [ "$CONFIGURE_LOCALHOST" = "true" ]; then
         if [ "$LOCALHOST_SWARM_MANAGER" = "true" ]; then
-            LOCALHOST_IS_SWARM_MANAGER=true envsubst < docker-compose.yml | docker compose -f - up -d
+            LOCALHOST_IS_SWARM_MANAGER=true docker compose -f /tmp/docker-compose-substituted.yml up -d
         else
-            envsubst < docker-compose.yml | docker compose -f - up -d
+            docker compose -f /tmp/docker-compose-substituted.yml up -d
         fi
     else
-        SKIP_LOCALHOST_SEED=true envsubst < docker-compose.yml | docker compose -f - up -d
+        SKIP_LOCALHOST_SEED=true docker compose -f /tmp/docker-compose-substituted.yml up -d
     fi
+    
+    # Clean up temporary file
+    rm -f /tmp/docker-compose-substituted.yml
+    
     echo "   ✅ Containers started successfully"
 fi
 echo ""
