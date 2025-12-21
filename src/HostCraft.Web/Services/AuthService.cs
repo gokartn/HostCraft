@@ -53,10 +53,6 @@ public class AuthService : IWebAuthService
                     await _jsRuntime.InvokeVoidAsync("localStorage.setItem", "authToken", authResponse.Token);
                     await _jsRuntime.InvokeVoidAsync("localStorage.setItem", "refreshToken", authResponse.RefreshToken);
 
-                    // Set authorization header for future requests
-                    _httpClient.DefaultRequestHeaders.Authorization =
-                        new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", authResponse.Token);
-
                     // Notify authentication state provider
                     if (_authStateProvider is HostCraftAuthenticationStateProvider hostCraftAuthProvider)
                     {
@@ -97,9 +93,6 @@ public class AuthService : IWebAuthService
             // Clear tokens from local storage
             await _jsRuntime.InvokeVoidAsync("localStorage.removeItem", "authToken");
             await _jsRuntime.InvokeVoidAsync("localStorage.removeItem", "refreshToken");
-
-            // Clear authorization header
-            _httpClient.DefaultRequestHeaders.Authorization = null;
 
             // Notify authentication state provider
             if (_authStateProvider is HostCraftAuthenticationStateProvider hostCraftAuthProvider)
@@ -174,10 +167,6 @@ public class AuthService : IWebAuthService
                     await _jsRuntime.InvokeVoidAsync("localStorage.setItem", "authToken", authResponse.Token);
                     await _jsRuntime.InvokeVoidAsync("localStorage.setItem", "refreshToken", authResponse.RefreshToken);
 
-                    // Update authorization header
-                    _httpClient.DefaultRequestHeaders.Authorization =
-                        new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", authResponse.Token);
-
                     _logger.LogInformation("Token refreshed successfully");
                     return AuthResult.Succeeded(authResponse.Token, authResponse.RefreshToken, authResponse.ExpiresAt, authResponse.User);
                 }
@@ -221,10 +210,6 @@ public class AuthService : IWebAuthService
             var token = await GetTokenAsync();
             if (!string.IsNullOrEmpty(token))
             {
-                // Set authorization header
-                _httpClient.DefaultRequestHeaders.Authorization =
-                    new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
-
                 // Try to validate the token by making a request to get current user
                 try
                 {

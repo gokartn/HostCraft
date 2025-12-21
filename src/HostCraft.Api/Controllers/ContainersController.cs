@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using HostCraft.Core.Interfaces;
@@ -7,6 +8,7 @@ namespace HostCraft.Api.Controllers;
 
 [ApiController]
 [Route("api/servers/{serverId}/[controller]")]
+[Authorize]
 public class ContainersController : ControllerBase
 {
     private readonly HostCraftDbContext _context;

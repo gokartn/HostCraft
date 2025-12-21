@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using HostCraft.Core.Interfaces;
 using HostCraft.Core.Enums;
@@ -8,6 +9,7 @@ namespace HostCraft.Api.Controllers;
 
 [ApiController]
 [Route("api/servers/{serverId}/[controller]")]
+[Authorize]
 public class NodesController : ControllerBase
 {
     private readonly HostCraftDbContext _context;

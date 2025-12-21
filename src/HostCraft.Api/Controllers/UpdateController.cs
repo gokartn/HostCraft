@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using HostCraft.Core.Interfaces;
 
@@ -5,6 +6,7 @@ namespace HostCraft.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
+[Authorize]
 public class UpdateController : ControllerBase
 {
     private readonly IUpdateService _updateService;

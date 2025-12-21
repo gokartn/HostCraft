@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using HostCraft.Core.Enums;
@@ -7,6 +8,7 @@ namespace HostCraft.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
+[Authorize]
 public class DeploymentsController : ControllerBase
 {
     private readonly HostCraftDbContext _context;

@@ -3,11 +3,13 @@ using Microsoft.EntityFrameworkCore;
 using HostCraft.Core.Interfaces;
 using HostCraft.Infrastructure.Persistence;
 using HostCraft.Core.Enums;
+using Microsoft.AspNetCore.Authorization;
 
 namespace HostCraft.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
+[Authorize]
 public class HealthController : ControllerBase
 {
     private readonly HostCraftDbContext _context;

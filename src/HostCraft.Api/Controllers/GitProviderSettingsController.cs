@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using HostCraft.Core.Entities;
@@ -8,6 +9,7 @@ namespace HostCraft.Api.Controllers;
 
 [ApiController]
 [Route("api/gitprovider-settings")]
+[Authorize]
 public class GitProviderSettingsController : ControllerBase
 {
     private readonly HostCraftDbContext _context;

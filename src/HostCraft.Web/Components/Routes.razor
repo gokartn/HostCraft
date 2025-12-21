@@ -6,11 +6,11 @@
 
 <Router AppAssembly="typeof(Program).Assembly" NotFoundPage="typeof(Pages.NotFound)">
     <Found Context="routeData">
-        @if (IsCheckingSetup)
+        @if (IsCheckingSetup || IsCheckingAuth)
         {
             <div class="setup-check-loading">
                 <div class="spinner"></div>
-                <p>Checking setup status...</p>
+                <p>@(IsCheckingSetup ? "Checking setup status..." : "Checking authentication...")</p>
             </div>
         }
         else if (SetupRequired && routeData.PageType != typeof(Pages.Setup))
@@ -38,11 +38,14 @@
     private bool IsCheckingSetup = true;
     private bool SetupRequired = false;
     private bool IsAuthenticated = false;
+    private bool IsCheckingAuth = true;
 
     protected override async Task OnInitializedAsync()
     {
         await CheckSetupStatus();
         await CheckAuthenticationStatus();
+        IsCheckingAuth = false;
+        StateHasChanged();
     }
 
     private async Task CheckSetupStatus()
@@ -83,6 +86,8 @@
             // Check if user is authenticated
             var authState = await AuthStateProvider.GetAuthenticationStateAsync();
             IsAuthenticated = authState.User?.Identity?.IsAuthenticated == true;
+            
+            Logger.LogInformation("Authentication check completed. IsAuthenticated: {IsAuthenticated}", IsAuthenticated);
         }
         catch (Exception ex)
         {

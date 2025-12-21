@@ -6,6 +6,7 @@ using Yarp.ReverseProxy.Configuration;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Components.Authorization;
 using HostCraft.Web.Services;
+using HostCraft.Web.Handlers;
 
 // Configure Serilog
 Log.Logger = new LoggerConfiguration()
@@ -83,7 +84,11 @@ builder.Services.AddHttpClient("HostCraftAPI", client =>
     client.BaseAddress = new Uri(apiUrl);
     client.Timeout = TimeSpan.FromSeconds(30);
 })
+.AddHttpMessageHandler<AuthenticationHandler>()
 .SetHandlerLifetime(TimeSpan.FromMinutes(5)); // Prevent socket exhaustion
+
+// Register the authentication handler
+builder.Services.AddTransient<AuthenticationHandler>();
 
 // Register as scoped to match Blazor component lifecycle
 builder.Services.AddScoped(sp =>

@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using HostCraft.Core.Entities;
@@ -8,6 +9,7 @@ namespace HostCraft.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
+[Authorize]
 public class SystemSettingsController : ControllerBase
 {
     private readonly HostCraftDbContext _context;
