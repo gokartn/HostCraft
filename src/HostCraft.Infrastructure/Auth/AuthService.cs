@@ -258,7 +258,17 @@ public class AuthService : IAuthService
 
     public async Task<bool> HasAnyUsersAsync()
     {
-        return await _context.Users.AnyAsync();
+        try
+        {
+            return await _context.Users.AnyAsync();
+        }
+        catch (Exception ex)
+        {
+            // If we can't query the database (table doesn't exist, connection issue, etc.)
+            // assume no users exist so setup can proceed
+            _logger.LogWarning(ex, "Failed to check if users exist, assuming setup is required");
+            return false;
+        }
     }
 
     public async Task<bool> RevokeRefreshTokenAsync(string refreshToken, string? ipAddress = null)

@@ -174,8 +174,18 @@ public class AuthController : ControllerBase
     [AllowAnonymous]
     public async Task<ActionResult<SetupStatusResponse>> CheckSetupRequired()
     {
-        var hasUsers = await _authService.HasAnyUsersAsync();
-        return Ok(new SetupStatusResponse { SetupRequired = !hasUsers });
+        try
+        {
+            var hasUsers = await _authService.HasAnyUsersAsync();
+            _logger.LogInformation("Setup check: hasUsers={HasUsers}, setupRequired={SetupRequired}", hasUsers, !hasUsers);
+            return Ok(new SetupStatusResponse { SetupRequired = !hasUsers });
+        }
+        catch (Exception ex)
+        {
+            // If anything fails, assume setup is required
+            _logger.LogError(ex, "Error checking setup status, assuming setup is required");
+            return Ok(new SetupStatusResponse { SetupRequired = true });
+        }
     }
 
     /// <summary>
