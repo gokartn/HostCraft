@@ -41,13 +41,24 @@
     private bool SetupRequired = false;
     private bool IsAuthenticated = false;
     private bool IsCheckingAuth = true;
+    private bool _hasRendered = false;
 
     protected override async Task OnInitializedAsync()
     {
+        // Only check setup status during initialization (doesn't require JS)
         await CheckSetupStatus();
-        await CheckAuthenticationStatus();
-        IsCheckingAuth = false;
-        StateHasChanged();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && !_hasRendered)
+        {
+            _hasRendered = true;
+            // Check authentication after first render when JS interop is available
+            await CheckAuthenticationStatus();
+            IsCheckingAuth = false;
+            StateHasChanged();
+        }
     }
 
     private async Task CheckSetupStatus()

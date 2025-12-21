@@ -121,10 +121,23 @@ public class AuthService : IWebAuthService
     {
         try
         {
+            // Check if JS interop is available (not during pre-rendering)
+            if (_jsRuntime is IJSInProcessRuntime)
+            {
+                return ((IJSInProcessRuntime)_jsRuntime).Invoke<string>("localStorage.getItem", "authToken");
+            }
+
             return await _jsRuntime.InvokeAsync<string>("localStorage.getItem", "authToken");
         }
-        catch
+        catch (InvalidOperationException)
         {
+            // JS interop not available during pre-rendering
+            _logger.LogDebug("JS interop not available yet (pre-rendering)");
+            return null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Error getting token from localStorage");
             return null;
         }
     }
