@@ -1,6 +1,7 @@
 namespace HostCraft.Web.Models;
 
 using System.ComponentModel.DataAnnotations;
+using System.Text.Json.Serialization;
 
 /// <summary>
 /// Request model for user login.
@@ -45,11 +46,22 @@ public class RefreshTokenRequest
 /// </summary>
 public class AuthResponse
 {
+    [JsonPropertyName("success")]
     public bool Success { get; set; }
+
+    [JsonPropertyName("token")]
     public string? Token { get; set; }
+
+    [JsonPropertyName("refreshToken")]
     public string? RefreshToken { get; set; }
+
+    [JsonPropertyName("expiresAt")]
     public DateTime? ExpiresAt { get; set; }
+
+    [JsonPropertyName("user")]
     public User? User { get; set; }
+
+    [JsonPropertyName("error")]
     public string? Error { get; set; }
 }
 
@@ -58,12 +70,25 @@ public class AuthResponse
 /// </summary>
 public class User
 {
+    [JsonPropertyName("id")]
     public int Id { get; set; }
+
+    [JsonPropertyName("email")]
     public string Email { get; set; } = string.Empty;
+
+    [JsonPropertyName("name")]
     public string? Name { get; set; }
+
+    [JsonPropertyName("isAdmin")]
     public bool IsAdmin { get; set; }
+
+    [JsonPropertyName("createdAt")]
     public DateTime CreatedAt { get; set; }
+
+    [JsonPropertyName("lastLoginAt")]
     public DateTime? LastLoginAt { get; set; }
+
+    [JsonPropertyName("isActive")]
     public bool IsActive { get; set; } = true;
 }
 
