@@ -36,33 +36,43 @@
                 <p>Let's set up your first administrator account.</p>
             </div>
 
-            <EditForm Model="@SetupRequest" OnValidSubmit="HandleSetup" FormName="setupForm">
-                <DataAnnotationsValidator />
-                <ValidationSummary />
+            <EditForm Model="@SetupRequest" OnSubmit="HandleSetup" FormName="setupForm">
 
                 <div class="form-group">
                     <label for="name">Name</label>
                     <InputText id="name" @bind-Value="SetupRequest.Name" class="form-control" placeholder="Your name" />
-                    <ValidationMessage For="@(() => SetupRequest.Name)" />
+                    @if (ValidationErrors.ContainsKey("Name"))
+                    {
+                        <div class="validation-error">@ValidationErrors["Name"]</div>
+                    }
                 </div>
 
                 <div class="form-group">
                     <label for="email">Email</label>
                     <InputText id="email" @bind-Value="SetupRequest.Email" type="email" class="form-control" placeholder="admin@example.com" />
-                    <ValidationMessage For="@(() => SetupRequest.Email)" />
+                    @if (ValidationErrors.ContainsKey("Email"))
+                    {
+                        <div class="validation-error">@ValidationErrors["Email"]</div>
+                    }
                 </div>
 
                 <div class="form-group">
                     <label for="password">Password</label>
                     <InputText id="password" @bind-Value="SetupRequest.Password" type="password" class="form-control" placeholder="Min. 8 characters" />
-                    <ValidationMessage For="@(() => SetupRequest.Password)" />
+                    @if (ValidationErrors.ContainsKey("Password"))
+                    {
+                        <div class="validation-error">@ValidationErrors["Password"]</div>
+                    }
                     <small class="form-hint">Must contain uppercase, lowercase, and numbers</small>
                 </div>
 
                 <div class="form-group">
                     <label for="confirmPassword">Confirm Password</label>
                     <InputText id="confirmPassword" @bind-Value="SetupRequest.ConfirmPassword" type="password" class="form-control" placeholder="Confirm your password" />
-                    <ValidationMessage For="@(() => SetupRequest.ConfirmPassword)" />
+                    @if (ValidationErrors.ContainsKey("ConfirmPassword"))
+                    {
+                        <div class="validation-error">@ValidationErrors["ConfirmPassword"]</div>
+                    }
                 </div>
 
                 @if (!string.IsNullOrEmpty(ErrorMessage))
@@ -95,6 +105,7 @@
     private bool SetupRequired = false;
     private bool IsSubmitting = false;
     private string ErrorMessage = "";
+    private Dictionary<string, string> ValidationErrors { get; set; } = new();
     private SetupRequestDto SetupRequest { get; set; } = new();
 
     protected override async Task OnInitializedAsync()
@@ -135,10 +146,59 @@
     {
         // Clear previous errors
         ErrorMessage = "";
+        ValidationErrors.Clear();
+
+        // Manual validation
+        bool isValid = true;
+
+        if (string.IsNullOrWhiteSpace(SetupRequest.Name))
+        {
+            ValidationErrors["Name"] = "The Name field is required.";
+            isValid = false;
+        }
+
+        if (string.IsNullOrWhiteSpace(SetupRequest.Email))
+        {
+            ValidationErrors["Email"] = "The Email field is required.";
+            isValid = false;
+        }
+        else if (!IsValidEmail(SetupRequest.Email))
+        {
+            ValidationErrors["Email"] = "Please enter a valid email address.";
+            isValid = false;
+        }
+
+        if (string.IsNullOrWhiteSpace(SetupRequest.Password))
+        {
+            ValidationErrors["Password"] = "The Password field is required.";
+            isValid = false;
+        }
+        else if (SetupRequest.Password.Length < 8)
+        {
+            ValidationErrors["Password"] = "Password must be at least 8 characters long.";
+            isValid = false;
+        }
+
+        if (string.IsNullOrWhiteSpace(SetupRequest.ConfirmPassword))
+        {
+            ValidationErrors["ConfirmPassword"] = "The Confirm Password field is required.";
+            isValid = false;
+        }
+        else if (SetupRequest.ConfirmPassword != SetupRequest.Password)
+        {
+            ValidationErrors["ConfirmPassword"] = "The password and confirmation password do not match.";
+            isValid = false;
+        }
+
+        if (!isValid)
+        {
+            StateHasChanged();
+            return;
+        }
 
         // Debug logging
-        Logger.LogInformation("Setup validation - Name: '{Name}', Length: {Length}",
-            SetupRequest.Name ?? "null", SetupRequest.Name?.Length ?? 0);
+        Logger.LogInformation("Setup validation passed - Name: '{Name}', Email: '{Email}'",
+            SetupRequest.Name ?? "null", SetupRequest.Email ?? "null");
 
         IsSubmitting = true;
 
@@ -178,6 +238,19 @@
     private void NavigateToLogin()
     {
         Navigation.NavigateTo("/login");
+    }
+
+    private bool IsValidEmail(string email)
+    {
+        try
+        {
+            var addr = new System.Net.Mail.MailAddress(email);
+            return addr.Address == email;
+        }
+        catch
+        {
+            return false;
+        }
     }
 }
 
@@ -288,6 +361,14 @@
     margin-top: 6px;
     color: #6b6b85;
     font-size: 12px;
+}
+
+.validation-error {
+    display: block;
+    margin-top: 6px;
+    color: #f87171;
+    font-size: 12px;
+    font-weight: 500;
 }
 
 .setup-actions {
