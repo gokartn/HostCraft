@@ -137,13 +137,17 @@
             if (response.IsSuccessStatusCode)
             {
                 var result = await response.Content.ReadFromJsonAsync<SetupStatusResponse>();
-                setupRequired = result?.SetupRequired ?? false;
+                setupRequired = result?.SetupRequired ?? true; // Default to true if null
+            }
+            else
+            {
+                setupRequired = true; // If API fails, assume setup required
             }
         }
         catch (Exception ex)
         {
-            Logger.LogWarning(ex, "Could not check setup status");
-            setupRequired = false;
+            Logger.LogWarning(ex, "Could not check setup status, assuming setup required");
+            setupRequired = true; // If exception, assume setup required
         }
     }
 

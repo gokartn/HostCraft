@@ -56,18 +56,19 @@
             if (response.IsSuccessStatusCode)
             {
                 var result = await response.Content.ReadFromJsonAsync<SetupStatusResponse>();
-                SetupRequired = result?.SetupRequired ?? false;
+                SetupRequired = result?.SetupRequired ?? true; // Default to setup required if null
+                Logger.LogInformation("Setup status check: SetupRequired={SetupRequired}", SetupRequired);
             }
             else
             {
-                Logger.LogWarning("Failed to check setup status: {StatusCode}", response.StatusCode);
-                SetupRequired = false; // Allow normal routing if we can't check
+                Logger.LogWarning("Failed to check setup status: {StatusCode}, assuming setup required", response.StatusCode);
+                SetupRequired = true; // Assume setup required if API fails
             }
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Error checking setup status");
-            SetupRequired = false; // Allow normal routing on error
+            Logger.LogError(ex, "Error checking setup status, assuming setup required");
+            SetupRequired = true; // Assume setup required on error
         }
         finally
         {
