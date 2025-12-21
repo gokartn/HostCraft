@@ -16,8 +16,8 @@ services:
       ASPNETCORE_ENVIRONMENT: Production
       ASPNETCORE_URLS: http://+:8080
       ApiUrl: http://hostcraft_api:8080
-      ConnectionStrings__DefaultConnection: Host=hostcraft_postgres;Database=hostcraft;Username=hostcraft;Password=your_secure_password_here
-      Encryption__Key: ${ENCRYPTION_KEY:-}
+      ConnectionStrings__DefaultConnection: Host=hostcraft_postgres;Database=hostcraft;Username=hostcraft;Password=${POSTGRES_PASSWORD}
+      Encryption__Key: ${ENCRYPTION_KEY}
     depends_on:
       - api
       - postgres
@@ -71,9 +71,9 @@ services:
       <<: *common-variables
       ASPNETCORE_ENVIRONMENT: Production
       ASPNETCORE_URLS: http://+:8080
-      ConnectionStrings__DefaultConnection: Host=postgres;Database=hostcraft;Username=hostcraft;Password=your_secure_password_here
+      ConnectionStrings__DefaultConnection: Host=postgres;Database=hostcraft;Username=hostcraft;Password=${POSTGRES_PASSWORD}
       SKIP_LOCALHOST_SEED: "true"  # Temporarily disabled due to schema migration
-      Encryption__Key: ${ENCRYPTION_KEY:-}
+      Encryption__Key: ${ENCRYPTION_KEY}
       # Git Provider OAuth - set these to enable Git integrations
       GitHub__ClientId: ${GITHUB_CLIENT_ID:-}
       GitHub__ClientSecret: ${GITHUB_CLIENT_SECRET:-}
@@ -122,7 +122,7 @@ services:
     environment:
       - POSTGRES_DB=hostcraft
       - POSTGRES_USER=hostcraft
-      - POSTGRES_PASSWORD=your_secure_password_here
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
     ports:
       - "5432:5432"
     volumes:
