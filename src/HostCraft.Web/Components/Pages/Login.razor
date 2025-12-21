@@ -2,6 +2,7 @@
 @layout EmptyLayout
 @inject NavigationManager Navigation
 @inject IWebAuthService AuthService
+@inject HttpClient Http
 @inject ILogger<Login> Logger
 
 <PageTitle>Login - HostCraft</PageTitle>
@@ -18,7 +19,23 @@
             @if (!string.IsNullOrEmpty(errorMessage))
             {
                 <div class="alert alert-error">
-                    @errorMessage
+                    <svg class="alert-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <line x1="12" y1="8" x2="12" y2="12"></line>
+                        <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                    </svg>
+                    <span>@errorMessage</span>
+                </div>
+            }
+
+            @if (successMessage != null)
+            {
+                <div class="alert alert-success">
+                    <svg class="alert-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                        <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                    </svg>
+                    <span>@successMessage</span>
                 </div>
             }
 
@@ -27,14 +44,34 @@
 
                 <div class="form-group">
                     <label for="email">Email</label>
-                    <InputText id="email" @bind-Value="loginModel.Email" placeholder="Enter your email" class="form-control" />
+                    <div class="input-wrapper">
+                        <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
+                            <polyline points="22,6 12,13 2,6"></polyline>
+                        </svg>
+                        <InputText id="email" @bind-Value="loginModel.Email" placeholder="you@example.com" class="form-control with-icon" />
+                    </div>
                     <ValidationMessage For="() => loginModel.Email" class="validation-error" />
                 </div>
 
                 <div class="form-group">
                     <label for="password">Password</label>
-                    <InputText id="password" @bind-Value="loginModel.Password" type="password" placeholder="Enter your password" class="form-control" />
+                    <div class="input-wrapper">
+                        <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                            <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                        </svg>
+                        <InputText id="password" @bind-Value="loginModel.Password" type="password" placeholder="Enter your password" class="form-control with-icon" />
+                    </div>
                     <ValidationMessage For="() => loginModel.Password" class="validation-error" />
+                </div>
+
+                <div class="form-options">
+                    <label class="checkbox-wrapper">
+                        <input type="checkbox" @bind="loginModel.RememberMe" />
+                        <span class="checkmark"></span>
+                        <span class="checkbox-label">Remember me</span>
+                    </label>
                 </div>
 
                 <div class="form-actions">
@@ -46,6 +83,11 @@
                         }
                         else
                         {
+                            <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path>
+                                <polyline points="10 17 15 12 10 7"></polyline>
+                                <line x1="15" y1="12" x2="3" y2="12"></line>
+                            </svg>
                             <span>Sign In</span>
                         }
                     </button>
@@ -53,16 +95,57 @@
             </EditForm>
         </div>
 
-        <div class="login-footer">
-            <p>Need to set up HostCraft? <a href="/setup">Initial Setup</a></p>
-        </div>
+        @if (setupRequired)
+        {
+            <div class="login-footer">
+                <p>First time? <a href="/setup">Complete Initial Setup</a></p>
+            </div>
+        }
+    </div>
+
+    <div class="login-branding">
+        <p>Self-hosted PaaS with Docker Swarm support</p>
     </div>
 </div>
 
 @code {
     private LoginModel loginModel = new();
     private string? errorMessage;
+    private string? successMessage;
     private bool isLoading;
+    private bool setupRequired = false;
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Check if setup is required (to show/hide setup link)
+        await CheckSetupStatus();
+
+        // Check for success message from setup completion
+        var uri = new Uri(Navigation.Uri);
+        var query = System.Web.HttpUtility.ParseQueryString(uri.Query);
+        if (query["setup"] == "complete")
+        {
+            successMessage = "Account created successfully! Please sign in.";
+        }
+    }
+
+    private async Task CheckSetupStatus()
+    {
+        try
+        {
+            var response = await Http.GetAsync("api/auth/setup-required");
+            if (response.IsSuccessStatusCode)
+            {
+                var result = await response.Content.ReadFromJsonAsync<SetupStatusResponse>();
+                setupRequired = result?.SetupRequired ?? false;
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Could not check setup status");
+            setupRequired = false;
+        }
+    }
 
     private async Task HandleLogin()
     {
@@ -70,6 +153,7 @@
 
         isLoading = true;
         errorMessage = null;
+        successMessage = null;
 
         try
         {
@@ -84,13 +168,13 @@
             }
             else
             {
-                errorMessage = result.Error ?? "Login failed";
+                errorMessage = result.Error ?? "Invalid email or password";
                 Logger.LogWarning("Login failed for user: {Email} - {Error}", loginModel.Email, errorMessage);
             }
         }
         catch (Exception ex)
         {
-            errorMessage = "An unexpected error occurred";
+            errorMessage = "Unable to connect to the server. Please try again.";
             Logger.LogError(ex, "Exception during login for user: {Email}", loginModel.Email);
         }
         finally
@@ -106,14 +190,21 @@
         public string Email { get; set; } = string.Empty;
 
         [System.ComponentModel.DataAnnotations.Required(ErrorMessage = "Password is required")]
-        [System.ComponentModel.DataAnnotations.MinLength(6, ErrorMessage = "Password must be at least 6 characters")]
         public string Password { get; set; } = string.Empty;
+
+        public bool RememberMe { get; set; } = false;
+    }
+
+    public class SetupStatusResponse
+    {
+        public bool SetupRequired { get; set; }
     }
 }
 
 <style>
 .login-container {
     display: flex;
+    flex-direction: column;
     justify-content: center;
     align-items: center;
     min-height: 100vh;
@@ -176,6 +267,26 @@
     font-size: 14px;
 }
 
+.input-wrapper {
+    position: relative;
+}
+
+.input-icon {
+    position: absolute;
+    left: 14px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 18px;
+    height: 18px;
+    color: #6b6b85;
+    pointer-events: none;
+    transition: color 0.2s ease;
+}
+
+.input-wrapper:focus-within .input-icon {
+    color: #8b5cf6;
+}
+
 .form-control {
     width: 100%;
     padding: 14px 16px;
@@ -188,6 +299,10 @@
     box-sizing: border-box;
 }
 
+.form-control.with-icon {
+    padding-left: 44px;
+}
+
 .form-control:focus {
     outline: none;
     border-color: #6366f1;
@@ -198,8 +313,67 @@
     color: #6b6b85;
 }
 
+.form-options {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.checkbox-wrapper {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    cursor: pointer;
+    user-select: none;
+}
+
+.checkbox-wrapper input[type="checkbox"] {
+    position: absolute;
+    opacity: 0;
+    cursor: pointer;
+    height: 0;
+    width: 0;
+}
+
+.checkmark {
+    height: 18px;
+    width: 18px;
+    background: rgba(10, 14, 39, 0.6);
+    border: 1px solid rgba(99, 102, 241, 0.3);
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+}
+
+.checkbox-wrapper:hover .checkmark {
+    border-color: #6366f1;
+}
+
+.checkbox-wrapper input:checked ~ .checkmark {
+    background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+    border-color: transparent;
+}
+
+.checkbox-wrapper input:checked ~ .checkmark::after {
+    content: "";
+    width: 5px;
+    height: 9px;
+    border: solid white;
+    border-width: 0 2px 2px 0;
+    transform: rotate(45deg);
+    margin-bottom: 2px;
+}
+
+.checkbox-label {
+    color: #a0a0b8;
+    font-size: 14px;
+}
+
 .form-actions {
-    margin-top: 28px;
+    margin-top: 24px;
 }
 
 .btn {
@@ -215,6 +389,11 @@
     cursor: pointer;
     transition: all 0.2s ease;
     width: 100%;
+}
+
+.btn-icon {
+    width: 18px;
+    height: 18px;
 }
 
 .btn-primary {
@@ -249,6 +428,9 @@
 }
 
 .alert {
+    display: flex;
+    align-items: center;
+    gap: 12px;
     padding: 14px 16px;
     border-radius: 10px;
     margin-bottom: 20px;
@@ -256,10 +438,22 @@
     font-size: 14px;
 }
 
+.alert-icon {
+    width: 20px;
+    height: 20px;
+    flex-shrink: 0;
+}
+
 .alert-error {
     background-color: rgba(239, 68, 68, 0.1);
     color: #f87171;
     border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.alert-success {
+    background-color: rgba(34, 197, 94, 0.1);
+    color: #4ade80;
+    border: 1px solid rgba(34, 197, 94, 0.3);
 }
 
 .validation-error {
@@ -271,7 +465,8 @@
 
 .login-footer {
     text-align: center;
-    padding-top: 16px;
+    padding-top: 20px;
+    margin-top: 8px;
     border-top: 1px solid rgba(99, 102, 241, 0.1);
 }
 
@@ -293,8 +488,33 @@
     text-decoration: underline;
 }
 
+.login-branding {
+    margin-top: 32px;
+    text-align: center;
+}
+
+.login-branding p {
+    color: #6b6b85;
+    font-size: 13px;
+    margin: 0;
+}
+
 @@keyframes spin {
     0% { transform: rotate(0deg); }
     100% { transform: rotate(360deg); }
+}
+
+@@media (max-width: 480px) {
+    .login-card {
+        padding: 32px 24px;
+    }
+
+    .logo-icon {
+        font-size: 3rem;
+    }
+
+    .login-header h1 {
+        font-size: 24px;
+    }
 }
 </style>
