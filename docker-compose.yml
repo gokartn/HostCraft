@@ -19,7 +19,8 @@ services:
       ConnectionStrings__DefaultConnection: Host=hostcraft_postgres;Database=hostcraft;Username=hostcraft;Password=${POSTGRES_PASSWORD}
       Encryption__Key: ${ENCRYPTION_KEY}
     depends_on:
-      api: {}
+      api:
+        condition: service_started
       postgres:
         condition: service_healthy
     restart: unless-stopped  # For standalone mode
