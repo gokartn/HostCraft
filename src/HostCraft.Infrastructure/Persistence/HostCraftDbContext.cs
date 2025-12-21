@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using HostCraft.Core.Entities;
+using HostCraft.Infrastructure.Security;
 
 namespace HostCraft.Infrastructure.Persistence;
 
@@ -17,6 +18,8 @@ public class HostCraftDbContext : DbContext
     public DbSet<EnvironmentVariable> EnvironmentVariables => Set<EnvironmentVariable>();
     public DbSet<PrivateKey> PrivateKeys => Set<PrivateKey>();
     public DbSet<User> Users => Set<User>();
+    public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
+    public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
     public DbSet<Region> Regions => Set<Region>();
     public DbSet<Backup> Backups => Set<Backup>();
     public DbSet<HealthCheck> HealthChecks => Set<HealthCheck>();
@@ -41,6 +44,8 @@ public class HostCraftDbContext : DbContext
         ConfigureEnvironmentVariable(modelBuilder);
         ConfigurePrivateKey(modelBuilder);
         ConfigureUser(modelBuilder);
+        ConfigureRefreshToken(modelBuilder);
+        ConfigureAuditLog(modelBuilder);
         ConfigureSystemSettings(modelBuilder);
         ConfigureGitProviderSettings(modelBuilder);
     }
@@ -192,6 +197,13 @@ public class HostCraftDbContext : DbContext
             
             entity.HasIndex(e => e.Uuid).IsUnique();
             entity.HasIndex(e => e.Email).IsUnique();
+
+            // Encrypt sensitive fields at rest
+            entity.Property(e => e.TwoFactorSecret).HasConversion<EncryptedStringConverter>();
+            entity.Property(e => e.RecoveryCodes).HasConversion<EncryptedStringConverter>();
+            entity.Property(e => e.EmailConfirmationToken).HasConversion<EncryptedStringConverter>();
+            entity.Property(e => e.PasswordResetToken).HasConversion<EncryptedStringConverter>();
+            entity.Property(e => e.SecurityStamp).HasConversion<EncryptedStringConverter>();
         });
     }
     
@@ -287,6 +299,44 @@ public class HostCraftDbContext : DbContext
             entity.Property(e => e.CertificateStatus).HasMaxLength(100);
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
             entity.Property(e => e.UpdatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+            // Encrypt sensitive email address at rest
+            entity.Property(e => e.HostCraftLetsEncryptEmail).HasConversion<EncryptedStringConverter>();
+        });
+    }
+
+    private void ConfigureRefreshToken(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<RefreshToken>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Token).IsRequired();
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+            entity.HasIndex(e => e.Token).IsUnique();
+            entity.HasIndex(e => e.UserId);
+            entity.HasIndex(e => e.ExpiresAt);
+
+            entity.HasOne(e => e.User)
+                .WithMany()
+                .HasForeignKey(e => e.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+    }
+
+    private void ConfigureAuditLog(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<AuditLog>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.EventType).IsRequired().HasMaxLength(100);
+            entity.Property(e => e.Description).IsRequired();
+            entity.Property(e => e.Timestamp).HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+            entity.HasIndex(e => e.UserId);
+            entity.HasIndex(e => e.EventType);
+            entity.HasIndex(e => e.Timestamp);
+            entity.HasIndex(e => e.IsSuccess);
         });
     }
 
@@ -302,6 +352,9 @@ public class HostCraftDbContext : DbContext
             entity.HasIndex(e => new { e.Type, e.ApiUrl }).IsUnique();
 
             entity.Ignore(e => e.IsConfigured);
+
+            // Encrypt sensitive OAuth credentials at rest
+            entity.Property(e => e.ClientSecret).HasConversion<EncryptedStringConverter>();
         });
     }
 }

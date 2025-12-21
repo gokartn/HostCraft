@@ -143,6 +143,13 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
 
 var app = builder.Build();
 
+// Initialize the encrypted string converter with the encryption service
+using (var scope = app.Services.CreateScope())
+{
+    var encryptionService = scope.ServiceProvider.GetRequiredService<IEncryptionService>();
+    HostCraft.Infrastructure.Security.EncryptedStringConverter.Initialize(encryptionService);
+}
+
 // Use forwarded headers (must be first in pipeline for reverse proxy)
 app.UseForwardedHeaders();
 

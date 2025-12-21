@@ -8,10 +8,51 @@ namespace HostCraft.Infrastructure.Security;
 /// </summary>
 public class EncryptedStringConverter : ValueConverter<string, string>
 {
-    public EncryptedStringConverter(IEncryptionService encryptionService)
+    private static IEncryptionService? _encryptionService;
+
+    public EncryptedStringConverter()
         : base(
-            v => encryptionService.Encrypt(v),
-            v => encryptionService.Decrypt(v))
+            v => Encrypt(v),
+            v => Decrypt(v))
     {
+    }
+
+    /// <summary>
+    /// Initialize the converter with the encryption service.
+    /// This should be called during application startup.
+    /// </summary>
+    public static void Initialize(IEncryptionService encryptionService)
+    {
+        _encryptionService = encryptionService;
+    }
+
+    private static string Encrypt(string plainText)
+    {
+        if (string.IsNullOrEmpty(plainText))
+        {
+            return plainText;
+        }
+
+        if (_encryptionService == null)
+        {
+            throw new InvalidOperationException("EncryptedStringConverter has not been initialized with an encryption service.");
+        }
+
+        return _encryptionService.Encrypt(plainText);
+    }
+
+    private static string Decrypt(string cipherText)
+    {
+        if (string.IsNullOrEmpty(cipherText))
+        {
+            return cipherText;
+        }
+
+        if (_encryptionService == null)
+        {
+            throw new InvalidOperationException("EncryptedStringConverter has not been initialized with an encryption service.");
+        }
+
+        return _encryptionService.Decrypt(cipherText);
     }
 }

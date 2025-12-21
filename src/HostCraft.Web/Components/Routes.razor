@@ -1,11 +1,111 @@
-﻿<Router AppAssembly="typeof(Program).Assembly" NotFoundPage="typeof(Pages.NotFound)">
+﻿@inject HttpClient Http
+@inject NavigationManager Navigation
+@inject ILogger<Routes> Logger
+
+<Router AppAssembly="typeof(Program).Assembly" NotFoundPage="typeof(Pages.NotFound)">
     <Found Context="routeData">
-        <RouteView RouteData="routeData" DefaultLayout="typeof(Layout.MainLayout)" />
-        <FocusOnNavigate RouteData="routeData" Selector="h1" />
+        @if (IsCheckingSetup)
+        {
+            <div class="setup-check-loading">
+                <div class="spinner"></div>
+                <p>Checking setup status...</p>
+            </div>
+        }
+        else if (SetupRequired && routeData.PageType != typeof(Pages.Setup))
+        {
+            Navigation.NavigateTo("/setup");
+            <div>Redirecting to setup...</div>
+        }
+        else
+        {
+            <RouteView RouteData="routeData" DefaultLayout="typeof(Layout.MainLayout)" />
+            <FocusOnNavigate RouteData="routeData" Selector="h1" />
+        }
     </Found>
 </Router>
 
 @code {
     [CascadingParameter]
     public HttpContext? HttpContext { get; set; }
+
+    private bool IsCheckingSetup = true;
+    private bool SetupRequired = false;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await CheckSetupStatus();
+    }
+
+    private async Task CheckSetupStatus()
+    {
+        try
+        {
+            var response = await Http.GetAsync("api/auth/setup-required");
+            if (response.IsSuccessStatusCode)
+            {
+                var result = await response.Content.ReadFromJsonAsync<SetupStatusResponse>();
+                SetupRequired = result?.SetupRequired ?? false;
+            }
+            else
+            {
+                Logger.LogWarning("Failed to check setup status: {StatusCode}", response.StatusCode);
+                SetupRequired = false; // Allow normal routing if we can't check
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error checking setup status");
+            SetupRequired = false; // Allow normal routing on error
+        }
+        finally
+        {
+            IsCheckingSetup = false;
+            StateHasChanged();
+        }
+    }
 }
+
+@code {
+    public class SetupStatusResponse
+    {
+        public bool SetupRequired { get; set; }
+    }
+}
+
+<style>
+.setup-check-loading {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    z-index: 9999;
+}
+
+.setup-check-loading .spinner {
+    width: 40px;
+    height: 40px;
+    border: 4px solid rgba(255,255,255,0.3);
+    border-top: 4px solid white;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin-bottom: 20px;
+}
+
+.setup-check-loading p {
+    margin: 0;
+    font-size: 1.1rem;
+    opacity: 0.9;
+}
+
+@@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+</style>

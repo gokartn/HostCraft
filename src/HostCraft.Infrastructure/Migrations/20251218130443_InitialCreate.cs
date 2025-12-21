@@ -94,11 +94,72 @@ namespace HostCraft.Infrastructure.Migrations
                     Name = table.Column<string>(type: "text", nullable: true),
                     IsAdmin = table.Column<bool>(type: "boolean", nullable: false),
                     CreatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false, defaultValueSql: "CURRENT_TIMESTAMP"),
-                    LastLoginAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: true)
+                    LastLoginAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: true),
+                    AccessFailedCount = table.Column<int>(type: "integer", nullable: false, defaultValue: 0),
+                    EmailConfirmationToken = table.Column<string>(type: "text", nullable: true),
+                    EmailConfirmationTokenExpiresAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: true),
+                    EmailConfirmed = table.Column<bool>(type: "boolean", nullable: false, defaultValue: false),
+                    IsLockedOut = table.Column<bool>(type: "boolean", nullable: false, defaultValue: false),
+                    LastPasswordChangeAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: true),
+                    LockoutEnd = table.Column<DateTime>(type: "timestamp with time zone", nullable: true),
+                    PasswordResetToken = table.Column<string>(type: "text", nullable: true),
+                    PasswordResetTokenExpiresAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: true),
+                    RecoveryCodes = table.Column<string>(type: "text", nullable: true),
+                    SecurityStamp = table.Column<string>(type: "text", nullable: true),
+                    TwoFactorEnabled = table.Column<bool>(type: "boolean", nullable: false, defaultValue: false),
+                    TwoFactorSecret = table.Column<string>(type: "text", nullable: true)
                 },
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_Users", x => x.Id);
+                });
+
+            migrationBuilder.CreateTable(
+                name: "AuditLogs",
+                columns: table => new
+                {
+                    Id = table.Column<int>(type: "integer", nullable: false)
+                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
+                    UserId = table.Column<string>(type: "text", nullable: true),
+                    Username = table.Column<string>(type: "text", nullable: true),
+                    EventType = table.Column<string>(type: "character varying(100)", maxLength: 100, nullable: false),
+                    Description = table.Column<string>(type: "text", nullable: false),
+                    IpAddress = table.Column<string>(type: "text", nullable: true),
+                    UserAgent = table.Column<string>(type: "text", nullable: true),
+                    AdditionalData = table.Column<string>(type: "text", nullable: true),
+                    IsSuccess = table.Column<bool>(type: "boolean", nullable: false),
+                    Timestamp = table.Column<DateTime>(type: "timestamp with time zone", nullable: false, defaultValueSql: "CURRENT_TIMESTAMP"),
+                    SessionId = table.Column<string>(type: "text", nullable: true)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_AuditLogs", x => x.Id);
+                });
+
+            migrationBuilder.CreateTable(
+                name: "RefreshTokens",
+                columns: table => new
+                {
+                    Id = table.Column<int>(type: "integer", nullable: false)
+                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
+                    Token = table.Column<string>(type: "text", nullable: false),
+                    UserId = table.Column<int>(type: "integer", nullable: false),
+                    ExpiresAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
+                    CreatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false, defaultValueSql: "CURRENT_TIMESTAMP"),
+                    CreatedByIp = table.Column<string>(type: "text", nullable: true),
+                    RevokedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: true),
+                    RevokedByIp = table.Column<string>(type: "text", nullable: true),
+                    ReplacedByToken = table.Column<string>(type: "text", nullable: true)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_RefreshTokens", x => x.Id);
+                    table.ForeignKey(
+                        name: "FK_RefreshTokens_Users_UserId",
+                        column: x => x.UserId,
+                        principalTable: "Users",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Cascade);
                 });
 
             migrationBuilder.CreateTable(
@@ -663,6 +724,42 @@ namespace HostCraft.Infrastructure.Migrations
                 unique: true);
 
             migrationBuilder.CreateIndex(
+                name: "IX_AuditLogs_EventType",
+                table: "AuditLogs",
+                column: "EventType");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_AuditLogs_IsSuccess",
+                table: "AuditLogs",
+                column: "IsSuccess");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_AuditLogs_Timestamp",
+                table: "AuditLogs",
+                column: "Timestamp");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_AuditLogs_UserId",
+                table: "AuditLogs",
+                column: "UserId");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_RefreshTokens_ExpiresAt",
+                table: "RefreshTokens",
+                column: "ExpiresAt");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_RefreshTokens_Token",
+                table: "RefreshTokens",
+                column: "Token",
+                unique: true);
+
+            migrationBuilder.CreateIndex(
+                name: "IX_RefreshTokens_UserId",
+                table: "RefreshTokens",
+                column: "UserId");
+
+            migrationBuilder.CreateIndex(
                 name: "IX_Volumes_ApplicationId",
                 table: "Volumes",
                 column: "ApplicationId");
@@ -683,6 +780,12 @@ namespace HostCraft.Infrastructure.Migrations
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
+            migrationBuilder.DropTable(
+                name: "AuditLogs");
+
+            migrationBuilder.DropTable(
+                name: "RefreshTokens");
+
             migrationBuilder.DropTable(
                 name: "Backups");
 

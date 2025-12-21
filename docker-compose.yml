@@ -17,6 +17,7 @@ services:
       ASPNETCORE_URLS: http://+:8080
       ApiUrl: http://hostcraft_api:8080
       ConnectionStrings__DefaultConnection: Host=hostcraft_postgres;Database=hostcraft;Username=hostcraft;Password=your_secure_password_here
+      Encryption__Key: ${ENCRYPTION_KEY:-}
     depends_on:
       - api
       - postgres
@@ -72,6 +73,7 @@ services:
       ASPNETCORE_URLS: http://+:8080
       ConnectionStrings__DefaultConnection: Host=postgres;Database=hostcraft;Username=hostcraft;Password=your_secure_password_here
       SKIP_LOCALHOST_SEED: "true"  # Temporarily disabled due to schema migration
+      Encryption__Key: ${ENCRYPTION_KEY:-}
       # Git Provider OAuth - set these to enable Git integrations
       GitHub__ClientId: ${GITHUB_CLIENT_ID:-}
       GitHub__ClientSecret: ${GITHUB_CLIENT_SECRET:-}

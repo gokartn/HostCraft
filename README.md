@@ -59,7 +59,68 @@ docker-compose ps
 docker-compose logs -f
 ```
 
-## 🗑️ Uninstallation
+## � Security & Encryption
+
+HostCraft implements enterprise-grade security features to protect your data and infrastructure.
+
+### Data Encryption at Rest
+
+HostCraft automatically encrypts sensitive data stored in the database using AES-256-GCM encryption:
+
+**Encrypted Fields:**
+- User 2FA secrets and recovery codes
+- Email confirmation and password reset tokens
+- Security stamps and session tokens
+- Git provider OAuth client secrets
+- Let's Encrypt email addresses
+- SSH private keys and passphrases
+- Environment variable secrets
+
+**Encryption Key Management:**
+1. **Generate a secure encryption key:**
+   ```bash
+   # On Linux/Mac or WSL:
+   chmod +x scripts/generate-encryption-key.sh
+   ./scripts/generate-encryption-key.sh
+   
+   # Or run directly with bash:
+   bash scripts/generate-encryption-key.sh
+   ```
+
+2. **Set the encryption key in your environment:**
+   ```bash
+   export ENCRYPTION_KEY="your-generated-key-here"
+   ```
+
+3. **For Docker Compose, create a `.env` file:**
+   ```bash
+   ENCRYPTION_KEY=your-generated-key-here
+   ```
+
+**⚠️ CRITICAL SECURITY WARNING:**
+- **Backup your encryption key securely** - without it, encrypted data cannot be recovered
+- Store the key in a secure secret manager (AWS Secrets Manager, Azure Key Vault, etc.)
+- Never commit the key to version control
+- Rotate keys periodically using the built-in key rotation feature
+
+### Authentication & Authorization
+
+- **JWT-based authentication** with refresh tokens
+- **Two-factor authentication (2FA)** support
+- **Role-based access control (RBAC)**
+- **Secure password hashing** with PBKDF2
+- **Session management** with security stamps
+- **Audit logging** for all security events
+
+### Network Security
+
+- **HTTPS enforcement** with automatic Let's Encrypt certificates
+- **Reverse proxy protection** with Traefik
+- **Docker network isolation** between services
+- **SSH key-based server authentication**
+- **API rate limiting** and request validation
+
+## �🗑️ Uninstallation
 
 ### Quick Uninstall (keeps data)
 
