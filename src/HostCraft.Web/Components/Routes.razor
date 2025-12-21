@@ -1,6 +1,8 @@
 ﻿@inject HttpClient Http
 @inject NavigationManager Navigation
 @inject ILogger<Routes> Logger
+@inject AuthenticationStateProvider AuthStateProvider
+@inject IWebAuthService AuthService
 
 <Router AppAssembly="typeof(Program).Assembly" NotFoundPage="typeof(Pages.NotFound)">
     <Found Context="routeData">
@@ -16,6 +18,11 @@
             Navigation.NavigateTo("/setup");
             <div>Redirecting to setup...</div>
         }
+        else if (!IsAuthenticated && !IsPublicPage(routeData.PageType))
+        {
+            Navigation.NavigateTo("/login");
+            <div>Redirecting to login...</div>
+        }
         else
         {
             <RouteView RouteData="routeData" DefaultLayout="typeof(Layout.MainLayout)" />
@@ -30,10 +37,12 @@
 
     private bool IsCheckingSetup = true;
     private bool SetupRequired = false;
+    private bool IsAuthenticated = false;
 
     protected override async Task OnInitializedAsync()
     {
         await CheckSetupStatus();
+        await CheckAuthenticationStatus();
     }
 
     private async Task CheckSetupStatus()
@@ -62,6 +71,38 @@
             IsCheckingSetup = false;
             StateHasChanged();
         }
+    }
+
+    private async Task CheckAuthenticationStatus()
+    {
+        try
+        {
+            // Initialize authentication service
+            await AuthService.InitializeAsync();
+
+            // Check if user is authenticated
+            var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+            IsAuthenticated = authState.User?.Identity?.IsAuthenticated == true;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error checking authentication status");
+            IsAuthenticated = false;
+        }
+    }
+
+    private bool IsPublicPage(Type pageType)
+    {
+        // Define which pages are accessible without authentication
+        var publicPages = new[]
+        {
+            typeof(Pages.Setup),
+            typeof(Pages.Login),
+            typeof(Pages.NotFound),
+            typeof(Pages.Error)
+        };
+
+        return publicPages.Contains(pageType);
     }
 }
 

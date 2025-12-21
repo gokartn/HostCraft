@@ -40,3 +40,13 @@
 </body>
 
 </html>
+
+@code {
+    [Inject]
+    private IWebAuthService AuthService { get; set; } = default!;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await AuthService.InitializeAsync();
+    }
+}

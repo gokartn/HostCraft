@@ -3,6 +3,9 @@ using HostCraft.Web.Hubs;
 using Serilog;
 using Serilog.Events;
 using Yarp.ReverseProxy.Configuration;
+using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Components.Authorization;
+using HostCraft.Web.Services;
 
 // Configure Serilog
 Log.Logger = new LoggerConfiguration()
@@ -89,6 +92,25 @@ builder.Services.AddScoped(sp =>
     return factory.CreateClient("HostCraftAPI");
 });
 
+// Add authentication and authorization services
+builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
+    .AddCookie(options =>
+    {
+        options.LoginPath = "/login";
+        options.LogoutPath = "/logout";
+        options.AccessDeniedPath = "/access-denied";
+        options.Cookie.Name = "HostCraft.Auth";
+        options.Cookie.HttpOnly = true;
+        options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
+        options.Cookie.SameSite = SameSiteMode.Lax;
+        options.ExpireTimeSpan = TimeSpan.FromHours(24);
+        options.SlidingExpiration = true;
+    });
+
+builder.Services.AddAuthorization();
+builder.Services.AddScoped<AuthenticationStateProvider, HostCraftAuthenticationStateProvider>();
+builder.Services.AddScoped<IWebAuthService, AuthService>();
+
 // Configure YARP reverse proxy to forward /api/* requests to API service
 // This enables OAuth callbacks and webhooks to work through Traefik -> Web -> API
 var apiBaseUrl = apiUrl.TrimEnd('/');
@@ -133,6 +155,10 @@ if (!app.Environment.IsDevelopment())
 // app.UseHttpsRedirection();
 
 app.UseAntiforgery();
+
+// Add authentication and authorization middleware
+app.UseAuthentication();
+app.UseAuthorization();
 
 // Map YARP reverse proxy BEFORE static assets and Razor components
 // This ensures /api/* requests are forwarded to the API service
