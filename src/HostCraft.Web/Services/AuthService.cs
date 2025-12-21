@@ -12,21 +12,26 @@ namespace HostCraft.Web.Services;
 /// </summary>
 public class AuthService : IWebAuthService
 {
-    private readonly HttpClient _httpClient;
+    private readonly IHttpClientFactory _httpClientFactory;
     private readonly AuthenticationStateProvider _authStateProvider;
     private readonly IJSRuntime _jsRuntime;
     private readonly ILogger<AuthService> _logger;
 
     public AuthService(
-        HttpClient httpClient,
+        IHttpClientFactory httpClientFactory,
         AuthenticationStateProvider authStateProvider,
         IJSRuntime jsRuntime,
         ILogger<AuthService> logger)
     {
-        _httpClient = httpClient;
+        _httpClientFactory = httpClientFactory;
         _authStateProvider = authStateProvider;
         _jsRuntime = jsRuntime;
         _logger = logger;
+    }
+
+    private HttpClient CreateHttpClient()
+    {
+        return _httpClientFactory.CreateClient("HostCraftAPI");
     }
 
     /// <summary>
@@ -42,7 +47,7 @@ public class AuthService : IWebAuthService
                 Password = password
             };
 
-            var response = await _httpClient.PostAsJsonAsync("api/auth/login", loginRequest);
+            var response = await CreateHttpClient().PostAsJsonAsync("api/auth/login", loginRequest);
 
             if (response.IsSuccessStatusCode)
             {
@@ -156,7 +161,7 @@ public class AuthService : IWebAuthService
                 RefreshToken = refreshToken
             };
 
-            var response = await _httpClient.PostAsJsonAsync("api/auth/refresh", refreshRequest);
+            var response = await CreateHttpClient().PostAsJsonAsync("api/auth/refresh", refreshRequest);
 
             if (response.IsSuccessStatusCode)
             {
@@ -213,7 +218,7 @@ public class AuthService : IWebAuthService
                 // Try to validate the token by making a request to get current user
                 try
                 {
-                    var response = await _httpClient.GetAsync("api/auth/me");
+                    var response = await CreateHttpClient().GetAsync("api/auth/me");
                     if (response.IsSuccessStatusCode)
                     {
                         var user = await response.Content.ReadFromJsonAsync<User>();

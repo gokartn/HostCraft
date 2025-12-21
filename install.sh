@@ -437,67 +437,6 @@ ALTER TABLE "Backups" ALTER COLUMN "CompletedAt" TYPE timestamp USING CASE WHEN 
 ALTER TABLE "Backups" ALTER COLUMN "ExpiresAt" TYPE timestamp USING CASE WHEN "ExpiresAt" IS NULL OR "ExpiresAt" = '' THEN NULL ELSE "ExpiresAt"::timestamp END;
 ALTER TABLE "HealthChecks" ALTER COLUMN "CheckedAt" TYPE timestamp USING "CheckedAt"::timestamp;
 ALTER TABLE "Volumes" ALTER COLUMN "CreatedAt" TYPE timestamp USING "CreatedAt"::timestamp;
-
--- Add auto-increment sequences
-CREATE SEQUENCE IF NOT EXISTS "Regions_Id_seq";
-ALTER TABLE "Regions" ALTER COLUMN "Id" SET DEFAULT nextval('"Regions_Id_seq"');
-SELECT setval('"Regions_Id_seq"', COALESCE((SELECT MAX("Id") FROM "Regions"), 0) + 1, false);
-ALTER SEQUENCE "Regions_Id_seq" OWNED BY "Regions"."Id";
-
-CREATE SEQUENCE IF NOT EXISTS "PrivateKeys_Id_seq";
-ALTER TABLE "PrivateKeys" ALTER COLUMN "Id" SET DEFAULT nextval('"PrivateKeys_Id_seq"');
-SELECT setval('"PrivateKeys_Id_seq"', COALESCE((SELECT MAX("Id") FROM "PrivateKeys"), 0) + 1, false);
-ALTER SEQUENCE "PrivateKeys_Id_seq" OWNED BY "PrivateKeys"."Id";
-
-CREATE SEQUENCE IF NOT EXISTS "Projects_Id_seq";
-ALTER TABLE "Projects" ALTER COLUMN "Id" SET DEFAULT nextval('"Projects_Id_seq"');
-SELECT setval('"Projects_Id_seq"', COALESCE((SELECT MAX("Id") FROM "Projects"), 0) + 1, false);
-ALTER SEQUENCE "Projects_Id_seq" OWNED BY "Projects"."Id";
-
-CREATE SEQUENCE IF NOT EXISTS "Users_Id_seq";
-ALTER TABLE "Users" ALTER COLUMN "Id" SET DEFAULT nextval('"Users_Id_seq"');
-SELECT setval('"Users_Id_seq"', COALESCE((SELECT MAX("Id") FROM "Users"), 0) + 1, false);
-ALTER SEQUENCE "Users_Id_seq" OWNED BY "Users"."Id";
-
-CREATE SEQUENCE IF NOT EXISTS "Servers_Id_seq";
-ALTER TABLE "Servers" ALTER COLUMN "Id" SET DEFAULT nextval('"Servers_Id_seq"');
-SELECT setval('"Servers_Id_seq"', COALESCE((SELECT MAX("Id") FROM "Servers"), 0) + 1, false);
-ALTER SEQUENCE "Servers_Id_seq" OWNED BY "Servers"."Id";
-
-CREATE SEQUENCE IF NOT EXISTS "Applications_Id_seq";
-ALTER TABLE "Applications" ALTER COLUMN "Id" SET DEFAULT nextval('"Applications_Id_seq"');
-SELECT setval('"Applications_Id_seq"', COALESCE((SELECT MAX("Id") FROM "Applications"), 0) + 1, false);
-ALTER SEQUENCE "Applications_Id_seq" OWNED BY "Applications"."Id";
-
-CREATE SEQUENCE IF NOT EXISTS "Deployments_Id_seq";
-ALTER TABLE "Deployments" ALTER COLUMN "Id" SET DEFAULT nextval('"Deployments_Id_seq"');
-SELECT setval('"Deployments_Id_seq"', COALESCE((SELECT MAX("Id") FROM "Deployments"), 0) + 1, false);
-ALTER SEQUENCE "Deployments_Id_seq" OWNED BY "Deployments"."Id";
-
-CREATE SEQUENCE IF NOT EXISTS "DeploymentLogs_Id_seq";
-ALTER TABLE "DeploymentLogs" ALTER COLUMN "Id" SET DEFAULT nextval('"DeploymentLogs_Id_seq"');
-SELECT setval('"DeploymentLogs_Id_seq"', COALESCE((SELECT MAX("Id") FROM "DeploymentLogs"), 0) + 1, false);
-ALTER SEQUENCE "DeploymentLogs_Id_seq" OWNED BY "DeploymentLogs"."Id";
-
-CREATE SEQUENCE IF NOT EXISTS "EnvironmentVariables_Id_seq";
-ALTER TABLE "EnvironmentVariables" ALTER COLUMN "Id" SET DEFAULT nextval('"EnvironmentVariables_Id_seq"');
-SELECT setval('"EnvironmentVariables_Id_seq"', COALESCE((SELECT MAX("Id") FROM "EnvironmentVariables"), 0) + 1, false);
-ALTER SEQUENCE "EnvironmentVariables_Id_seq" OWNED BY "EnvironmentVariables"."Id";
-
-CREATE SEQUENCE IF NOT EXISTS "Backups_Id_seq";
-ALTER TABLE "Backups" ALTER COLUMN "Id" SET DEFAULT nextval('"Backups_Id_seq"');
-SELECT setval('"Backups_Id_seq"', COALESCE((SELECT MAX("Id") FROM "Backups"), 0) + 1, false);
-ALTER SEQUENCE "Backups_Id_seq" OWNED BY "Backups"."Id";
-
-CREATE SEQUENCE IF NOT EXISTS "HealthChecks_Id_seq";
-ALTER TABLE "HealthChecks" ALTER COLUMN "Id" SET DEFAULT nextval('"HealthChecks_Id_seq"');
-SELECT setval('"HealthChecks_Id_seq"', COALESCE((SELECT MAX("Id") FROM "HealthChecks"), 0) + 1, false);
-ALTER SEQUENCE "HealthChecks_Id_seq" OWNED BY "HealthChecks"."Id";
-
-CREATE SEQUENCE IF NOT EXISTS "Volumes_Id_seq";
-ALTER TABLE "Volumes" ALTER COLUMN "Id" SET DEFAULT nextval('"Volumes_Id_seq"');
-SELECT setval('"Volumes_Id_seq"', COALESCE((SELECT MAX("Id") FROM "Volumes"), 0) + 1, false);
-ALTER SEQUENCE "Volumes_Id_seq" OWNED BY "Volumes"."Id";
 SQL
 
 docker exec -i "$POSTGRES_TARGET" psql -U hostcraft -d hostcraft < /tmp/fix_postgres_types.sql > /dev/null 2>&1

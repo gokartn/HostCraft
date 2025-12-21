@@ -153,16 +153,44 @@ using (var scope = app.Services.CreateScope())
 // Use forwarded headers (must be first in pipeline for reverse proxy)
 app.UseForwardedHeaders();
 
-// Auto-migrate database and seed
+// Auto-migrate database and seed with retry logic for Docker Swarm DNS resolution
 using (var scope = app.Services.CreateScope())
 {
     var context = scope.ServiceProvider.GetRequiredService<HostCraftDbContext>();
     
-    // Automatically apply pending migrations (creates database if needed)
-    await context.Database.MigrateAsync();
+    // Retry database operations for Docker Swarm DNS propagation
+    const int maxRetries = 10;
+    const int retryDelaySeconds = 5;
     
-    // Seed initial data
-    await HostCraft.Infrastructure.Persistence.DbSeeder.SeedAsync(context);
+    for (int attempt = 1; attempt <= maxRetries; attempt++)
+    {
+        try
+        {
+            Log.Information("Attempting database migration (attempt {Attempt}/{MaxRetries})", attempt, maxRetries);
+            
+            // Automatically apply pending migrations (creates database if needed)
+            await context.Database.MigrateAsync();
+            
+            // Seed initial data
+            await HostCraft.Infrastructure.Persistence.DbSeeder.SeedAsync(context);
+            
+            Log.Information("Database migration and seeding completed successfully");
+            break;
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "Database operation failed on attempt {Attempt}/{MaxRetries}", attempt, maxRetries);
+            
+            if (attempt == maxRetries)
+            {
+                Log.Error(ex, "Database operations failed after {MaxRetries} attempts, application will terminate", maxRetries);
+                throw;
+            }
+            
+            Log.Information("Waiting {Delay} seconds before retry...", retryDelaySeconds);
+            await Task.Delay(TimeSpan.FromSeconds(retryDelaySeconds));
+        }
+    }
 }
 
 // Configure the HTTP request pipeline.
