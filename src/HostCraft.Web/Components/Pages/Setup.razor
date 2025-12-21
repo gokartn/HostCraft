@@ -36,7 +36,9 @@
                 <p>Let's set up your first administrator account.</p>
             </div>
 
-            <EditForm Model="@SetupRequest" OnSubmit="HandleSetup" FormName="setupForm">
+            <EditForm Model="@SetupRequest" OnValidSubmit="HandleSetup" FormName="setupForm">
+                <DataAnnotationsValidator />
+                <ValidationSummary />
 
                 <div class="form-group">
                     <label for="name">Name</label>
@@ -134,42 +136,9 @@
         // Clear previous errors
         ErrorMessage = "";
 
-        // Manual validation
-        if (string.IsNullOrWhiteSpace(SetupRequest.Name))
-        {
-            ErrorMessage = "Name is required.";
-            return;
-        }
-
-        if (string.IsNullOrWhiteSpace(SetupRequest.Email))
-        {
-            ErrorMessage = "Email is required.";
-            return;
-        }
-
-        if (string.IsNullOrWhiteSpace(SetupRequest.Password))
-        {
-            ErrorMessage = "Password is required.";
-            return;
-        }
-
-        if (SetupRequest.Password.Length < 8)
-        {
-            ErrorMessage = "Password must be at least 8 characters.";
-            return;
-        }
-
-        if (string.IsNullOrWhiteSpace(SetupRequest.ConfirmPassword))
-        {
-            ErrorMessage = "Please confirm your password.";
-            return;
-        }
-
-        if (SetupRequest.ConfirmPassword != SetupRequest.Password)
-        {
-            ErrorMessage = "Passwords do not match.";
-            return;
-        }
+        // Debug logging
+        Logger.LogInformation("Setup validation - Name: '{Name}', Length: {Length}",
+            SetupRequest.Name ?? "null", SetupRequest.Name?.Length ?? 0);
 
         IsSubmitting = true;
 
@@ -177,9 +146,9 @@
         {
             var setupRequest = new
             {
-                Email = SetupRequest.Email.Trim(),
-                Name = SetupRequest.Name.Trim(),
-                Password = SetupRequest.Password
+                Email = SetupRequest.Email?.Trim() ?? "",
+                Name = SetupRequest.Name?.Trim() ?? "",
+                Password = SetupRequest.Password ?? ""
             };
 
             var response = await Http.PostAsJsonAsync("api/auth/setup", setupRequest);
