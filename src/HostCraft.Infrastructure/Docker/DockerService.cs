@@ -819,7 +819,29 @@ public class DockerService : IDockerService, IDisposable
     public async Task<bool> RemoveNodeAsync(Server server, string nodeId, bool force = false, CancellationToken cancellationToken = default)
     {
         var client = GetClient(server);
+
+        // First, inspect the node to check its current state
+        try
+        {
+            var node = await client.Swarm.InspectNodeAsync(nodeId, cancellationToken);
+            var nodeState = node.Status?.State?.ToString()?.ToLower() ?? "unknown";
+            Console.WriteLine($"[DockerService] Removing node {nodeId}: State={nodeState}, Role={node.Spec?.Role}, Force={force}");
+
+            // Check if node can be removed (node must be 'down' unless force=true)
+            if (nodeState != "down" && !force)
+            {
+                Console.WriteLine($"[DockerService] Node {nodeId} is not in 'down' state (current: {nodeState}). Use force=true to remove anyway.");
+                throw new InvalidOperationException($"Node is not in 'down' state. Current state: {nodeState}. Use force=true to remove.");
+            }
+        }
+        catch (DockerApiException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            Console.WriteLine($"[DockerService] Node {nodeId} not found - may have already been removed");
+            return true; // Node doesn't exist, consider it removed
+        }
+
         await client.Swarm.RemoveNodeAsync(nodeId, force, cancellationToken);
+        Console.WriteLine($"[DockerService] Successfully removed node {nodeId}");
         return true;
     }
     

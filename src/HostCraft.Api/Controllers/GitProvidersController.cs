@@ -29,24 +29,26 @@ public class GitProvidersController : ControllerBase
     /// Get all connected Git providers for the current user.
     /// </summary>
     [HttpGet]
-    public async Task<ActionResult<IEnumerable<GitProvider>>> GetProviders()
+    public async Task<ActionResult<IEnumerable<GitProviderDto>>> GetProviders()
     {
         // Get userId from authentication context (defaults to 1 for single-user mode)
         int userId = GetCurrentUserId();
-        
+
         var providers = await _context.GitProviders
             .Where(p => p.UserId == userId)
             .OrderByDescending(p => p.ConnectedAt)
             .ToListAsync();
-        
-        // Don't expose sensitive tokens to client
-        foreach (var provider in providers)
-        {
-            provider.AccessToken = "***";
-            provider.RefreshToken = null;
-        }
-        
-        return providers;
+
+        // Return as DTOs without sensitive data
+        var dtos = providers.Select(p => new GitProviderDto(
+            p.Id,
+            p.Name,
+            p.Type.ToString(), // Convert enum to string for JSON serialization
+            p.Username,
+            p.IsActive
+        ));
+
+        return Ok(dtos);
     }
 
     /// <summary>
@@ -312,3 +314,5 @@ public record TestConnectionResult
     public bool IsValid { get; init; }
     public string Message { get; init; } = string.Empty;
 }
+
+public record GitProviderDto(int Id, string Name, string Type, string? Username, bool IsActive);

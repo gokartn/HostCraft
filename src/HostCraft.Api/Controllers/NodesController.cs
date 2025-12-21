@@ -163,24 +163,40 @@ public class NodesController : ControllerBase
         var server = await _context.Servers
             .Include(s => s.PrivateKey)
             .FirstOrDefaultAsync(s => s.Id == serverId);
-        
+
         if (server == null)
         {
             return NotFound(new { error = $"Server {serverId} not found" });
         }
-        
+
+        // Ensure this is a swarm manager
+        if (server.Type != ServerType.SwarmManager)
+        {
+            return BadRequest(new { error = "Server is not a swarm manager. Only managers can remove nodes." });
+        }
+
         try
         {
+            _logger.LogInformation("Attempting to remove node {NodeId} from swarm on server {ServerId} (force={Force})",
+                nodeId, serverId, force);
+
             var success = await _dockerService.RemoveNodeAsync(server, nodeId, force);
-            
+
             if (success)
             {
-                return Ok(new { message = "Node removed successfully" });
+                _logger.LogInformation("Successfully removed node {NodeId} from swarm", nodeId);
+                return Ok(new { message = "Node removed successfully", nodeId });
             }
             else
             {
+                _logger.LogWarning("RemoveNodeAsync returned false for node {NodeId}", nodeId);
                 return BadRequest(new { error = "Failed to remove node" });
             }
+        }
+        catch (InvalidOperationException ex)
+        {
+            _logger.LogWarning(ex, "Cannot remove node {NodeId}: {Message}", nodeId, ex.Message);
+            return BadRequest(new { error = ex.Message });
         }
         catch (Exception ex)
         {
