@@ -52,7 +52,8 @@ public class AuthService : IWebAuthService
             if (response.IsSuccessStatusCode)
             {
                 var authResponse = await response.Content.ReadFromJsonAsync<AuthResponse>();
-                if (authResponse?.Success == true && !string.IsNullOrEmpty(authResponse.Token) && !string.IsNullOrEmpty(authResponse.RefreshToken) && authResponse.User != null)
+                // API returns 200 OK on success - just check required fields are present
+                if (authResponse != null && !string.IsNullOrEmpty(authResponse.Token) && !string.IsNullOrEmpty(authResponse.RefreshToken) && authResponse.User != null)
                 {
                     // Store tokens in local storage
                     await _jsRuntime.InvokeVoidAsync("localStorage.setItem", "authToken", authResponse.Token);
@@ -166,7 +167,8 @@ public class AuthService : IWebAuthService
             if (response.IsSuccessStatusCode)
             {
                 var authResponse = await response.Content.ReadFromJsonAsync<AuthResponse>();
-                if (authResponse?.Success == true && !string.IsNullOrEmpty(authResponse.Token) && !string.IsNullOrEmpty(authResponse.RefreshToken) && authResponse.User != null)
+                // API returns 200 OK on success - just check required fields are present
+                if (authResponse != null && !string.IsNullOrEmpty(authResponse.Token) && !string.IsNullOrEmpty(authResponse.RefreshToken) && authResponse.User != null)
                 {
                     // Update tokens in local storage
                     await _jsRuntime.InvokeVoidAsync("localStorage.setItem", "authToken", authResponse.Token);
