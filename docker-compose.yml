@@ -19,9 +19,9 @@ services:
       ConnectionStrings__DefaultConnection: Host=hostcraft_postgres;Database=hostcraft;Username=hostcraft;Password=${POSTGRES_PASSWORD}
       Encryption__Key: ${ENCRYPTION_KEY}
     depends_on:
-      - api
-      - postgres:
-          condition: service_healthy
+      api: {}
+      postgres:
+        condition: service_healthy
     restart: unless-stopped  # For standalone mode
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock  # Access to Docker daemon
