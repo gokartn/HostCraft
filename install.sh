@@ -239,7 +239,8 @@ if [ "$SWARM_ACTIVE" = "true" ]; then
     echo "   Deploying as Docker Swarm stack..."
     
     # Create temporary compose file with substituted variables
-    perl -pe "s/\\\$\\\{POSTGRES_PASSWORD\\\}/$POSTGRES_PASSWORD/g; s/\\\$\\\{ENCRYPTION_KEY\\\}/$ENCRYPTION_KEY/g" docker-compose.yml > /tmp/docker-compose-substituted.yml
+    export POSTGRES_PASSWORD ENCRYPTION_KEY
+    envsubst < docker-compose.yml > /tmp/docker-compose-substituted.yml
     
     if [ "$CONFIGURE_LOCALHOST" = "true" ]; then
         if [ "$LOCALHOST_SWARM_MANAGER" = "true" ]; then
@@ -262,7 +263,8 @@ else
     echo "   Deploying with Docker Compose..."
     
     # Create temporary compose file with substituted variables
-    perl -pe "s/\\\$\\\{POSTGRES_PASSWORD\\\}/$POSTGRES_PASSWORD/g; s/\\\$\\\{ENCRYPTION_KEY\\\}/$ENCRYPTION_KEY/g" docker-compose.yml > /tmp/docker-compose-substituted.yml
+    export POSTGRES_PASSWORD ENCRYPTION_KEY
+    envsubst < docker-compose.yml > /tmp/docker-compose-substituted.yml
     
     if [ "$CONFIGURE_LOCALHOST" = "true" ]; then
         if [ "$LOCALHOST_SWARM_MANAGER" = "true" ]; then
