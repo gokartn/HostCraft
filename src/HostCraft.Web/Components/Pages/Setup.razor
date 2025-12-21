@@ -36,7 +36,7 @@
                 <p>Let's set up your first administrator account.</p>
             </div>
 
-            <EditForm Model="@SetupRequest" OnValidSubmit="HandleSetup" FormName="setupForm">
+            <EditForm EditContext="@EditContext" OnSubmit="HandleSetup" FormName="setupForm">
                 <DataAnnotationsValidator />
                 <ValidationSummary />
 
@@ -96,9 +96,11 @@
     private bool IsSubmitting = false;
     private string ErrorMessage = "";
     private SetupRequestDto SetupRequest { get; set; } = new();
+    private EditContext EditContext { get; set; }
 
     protected override async Task OnInitializedAsync()
     {
+        EditContext = new EditContext(SetupRequest);
         await CheckSetupStatus();
     }
 
@@ -133,6 +135,15 @@
 
     private async Task HandleSetup()
     {
+        // Validate the form
+        bool isValid = EditContext.Validate();
+
+        if (!isValid)
+        {
+            // Validation failed - let the ValidationSummary show the errors
+            return;
+        }
+
         IsSubmitting = true;
         ErrorMessage = "";
 
