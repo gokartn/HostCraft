@@ -36,9 +36,7 @@
                 <p>Let's set up your first administrator account.</p>
             </div>
 
-            <EditForm EditContext="@EditContext" OnSubmit="HandleSetup" FormName="setupForm">
-                <DataAnnotationsValidator />
-                <ValidationSummary />
+            <EditForm Model="@SetupRequest" OnSubmit="HandleSetup" FormName="setupForm">
 
                 <div class="form-group">
                     <label for="name">Name</label>
@@ -96,11 +94,9 @@
     private bool IsSubmitting = false;
     private string ErrorMessage = "";
     private SetupRequestDto SetupRequest { get; set; } = new();
-    private EditContext EditContext { get; set; }
 
     protected override async Task OnInitializedAsync()
     {
-        EditContext = new EditContext(SetupRequest);
         await CheckSetupStatus();
     }
 
@@ -135,17 +131,47 @@
 
     private async Task HandleSetup()
     {
-        // Validate the form
-        bool isValid = EditContext.Validate();
+        // Clear previous errors
+        ErrorMessage = "";
 
-        if (!isValid)
+        // Manual validation
+        if (string.IsNullOrWhiteSpace(SetupRequest.Name))
         {
-            // Validation failed - let the ValidationSummary show the errors
+            ErrorMessage = "Name is required.";
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(SetupRequest.Email))
+        {
+            ErrorMessage = "Email is required.";
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(SetupRequest.Password))
+        {
+            ErrorMessage = "Password is required.";
+            return;
+        }
+
+        if (SetupRequest.Password.Length < 8)
+        {
+            ErrorMessage = "Password must be at least 8 characters.";
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(SetupRequest.ConfirmPassword))
+        {
+            ErrorMessage = "Please confirm your password.";
+            return;
+        }
+
+        if (SetupRequest.ConfirmPassword != SetupRequest.Password)
+        {
+            ErrorMessage = "Passwords do not match.";
             return;
         }
 
         IsSubmitting = true;
-        ErrorMessage = "";
 
         try
         {
