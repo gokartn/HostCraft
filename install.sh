@@ -239,21 +239,12 @@ if [ "$SWARM_ACTIVE" = "true" ]; then
     echo "   Deploying as Docker Swarm stack..."
     if [ "$CONFIGURE_LOCALHOST" = "true" ]; then
         if [ "$LOCALHOST_SWARM_MANAGER" = "true" ]; then
-            LOCALHOST_IS_SWARM_MANAGER=true docker stack deploy \
-                --env POSTGRES_PASSWORD="$POSTGRES_PASSWORD" \
-                --env ENCRYPTION_KEY="$ENCRYPTION_KEY" \
-                -c docker-compose.yml hostcraft
+            LOCALHOST_IS_SWARM_MANAGER=true docker stack deploy -c docker-compose.yml hostcraft
         else
-            docker stack deploy \
-                --env POSTGRES_PASSWORD="$POSTGRES_PASSWORD" \
-                --env ENCRYPTION_KEY="$ENCRYPTION_KEY" \
-                -c docker-compose.yml hostcraft
+            docker stack deploy -c docker-compose.yml hostcraft
         fi
     else
-        SKIP_LOCALHOST_SEED=true docker stack deploy \
-            --env POSTGRES_PASSWORD="$POSTGRES_PASSWORD" \
-            --env ENCRYPTION_KEY="$ENCRYPTION_KEY" \
-            -c docker-compose.yml hostcraft
+        SKIP_LOCALHOST_SEED=true docker stack deploy -c docker-compose.yml hostcraft
     fi
     echo "   ✅ Stack deployed successfully"
     echo "   📊 Check status: docker stack ps hostcraft"
@@ -263,21 +254,12 @@ else
     echo "   Deploying with Docker Compose..."
     if [ "$CONFIGURE_LOCALHOST" = "true" ]; then
         if [ "$LOCALHOST_SWARM_MANAGER" = "true" ]; then
-            LOCALHOST_IS_SWARM_MANAGER=true docker compose \
-                --env POSTGRES_PASSWORD="$POSTGRES_PASSWORD" \
-                --env ENCRYPTION_KEY="$ENCRYPTION_KEY" \
-                up -d
+            LOCALHOST_IS_SWARM_MANAGER=true docker compose up -d
         else
-            docker compose \
-                --env POSTGRES_PASSWORD="$POSTGRES_PASSWORD" \
-                --env ENCRYPTION_KEY="$ENCRYPTION_KEY" \
-                up -d
+            docker compose up -d
         fi
     else
-        SKIP_LOCALHOST_SEED=true docker compose \
-            --env POSTGRES_PASSWORD="$POSTGRES_PASSWORD" \
-            --env ENCRYPTION_KEY="$ENCRYPTION_KEY" \
-            up -d
+        SKIP_LOCALHOST_SEED=true docker compose up -d
     fi
     echo "   ✅ Containers started successfully"
 fi
