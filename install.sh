@@ -239,12 +239,12 @@ if [ "$SWARM_ACTIVE" = "true" ]; then
     echo "   Deploying as Docker Swarm stack..."
     if [ "$CONFIGURE_LOCALHOST" = "true" ]; then
         if [ "$LOCALHOST_SWARM_MANAGER" = "true" ]; then
-            LOCALHOST_IS_SWARM_MANAGER=true docker stack deploy -c docker-compose.yml hostcraft
+            LOCALHOST_IS_SWARM_MANAGER=true envsubst < docker-compose.yml | docker stack deploy -c - hostcraft
         else
-            docker stack deploy -c docker-compose.yml hostcraft
+            envsubst < docker-compose.yml | docker stack deploy -c - hostcraft
         fi
     else
-        SKIP_LOCALHOST_SEED=true docker stack deploy -c docker-compose.yml hostcraft
+        SKIP_LOCALHOST_SEED=true envsubst < docker-compose.yml | docker stack deploy -c - hostcraft
     fi
     echo "   ✅ Stack deployed successfully"
     echo "   📊 Check status: docker stack ps hostcraft"
@@ -254,12 +254,12 @@ else
     echo "   Deploying with Docker Compose..."
     if [ "$CONFIGURE_LOCALHOST" = "true" ]; then
         if [ "$LOCALHOST_SWARM_MANAGER" = "true" ]; then
-            LOCALHOST_IS_SWARM_MANAGER=true docker compose up -d
+            LOCALHOST_IS_SWARM_MANAGER=true envsubst < docker-compose.yml | docker compose -f - up -d
         else
-            docker compose up -d
+            envsubst < docker-compose.yml | docker compose -f - up -d
         fi
     else
-        SKIP_LOCALHOST_SEED=true docker compose up -d
+        SKIP_LOCALHOST_SEED=true envsubst < docker-compose.yml | docker compose -f - up -d
     fi
     echo "   ✅ Containers started successfully"
 fi

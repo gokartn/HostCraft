@@ -71,7 +71,7 @@ services:
       <<: *common-variables
       ASPNETCORE_ENVIRONMENT: Production
       ASPNETCORE_URLS: http://+:8080
-      ConnectionStrings__DefaultConnection: Host=postgres;Database=hostcraft;Username=hostcraft;Password=${POSTGRES_PASSWORD}
+      ConnectionStrings__DefaultConnection: Host=hostcraft_postgres;Database=hostcraft;Username=hostcraft;Password=${POSTGRES_PASSWORD}
       SKIP_LOCALHOST_SEED: "true"  # Temporarily disabled due to schema migration
       Encryption__Key: ${ENCRYPTION_KEY}
       # Git Provider OAuth - set these to enable Git integrations
