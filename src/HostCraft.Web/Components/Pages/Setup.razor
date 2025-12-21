@@ -1,53 +1,83 @@
 @page "/setup"
+@layout EmptyLayout
 @inject HttpClient Http
 @inject NavigationManager Navigation
 @inject IJSRuntime JSRuntime
 
 <PageTitle>HostCraft Setup</PageTitle>
 
-@if (IsLoading)
-{
-    <p>Loading...</p>
-}
-else if (!SetupRequired)
-{
-    <h2>Setup Already Complete</h2>
-    <p>HostCraft has already been configured.</p>
-    <button @onclick="NavigateToLogin">Go to Login</button>
-}
-else
-{
-    <h1>Welcome to HostCraft</h1>
-    <p>Let's set up your first administrator account.</p>
-    
-    <form @onsubmit="HandleSetup">
-        <div>
-            <label>Email:</label>
-            <input @bind="Email" type="email" required />
-        </div>
-        <div>
-            <label>Name:</label>
-            <input @bind="Name" required />
-        </div>
-        <div>
-            <label>Password:</label>
-            <input @bind="Password" type="password" required />
-        </div>
-        <div>
-            <label>Confirm Password:</label>
-            <input @bind="ConfirmPassword" type="password" required />
-        </div>
-        
-        @if (!string.IsNullOrEmpty(ErrorMessage))
+<div class="setup-container">
+    <div class="setup-card">
+        @if (IsLoading)
         {
-            <p style="color: red;">@ErrorMessage</p>
+            <div class="setup-loading">
+                <div class="spinner"></div>
+                <p>Checking setup status...</p>
+            </div>
         }
-        
-        <button type="submit" disabled="@IsSubmitting">
-            @if (IsSubmitting) { <span>Setting up...</span> } else { <span>Complete Setup</span> }
-        </button>
-    </form>
-}
+        else if (!SetupRequired)
+        {
+            <div class="setup-header">
+                <div class="logo-icon">🚀</div>
+                <h1>Setup Complete</h1>
+                <p>HostCraft has already been configured.</p>
+            </div>
+            <div class="setup-actions">
+                <button class="btn btn-primary" @onclick="NavigateToLogin">Go to Login</button>
+            </div>
+        }
+        else
+        {
+            <div class="setup-header">
+                <div class="logo-icon">🚀</div>
+                <h1>Welcome to HostCraft</h1>
+                <p>Let's set up your first administrator account.</p>
+            </div>
+
+            <EditForm Model="@this" OnValidSubmit="HandleSetup" FormName="setupForm">
+                <div class="form-group">
+                    <label for="name">Name</label>
+                    <input id="name" @bind="Name" type="text" class="form-control" placeholder="Your name" required />
+                </div>
+
+                <div class="form-group">
+                    <label for="email">Email</label>
+                    <input id="email" @bind="Email" type="email" class="form-control" placeholder="admin@example.com" required />
+                </div>
+
+                <div class="form-group">
+                    <label for="password">Password</label>
+                    <input id="password" @bind="Password" type="password" class="form-control" placeholder="Min. 8 characters" required />
+                    <small class="form-hint">Must contain uppercase, lowercase, and numbers</small>
+                </div>
+
+                <div class="form-group">
+                    <label for="confirmPassword">Confirm Password</label>
+                    <input id="confirmPassword" @bind="ConfirmPassword" type="password" class="form-control" placeholder="Confirm your password" required />
+                </div>
+
+                @if (!string.IsNullOrEmpty(ErrorMessage))
+                {
+                    <div class="alert alert-error">@ErrorMessage</div>
+                }
+
+                <div class="setup-actions">
+                    <button type="submit" class="btn btn-primary btn-lg" disabled="@IsSubmitting">
+                        @if (IsSubmitting)
+                        {
+                            <span class="spinner-sm"></span>
+                            <span>Setting up...</span>
+                        }
+                        else
+                        {
+                            <span>Complete Setup</span>
+                        }
+                    </button>
+                </div>
+            </EditForm>
+        }
+    </div>
+</div>
 
 @code {
     [Inject] ILogger<Setup> Logger { get; set; } = null!;
@@ -137,7 +167,6 @@ else
 
             if (response.IsSuccessStatusCode)
             {
-                await JSRuntime.InvokeVoidAsync("alert", "Setup completed successfully!");
                 Navigation.NavigateTo("/login");
             }
             else
@@ -175,3 +204,182 @@ else
         public string Password { get; set; } = "";
     }
 }
+
+<style>
+.setup-container {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    background: linear-gradient(135deg, #0a0e27 0%, #1a2344 50%, #141b3a 100%);
+    padding: 20px;
+}
+
+.setup-card {
+    background: rgba(20, 27, 58, 0.9);
+    border: 1px solid rgba(99, 102, 241, 0.2);
+    border-radius: 16px;
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4), 0 0 40px rgba(99, 102, 241, 0.1);
+    padding: 48px;
+    width: 100%;
+    max-width: 480px;
+    backdrop-filter: blur(10px);
+}
+
+.setup-header {
+    text-align: center;
+    margin-bottom: 32px;
+}
+
+.logo-icon {
+    font-size: 4rem;
+    margin-bottom: 16px;
+    filter: drop-shadow(0 0 20px rgba(99, 102, 241, 0.5));
+}
+
+.setup-header h1 {
+    color: #ffffff;
+    margin: 0 0 8px 0;
+    font-size: 28px;
+    font-weight: 700;
+    background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+.setup-header p {
+    color: #a0a0b8;
+    margin: 0;
+    font-size: 1rem;
+}
+
+.setup-loading {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 48px;
+    color: #a0a0b8;
+}
+
+.setup-loading .spinner {
+    width: 48px;
+    height: 48px;
+    border: 3px solid rgba(99, 102, 241, 0.2);
+    border-top-color: #6366f1;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin-bottom: 16px;
+}
+
+.form-group {
+    margin-bottom: 20px;
+}
+
+.form-group label {
+    display: block;
+    margin-bottom: 8px;
+    color: #e2e8f0;
+    font-weight: 500;
+    font-size: 14px;
+}
+
+.form-control {
+    width: 100%;
+    padding: 14px 16px;
+    background: rgba(10, 14, 39, 0.6);
+    border: 1px solid rgba(99, 102, 241, 0.2);
+    border-radius: 10px;
+    font-size: 16px;
+    color: #ffffff;
+    transition: all 0.2s ease;
+    box-sizing: border-box;
+}
+
+.form-control:focus {
+    outline: none;
+    border-color: #6366f1;
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);
+}
+
+.form-control::placeholder {
+    color: #6b6b85;
+}
+
+.form-hint {
+    display: block;
+    margin-top: 6px;
+    color: #6b6b85;
+    font-size: 12px;
+}
+
+.setup-actions {
+    margin-top: 32px;
+}
+
+.btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 14px 24px;
+    font-size: 16px;
+    font-weight: 600;
+    border: none;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    width: 100%;
+}
+
+.btn-primary {
+    background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+    color: white;
+    box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+}
+
+.btn-primary:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 20px rgba(99, 102, 241, 0.4);
+}
+
+.btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none;
+}
+
+.btn-lg {
+    padding: 16px 28px;
+    font-size: 17px;
+}
+
+.spinner-sm {
+    width: 18px;
+    height: 18px;
+    border: 2px solid rgba(255, 255, 255, 0.3);
+    border-top: 2px solid currentColor;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+.alert {
+    padding: 14px 16px;
+    border-radius: 10px;
+    margin-bottom: 20px;
+    font-weight: 500;
+    font-size: 14px;
+}
+
+.alert-error {
+    background-color: rgba(239, 68, 68, 0.1);
+    color: #f87171;
+    border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+@@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+</style>

@@ -1,4 +1,5 @@
 @page "/login"
+@layout EmptyLayout
 @inject NavigationManager Navigation
 @inject IWebAuthService AuthService
 @inject ILogger<Login> Logger
@@ -8,6 +9,7 @@
 <div class="login-container">
     <div class="login-card">
         <div class="login-header">
+            <div class="logo-icon">🚀</div>
             <h1>HostCraft</h1>
             <p>Sign in to your account</p>
         </div>
@@ -22,30 +24,29 @@
 
             <EditForm Model="loginModel" OnValidSubmit="HandleLogin" FormName="loginForm">
                 <DataAnnotationsValidator />
-                <ValidationSummary />
 
                 <div class="form-group">
                     <label for="email">Email</label>
                     <InputText id="email" @bind-Value="loginModel.Email" placeholder="Enter your email" class="form-control" />
-                    <ValidationMessage For="() => loginModel.Email" />
+                    <ValidationMessage For="() => loginModel.Email" class="validation-error" />
                 </div>
 
                 <div class="form-group">
                     <label for="password">Password</label>
                     <InputText id="password" @bind-Value="loginModel.Password" type="password" placeholder="Enter your password" class="form-control" />
-                    <ValidationMessage For="() => loginModel.Password" />
+                    <ValidationMessage For="() => loginModel.Password" class="validation-error" />
                 </div>
 
                 <div class="form-actions">
-                    <button type="submit" class="btn btn-primary" disabled="@isLoading">
+                    <button type="submit" class="btn btn-primary btn-lg" disabled="@isLoading">
                         @if (isLoading)
                         {
-                            <span class="spinner"></span>
-                            @("Signing in")
+                            <span class="spinner-sm"></span>
+                            <span>Signing in...</span>
                         }
                         else
                         {
-                            @("Sign In")
+                            <span>Sign In</span>
                         }
                     </button>
                 </div>
@@ -53,7 +54,7 @@
         </div>
 
         <div class="login-footer">
-            <p>Don't have an account? <a href="/setup">Set up HostCraft</a></p>
+            <p>Need to set up HostCraft? <a href="/setup">Initial Setup</a></p>
         </div>
     </div>
 </div>
@@ -79,7 +80,7 @@
             if (result.Success)
             {
                 Logger.LogInformation("Login successful for user: {Email}", loginModel.Email);
-                Navigation.NavigateTo("/");
+                Navigation.NavigateTo("/", forceLoad: true);
             }
             else
             {
@@ -116,38 +117,51 @@
     justify-content: center;
     align-items: center;
     min-height: 100vh;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    background: linear-gradient(135deg, #0a0e27 0%, #1a2344 50%, #141b3a 100%);
     padding: 20px;
 }
 
 .login-card {
-    background: white;
-    border-radius: 12px;
-    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
-    padding: 40px;
+    background: rgba(20, 27, 58, 0.9);
+    border: 1px solid rgba(99, 102, 241, 0.2);
+    border-radius: 16px;
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4), 0 0 40px rgba(99, 102, 241, 0.1);
+    padding: 48px;
     width: 100%;
-    max-width: 400px;
+    max-width: 440px;
+    backdrop-filter: blur(10px);
 }
 
 .login-header {
     text-align: center;
-    margin-bottom: 30px;
+    margin-bottom: 32px;
+}
+
+.logo-icon {
+    font-size: 4rem;
+    margin-bottom: 16px;
+    filter: drop-shadow(0 0 20px rgba(99, 102, 241, 0.5));
 }
 
 .login-header h1 {
-    color: #333;
-    margin-bottom: 8px;
+    color: #ffffff;
+    margin: 0 0 8px 0;
     font-size: 28px;
-    font-weight: 600;
+    font-weight: 700;
+    background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
 }
 
 .login-header p {
-    color: #666;
+    color: #a0a0b8;
     margin: 0;
+    font-size: 1rem;
 }
 
 .login-form {
-    margin-bottom: 30px;
+    margin-bottom: 24px;
 }
 
 .form-group {
@@ -156,54 +170,62 @@
 
 .form-group label {
     display: block;
-    margin-bottom: 6px;
-    color: #333;
+    margin-bottom: 8px;
+    color: #e2e8f0;
     font-weight: 500;
+    font-size: 14px;
 }
 
 .form-control {
     width: 100%;
-    padding: 12px 16px;
-    border: 2px solid #e1e5e9;
-    border-radius: 8px;
+    padding: 14px 16px;
+    background: rgba(10, 14, 39, 0.6);
+    border: 1px solid rgba(99, 102, 241, 0.2);
+    border-radius: 10px;
     font-size: 16px;
-    transition: border-color 0.3s ease;
+    color: #ffffff;
+    transition: all 0.2s ease;
     box-sizing: border-box;
 }
 
 .form-control:focus {
     outline: none;
-    border-color: #667eea;
-    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+    border-color: #6366f1;
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);
+}
+
+.form-control::placeholder {
+    color: #6b6b85;
 }
 
 .form-actions {
-    margin-top: 30px;
+    margin-top: 28px;
 }
 
 .btn {
-    width: 100%;
-    padding: 14px;
-    border: none;
-    border-radius: 8px;
-    font-size: 16px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.3s ease;
-    display: flex;
+    display: inline-flex;
     align-items: center;
     justify-content: center;
     gap: 8px;
+    padding: 14px 24px;
+    font-size: 16px;
+    font-weight: 600;
+    border: none;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    width: 100%;
 }
 
 .btn-primary {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
     color: white;
+    box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
 }
 
 .btn-primary:hover:not(:disabled) {
     transform: translateY(-2px);
-    box-shadow: 0 8px 20px rgba(102, 126, 234, 0.3);
+    box-shadow: 0 8px 20px rgba(99, 102, 241, 0.4);
 }
 
 .btn:disabled {
@@ -212,40 +234,67 @@
     transform: none;
 }
 
-.spinner {
-    width: 16px;
-    height: 16px;
-    border: 2px solid transparent;
+.btn-lg {
+    padding: 16px 28px;
+    font-size: 17px;
+}
+
+.spinner-sm {
+    width: 18px;
+    height: 18px;
+    border: 2px solid rgba(255, 255, 255, 0.3);
     border-top: 2px solid currentColor;
     border-radius: 50%;
     animation: spin 1s linear infinite;
 }
 
 .alert {
-    padding: 12px 16px;
-    border-radius: 8px;
+    padding: 14px 16px;
+    border-radius: 10px;
     margin-bottom: 20px;
     font-weight: 500;
+    font-size: 14px;
 }
 
 .alert-error {
-    background-color: #fef2f2;
-    color: #dc2626;
-    border: 1px solid #fecaca;
+    background-color: rgba(239, 68, 68, 0.1);
+    color: #f87171;
+    border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.validation-error {
+    color: #f87171;
+    font-size: 12px;
+    margin-top: 6px;
+    display: block;
 }
 
 .login-footer {
     text-align: center;
-    color: #666;
+    padding-top: 16px;
+    border-top: 1px solid rgba(99, 102, 241, 0.1);
+}
+
+.login-footer p {
+    color: #a0a0b8;
+    margin: 0;
+    font-size: 14px;
 }
 
 .login-footer a {
-    color: #667eea;
+    color: #8b5cf6;
     text-decoration: none;
     font-weight: 500;
+    transition: color 0.2s ease;
 }
 
 .login-footer a:hover {
+    color: #a78bfa;
     text-decoration: underline;
+}
+
+@@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
 }
 </style>
