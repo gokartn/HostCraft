@@ -597,13 +597,13 @@ if [ "$setup_traefik" = "yes" ] && [ -n "$TRAEFIK_EMAIL" ]; then
                     docker service update \
                         --label-add "traefik.enable=true" \
                         --label-add "traefik.docker.network=traefik-public" \
-                        --label-add "traefik.http.routers.hostcraft-web.rule=Host(\`$hostcraft_domain\`)" \
+                        --label-add "traefik.http.routers.hostcraft-web.rule=Host(\\\`$hostcraft_domain\\\`)" \
                         --label-add "traefik.http.routers.hostcraft-web.entrypoints=websecure" \
                         --label-add "traefik.http.routers.hostcraft-web.tls=true" \
                         --label-add "traefik.http.routers.hostcraft-web.tls.certresolver=letsencrypt" \
                         --label-add "traefik.http.routers.hostcraft-web.service=hostcraft-web" \
                         --label-add "traefik.http.services.hostcraft-web.loadbalancer.server.port=8080" \
-                        --label-add "traefik.http.routers.hostcraft-web-http.rule=Host(\`$hostcraft_domain\`)" \
+                        --label-add "traefik.http.routers.hostcraft-web-http.rule=Host(\\\`$hostcraft_domain\\\`)" \
                         --label-add "traefik.http.routers.hostcraft-web-http.entrypoints=web" \
                         --label-add "traefik.http.routers.hostcraft-web-http.middlewares=redirect-to-https" \
                         --label-add "traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https" \
@@ -614,7 +614,7 @@ if [ "$setup_traefik" = "yes" ] && [ -n "$TRAEFIK_EMAIL" ]; then
                     docker service update \
                         --label-add "traefik.enable=true" \
                         --label-add "traefik.docker.network=traefik-public" \
-                        --label-add "traefik.http.routers.hostcraft-web.rule=Host(\`$hostcraft_domain\`)" \
+                        --label-add "traefik.http.routers.hostcraft-web.rule=Host(\\\`$hostcraft_domain\\\`)" \
                         --label-add "traefik.http.routers.hostcraft-web.entrypoints=web" \
                         --label-add "traefik.http.routers.hostcraft-web.service=hostcraft-web" \
                         --label-add "traefik.http.services.hostcraft-web.loadbalancer.server.port=8080" \
@@ -717,6 +717,11 @@ if [ "$SWARM_ACTIVE" = "true" ]; then
             echo "🖥️  Localhost server configured as Docker Swarm Manager!"
             echo "📋 Get worker join token: docker swarm join-token worker"
             echo "📋 Get manager join token: docker swarm join-token manager"
+            echo ""
+        else
+            echo "🖥️  Localhost server has been auto-configured and is ready to use!"
+        fi
+    fi
     echo ""
     
     if [ "$setup_traefik" = "yes" ]; then
@@ -732,10 +737,6 @@ if [ "$SWARM_ACTIVE" = "true" ]; then
         echo "   4. HostCraft will automatically configure and restart"
         echo ""
         echo "   📝 Traefik logs: docker service logs traefik_traefik -f"
-    fi
-        else
-            echo "🖥️  Localhost server has been auto-configured and is ready to use!"
-        fi
     fi
     echo ""
     echo "✨ Services will automatically restart after reboot!"
