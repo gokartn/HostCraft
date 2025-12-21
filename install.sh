@@ -330,7 +330,7 @@ echo "$CREATE_ADMIN_SQL" | docker exec -i "$POSTGRES_TARGET" psql -U hostcraft -
 
 # Now set the actual password hash using a proper method
 # We'll use a simple approach for the install script
-ADMIN_PASSWORD_HASH=\$(echo -n "$TEMP_PASSWORD" | sha256sum | cut -d' ' -f1)
+ADMIN_PASSWORD_HASH=$(echo -n "$TEMP_PASSWORD" | sha256sum | cut -d' ' -f1)
 UPDATE_PASSWORD_SQL="
 UPDATE \"Users\" 
 SET \"PasswordHash\" = '\$2b\$10\$dummy.hash.$ADMIN_PASSWORD_HASH'
@@ -485,10 +485,11 @@ if [ "$setup_traefik" = "yes" ] && [ -n "$TRAEFIK_EMAIL" ]; then
     echo "📦 Creating traefik-public network..."
     docker network create --driver=overlay traefik-public 2>/dev/null || echo "   Network already exists"
     
-    # Create Traefik compose file using printf to avoid heredoc encoding issues
+    # Create Traefik compose file
     TRAEFIK_COMPOSE="/tmp/traefik-compose.yml"
 
-    cat > "$TRAEFIK_COMPOSE" << EOF
+    # Use sed to substitute the email in the template
+    cat > "$TRAEFIK_COMPOSE" << 'EOF'
 version: '3.8'
 
 services:
@@ -504,7 +505,7 @@ services:
       - --entrypoints.web.http.redirections.entrypoint.to=websecure
       - --entrypoints.web.http.redirections.entrypoint.scheme=https
       - --api.dashboard=true
-      - --certificatesresolvers.letsencrypt.acme.email=${TRAEFIK_EMAIL}
+      - --certificatesresolvers.letsencrypt.acme.email=TRAEFIK_EMAIL_PLACEHOLDER
       - --certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json
       - --certificatesresolvers.letsencrypt.acme.httpchallenge=true
       - --certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web
@@ -540,6 +541,9 @@ networks:
   traefik-public:
     external: true
 EOF
+
+    # Replace the placeholder with the actual email
+    sed -i "s/TRAEFIK_EMAIL_PLACEHOLDER/${TRAEFIK_EMAIL}/g" "$TRAEFIK_COMPOSE"
 
     echo "Deploying Traefik..."
     docker stack deploy -c "$TRAEFIK_COMPOSE" traefik
@@ -591,8 +595,8 @@ EOF
                 echo ""
                 echo "🔧 Applying Traefik configuration to HostCraft..."
                 
-                # Construct Traefik rule strings
-                HOST_RULE="Host(\`$hostcraft_domain\`)"
+                # Construct Traefik rule strings safely
+                HOST_RULE=$(printf "Host(\`%s\`)" "$hostcraft_domain")
                 
                 # Apply Traefik labels to HostCraft web service
                 if [ "$enable_https" = "yes" ]; then
