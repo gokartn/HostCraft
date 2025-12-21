@@ -19,10 +19,7 @@ services:
       ConnectionStrings__DefaultConnection: Host=hostcraft_postgres;Database=hostcraft;Username=hostcraft;Password=${POSTGRES_PASSWORD}
       Encryption__Key: ${ENCRYPTION_KEY}
     depends_on:
-      api:
-        condition: service_started
-      postgres:
-        condition: service_healthy
+      - api
     restart: unless-stopped  # For standalone mode
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock  # Access to Docker daemon
@@ -83,9 +80,6 @@ services:
       GitLab__ClientSecret: ${GITLAB_CLIENT_SECRET:-}
       Bitbucket__ClientId: ${BITBUCKET_CLIENT_ID:-}
       Bitbucket__ClientSecret: ${BITBUCKET_CLIENT_SECRET:-}
-    depends_on:
-      postgres:
-        condition: service_healthy
     restart: unless-stopped  # For standalone mode
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock  # Access to Docker daemon
