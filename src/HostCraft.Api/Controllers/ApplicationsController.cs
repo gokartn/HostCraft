@@ -140,21 +140,38 @@ public class ApplicationsController : ControllerBase
         var server = await _context.Servers.FindAsync(request.ServerId);
         if (server == null)
             return BadRequest(new { error = "Server not found" });
-        
+
         // Docker Swarm Best Practice: Services must be deployed to manager nodes
         if (server.Type == ServerType.SwarmWorker)
             return BadRequest(new { error = "Cannot deploy applications to worker nodes. Please select a manager node or standalone server." });
-        
+
         var project = await _context.Projects.FindAsync(request.ProjectId);
         if (project == null)
             return BadRequest(new { error = "Project not found" });
-        
+
+        // Validate source type specific requirements
+        var isGitDeployment = request.SourceType == "Git";
+        if (isGitDeployment)
+        {
+            if (!request.GitProviderId.HasValue)
+                return BadRequest(new { error = "Git provider is required for Git deployments" });
+            if (string.IsNullOrWhiteSpace(request.GitRepository))
+                return BadRequest(new { error = "Git repository is required for Git deployments" });
+            if (string.IsNullOrWhiteSpace(request.GitBranch))
+                return BadRequest(new { error = "Git branch is required for Git deployments" });
+        }
+        else
+        {
+            if (string.IsNullOrWhiteSpace(request.Image))
+                return BadRequest(new { error = "Docker image is required" });
+        }
+
         // Check for duplicate application name on the same server
         var existingApp = await _context.Applications
             .FirstOrDefaultAsync(a => a.ServerId == request.ServerId && a.Name == request.Name);
         if (existingApp != null)
             return BadRequest(new { error = $"An application named '{request.Name}' already exists on this server. Please choose a different name." });
-        
+
         var app = new Application
         {
             Uuid = Guid.NewGuid(),
@@ -162,7 +179,7 @@ public class ApplicationsController : ControllerBase
             DockerImage = request.Image,
             ServerId = request.ServerId,
             ProjectId = request.ProjectId,
-            SourceType = ApplicationSourceType.DockerImage,
+            SourceType = isGitDeployment ? ApplicationSourceType.Git : ApplicationSourceType.DockerImage,
             Replicas = request.Replicas ?? 1,
             Port = request.Port,
             Domain = request.Domain,
@@ -170,6 +187,11 @@ public class ApplicationsController : ControllerBase
             EnableHttps = request.EnableHttps,
             ForceHttps = request.ForceHttps,
             LetsEncryptEmail = request.LetsEncryptEmail,
+            GitProviderId = request.GitProviderId,
+            GitRepository = request.GitRepository,
+            GitBranch = request.GitBranch,
+            Dockerfile = request.DockerfilePath ?? "Dockerfile",
+            AutoDeployOnPush = request.AutoDeployOnPush,
             CreatedAt = DateTime.UtcNow
         };
         
@@ -484,35 +506,43 @@ public class ApplicationsController : ControllerBase
                     var containers = await _dockerService.ListContainersAsync(server, true);
                     foreach (var container in containers)
                     {
-                        var inspect = await _dockerService.InspectContainerAsync(server, container.Id);
-                        if (inspect != null)
+                        try
                         {
-                            // Check if container has HostCraft labels
-                            var isManaged = inspect.Labels.TryGetValue("hostcraft.managed", out var managed) && managed == "true";
-                            
-                            if (isManaged)
+                            var inspect = await _dockerService.InspectContainerAsync(server, container.Id);
+                            if (inspect != null)
                             {
-                                // Check if application exists in database
-                                inspect.Labels.TryGetValue("hostcraft.application.id", out var appIdStr);
-                                if (int.TryParse(appIdStr, out var appId))
+                                // Check if container has HostCraft labels
+                                var isManaged = inspect.Labels.TryGetValue("hostcraft.managed", out var managed) && managed == "true";
+
+                                if (isManaged)
                                 {
-                                    var appExists = await _context.Applications.AnyAsync(a => a.Id == appId);
-                                    if (!appExists)
+                                    // Check if application exists in database
+                                    inspect.Labels.TryGetValue("hostcraft.application.id", out var appIdStr);
+                                    if (int.TryParse(appIdStr, out var appId))
                                     {
-                                        orphanedContainers.Add(new OrphanedContainerDto
+                                        var appExists = await _context.Applications.AnyAsync(a => a.Id == appId);
+                                        if (!appExists)
                                         {
-                                            ContainerId = container.Id,
-                                            ContainerName = container.Name,
-                                            Image = container.Image,
-                                            State = container.State,
-                                            ServerId = server.Id,
-                                            ServerName = server.Name,
-                                            ApplicationId = appId,
-                                            Labels = inspect.Labels
-                                        });
+                                            orphanedContainers.Add(new OrphanedContainerDto
+                                            {
+                                                ContainerId = container.Id,
+                                                ContainerName = container.Name,
+                                                Image = container.Image,
+                                                State = container.State,
+                                                ServerId = server.Id,
+                                                ServerName = server.Name,
+                                                ApplicationId = appId,
+                                                Labels = inspect.Labels
+                                            });
+                                        }
                                     }
                                 }
                             }
+                        }
+                        catch (Docker.DotNet.DockerContainerNotFoundException)
+                        {
+                            // Container was removed between list and inspect - skip it
+                            _logger.LogDebug("Container {ContainerId} was removed during orphan check, skipping", container.Id);
                         }
                     }
                     
@@ -702,9 +732,9 @@ public class ApplicationsController : ControllerBase
             try
             {
                 var existingContainers = await dockerService.ListContainersAsync(app.Server, true);
-                var existingContainer = existingContainers.FirstOrDefault(c => 
+                var existingContainer = existingContainers.FirstOrDefault(c =>
                     c.Name.TrimStart('/').Equals(containerName, StringComparison.OrdinalIgnoreCase));
-                
+
                 if (existingContainer != null)
                 {
                     logger.LogInformation("Found existing container with name {ContainerName}, removing it", containerName);
@@ -720,9 +750,72 @@ public class ApplicationsController : ControllerBase
             {
                 logger.LogWarning(ex, "Error checking for existing containers, continuing with deployment");
             }
-            
-            // Pull image
-            await dockerService.PullImageAsync(app.Server, request.Image);
+
+            // Determine the Docker image to use
+            string imageToUse;
+
+            if (app.SourceType == ApplicationSourceType.Git)
+            {
+                // Git deployment: Clone repo, build image from Dockerfile
+                logger.LogInformation("Git deployment: Cloning {Repository} branch {Branch}", app.GitRepository, app.GitBranch);
+
+                var gitService = scope.ServiceProvider.GetRequiredService<IGitService>();
+
+                // Get the Git provider with access token
+                var gitProvider = await context.GitProviders.FindAsync(app.GitProviderId);
+                if (gitProvider == null)
+                {
+                    throw new InvalidOperationException($"Git provider {app.GitProviderId} not found");
+                }
+
+                // Clone the repository
+                var clonePath = Path.Combine(Path.GetTempPath(), "hostcraft-builds", app.Uuid.ToString());
+                if (Directory.Exists(clonePath))
+                {
+                    Directory.Delete(clonePath, true);
+                }
+                Directory.CreateDirectory(clonePath);
+
+                var cloneUrl = $"https://github.com/{app.GitRepository}.git";
+                logger.LogInformation("Cloning {CloneUrl} to {ClonePath}", cloneUrl, clonePath);
+
+                await gitService.CloneRepositoryAsync(cloneUrl, clonePath, app.GitBranch ?? "main", gitProvider.AccessToken);
+
+                // Build the Docker image
+                var imageName = $"{containerName}:{deployment.Id}";
+                var dockerfilePath = app.Dockerfile ?? "Dockerfile";
+                var buildContext = app.BuildContext ?? ".";
+
+                logger.LogInformation("Building Docker image {ImageName} from {Dockerfile}", imageName, dockerfilePath);
+
+                var buildRequest = new BuildImageRequest(
+                    Dockerfile: dockerfilePath,
+                    Context: clonePath,
+                    Tag: imageName,
+                    BuildArgs: null
+                );
+
+                await dockerService.BuildImageAsync(app.Server, buildRequest);
+
+                imageToUse = imageName;
+
+                // Clean up the clone directory
+                try
+                {
+                    Directory.Delete(clonePath, true);
+                }
+                catch (Exception ex)
+                {
+                    logger.LogWarning(ex, "Failed to clean up clone directory {ClonePath}", clonePath);
+                }
+            }
+            else
+            {
+                // Docker Image deployment: Pull the specified image
+                imageToUse = request.Image!;
+                logger.LogInformation("Pulling Docker image {Image}", imageToUse);
+                await dockerService.PullImageAsync(app.Server, imageToUse);
+            }
             
             var envVars = request.EnvironmentVariables ?? new Dictionary<string, string>();
             
@@ -742,19 +835,19 @@ public class ApplicationsController : ControllerBase
             {
                 // For Swarm, check if service exists and update it instead of creating new
                 var existingServices = await dockerService.ListServicesAsync(app.Server);
-                var existingService = existingServices.FirstOrDefault(s => 
+                var existingService = existingServices.FirstOrDefault(s =>
                     s.Name.Equals(containerName, StringComparison.OrdinalIgnoreCase));
-                
+
                 if (existingService != null)
                 {
                     // Update existing service
                     logger.LogInformation("Updating existing service {ServiceName}", containerName);
                     var updateRequest = new UpdateServiceRequest(
-                        Image: request.Image,
+                        Image: imageToUse,
                         Replicas: request.Replicas,
                         EnvironmentVariables: envVars,
                         Labels: labels);
-                    
+
                     await dockerService.UpdateServiceAsync(app.Server, existingService.Id, updateRequest);
                     deployment.ServiceId = existingService.Id;
                 }
@@ -763,13 +856,13 @@ public class ApplicationsController : ControllerBase
                     // Deploy as new Swarm service
                     var serviceRequest = new CreateServiceRequest(
                         containerName,
-                        request.Image,
+                        imageToUse,
                         request.Replicas ?? 1,
                         envVars,
                         labels,
                         request.Networks ?? new List<string>(),
                         request.Port);
-                    
+
                     var serviceId = await dockerService.CreateServiceAsync(app.Server, serviceRequest);
                     deployment.ServiceId = serviceId;
                 }
@@ -780,10 +873,10 @@ public class ApplicationsController : ControllerBase
                 var portBindings = request.Port.HasValue
                     ? new Dictionary<int, int> { { request.Port.Value, request.Port.Value } }
                     : null;
-                
+
                 var containerRequest = new CreateContainerRequest(
                     containerName,
-                    request.Image,
+                    imageToUse,
                     envVars,
                     labels,
                     request.Networks ?? new List<string>(),
@@ -825,7 +918,7 @@ public record CreateApplicationRequest(
     string Name,
     int ServerId,
     int ProjectId,
-    string Image,
+    string? Image,
     int? Replicas = 1,
     Dictionary<string, string>? EnvironmentVariables = null,
     List<string>? Networks = null,
@@ -834,7 +927,14 @@ public record CreateApplicationRequest(
     string? AdditionalDomains = null,
     bool EnableHttps = true,
     bool ForceHttps = true,
-    string? LetsEncryptEmail = null);
+    string? LetsEncryptEmail = null,
+    // Git deployment fields
+    string? SourceType = "DockerImage",
+    int? GitProviderId = null,
+    string? GitRepository = null,
+    string? GitBranch = null,
+    string? DockerfilePath = "Dockerfile",
+    bool AutoDeployOnPush = true);
 
 public record ApplicationDto
 {

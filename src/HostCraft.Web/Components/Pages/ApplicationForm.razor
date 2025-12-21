@@ -667,14 +667,26 @@
             );
 
             var response = await Http.PostAsJsonAsync("api/applications", request);
-            
+
             if (response.IsSuccessStatusCode)
             {
                 Navigation.NavigateTo("/applications");
             }
             else
             {
-                errorMessage = "Failed to deploy application";
+                // Try to get error details from response
+                try
+                {
+                    var errorContent = await response.Content.ReadAsStringAsync();
+                    var errorObj = System.Text.Json.JsonSerializer.Deserialize<ErrorResponse>(errorContent,
+                        new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                    errorMessage = errorObj?.Error ?? $"Failed to deploy application (Status: {response.StatusCode})";
+                }
+                catch
+                {
+                    errorMessage = $"Failed to deploy application (Status: {response.StatusCode})";
+                }
+                Logger.LogWarning("Deployment failed with status {StatusCode}", response.StatusCode);
             }
         }
         catch (Exception ex)
@@ -836,4 +848,5 @@
     private record DeploymentInfo(int Id, DeploymentStatus Status, string? ContainerId, string? ServiceId, DateTime StartedAt, DateTime? FinishedAt, string? ErrorMessage);
     private record GitProviderDto(int Id, string Name, string Type, string? Username, bool IsActive);
     private record GitRepositoryDto(string Owner, string Name, string FullName, string? Description, string DefaultBranch, string CloneUrl, bool IsPrivate, DateTime? UpdatedAt);
+    private record ErrorResponse(string? Error, string? Message);
 }
