@@ -8,11 +8,11 @@
 
 <Router AppAssembly="typeof(Program).Assembly" NotFoundPage="typeof(Pages.NotFound)">
     <Found Context="routeData">
-        @if (IsCheckingSetup || IsCheckingAuth)
+        @if (IsCheckingSetup)
         {
             <div class="setup-check-loading">
                 <div class="spinner"></div>
-                <p>@(IsCheckingSetup ? "Checking setup status..." : "Checking authentication...")</p>
+                <p>Checking setup status...</p>
             </div>
         }
         else if (SetupRequired && routeData.PageType != typeof(Pages.Setup))
@@ -20,7 +20,20 @@
             Navigation.NavigateTo("/setup");
             <div>Redirecting to setup...</div>
         }
-        else if (!IsAuthenticated && !IsPublicPage(routeData.PageType))
+        else if (IsPublicPage(routeData.PageType))
+        {
+            @* Public pages don't need auth check *@
+            <RouteView RouteData="routeData" DefaultLayout="typeof(Layout.MainLayout)" />
+            <FocusOnNavigate RouteData="routeData" Selector="h1" />
+        }
+        else if (IsCheckingAuth)
+        {
+            <div class="setup-check-loading">
+                <div class="spinner"></div>
+                <p>Checking authentication...</p>
+            </div>
+        }
+        else if (!IsAuthenticated)
         {
             Navigation.NavigateTo("/login");
             <div>Redirecting to login...</div>
@@ -41,7 +54,7 @@
     private bool SetupRequired = false;
     private bool IsAuthenticated = false;
     private bool IsCheckingAuth = true;
-    private bool _hasRendered = false;
+    private bool _hasCheckedAuth = false;
 
     protected override async Task OnInitializedAsync()
     {
@@ -51,9 +64,10 @@
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (firstRender && !_hasRendered)
+        if (firstRender && !_hasCheckedAuth)
         {
-            _hasRendered = true;
+            _hasCheckedAuth = true;
+
             // Check authentication after first render when JS interop is available
             await CheckAuthenticationStatus();
             IsCheckingAuth = false;
