@@ -488,58 +488,58 @@ if [ "$setup_traefik" = "yes" ] && [ -n "$TRAEFIK_EMAIL" ]; then
     # Create Traefik compose file using printf to avoid heredoc encoding issues
     TRAEFIK_COMPOSE="/tmp/traefik-compose.yml"
 
-    printf '%s\n' \
-"version: '3.8'" \
-"" \
-"services:" \
-"  traefik:" \
-"    image: traefik:v2.11" \
-"    command:" \
-"      - --providers.docker=true" \
-"      - --providers.docker.swarmMode=true" \
-"      - --providers.docker.exposedByDefault=false" \
-"      - --providers.docker.network=traefik-public" \
-"      - --entrypoints.web.address=:80" \
-"      - --entrypoints.websecure.address=:443" \
-"      - --entrypoints.web.http.redirections.entrypoint.to=websecure" \
-"      - --entrypoints.web.http.redirections.entrypoint.scheme=https" \
-"      - --api.dashboard=true" \
-"      - --certificatesresolvers.letsencrypt.acme.email=${TRAEFIK_EMAIL}" \
-"      - --certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json" \
-"      - --certificatesresolvers.letsencrypt.acme.httpchallenge=true" \
-"      - --certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web" \
-"      - --log.level=INFO" \
-"      - --accesslog=true" \
-"    ports:" \
-"      - \"80:80\"" \
-"      - \"443:443\"" \
-"      - \"8080:8080\"" \
-"    volumes:" \
-"      - /var/run/docker.sock:/var/run/docker.sock:ro" \
-"      - traefik-certificates:/letsencrypt" \
-"    networks:" \
-"      - traefik-public" \
-"    deploy:" \
-"      mode: replicated" \
-"      replicas: 1" \
-"      placement:" \
-"        constraints:" \
-"          - node.role == manager" \
-"      restart_policy:" \
-"        condition: any" \
-"        delay: 5s" \
-"        max_attempts: 3" \
-"      labels:" \
-"        - \"traefik.enable=true\"" \
-"" \
-"volumes:" \
-"  traefik-certificates:" \
-"    driver: local" \
-"" \
-"networks:" \
-"  traefik-public:" \
-"    external: true" \
-> "$TRAEFIK_COMPOSE"
+    cat > "$TRAEFIK_COMPOSE" << EOF
+version: '3.8'
+
+services:
+  traefik:
+    image: traefik:v2.11
+    command:
+      - --providers.docker=true
+      - --providers.docker.swarmMode=true
+      - --providers.docker.exposedByDefault=false
+      - --providers.docker.network=traefik-public
+      - --entrypoints.web.address=:80
+      - --entrypoints.websecure.address=:443
+      - --entrypoints.web.http.redirections.entrypoint.to=websecure
+      - --entrypoints.web.http.redirections.entrypoint.scheme=https
+      - --api.dashboard=true
+      - --certificatesresolvers.letsencrypt.acme.email=${TRAEFIK_EMAIL}
+      - --certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json
+      - --certificatesresolvers.letsencrypt.acme.httpchallenge=true
+      - --certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web
+      - --log.level=INFO
+      - --accesslog=true
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - traefik-certificates:/letsencrypt
+    networks:
+      - traefik-public
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: any
+        delay: 5s
+        max_attempts: 3
+      labels:
+        - "traefik.enable=true"
+
+volumes:
+  traefik-certificates:
+    driver: local
+
+networks:
+  traefik-public:
+    external: true
+EOF
 
     echo "Deploying Traefik..."
     docker stack deploy -c "$TRAEFIK_COMPOSE" traefik
@@ -591,19 +591,22 @@ if [ "$setup_traefik" = "yes" ] && [ -n "$TRAEFIK_EMAIL" ]; then
                 echo ""
                 echo "🔧 Applying Traefik configuration to HostCraft..."
                 
+                # Construct Traefik rule strings
+                HOST_RULE="Host(\`$hostcraft_domain\`)"
+                
                 # Apply Traefik labels to HostCraft web service
                 if [ "$enable_https" = "yes" ]; then
                     # HTTPS configuration with Let's Encrypt
                     docker service update \
                         --label-add "traefik.enable=true" \
                         --label-add "traefik.docker.network=traefik-public" \
-                        --label-add "traefik.http.routers.hostcraft-web.rule=Host(\\\`$hostcraft_domain\\\`)" \
+                        --label-add "traefik.http.routers.hostcraft-web.rule=$HOST_RULE" \
                         --label-add "traefik.http.routers.hostcraft-web.entrypoints=websecure" \
                         --label-add "traefik.http.routers.hostcraft-web.tls=true" \
                         --label-add "traefik.http.routers.hostcraft-web.tls.certresolver=letsencrypt" \
                         --label-add "traefik.http.routers.hostcraft-web.service=hostcraft-web" \
                         --label-add "traefik.http.services.hostcraft-web.loadbalancer.server.port=8080" \
-                        --label-add "traefik.http.routers.hostcraft-web-http.rule=Host(\\\`$hostcraft_domain\\\`)" \
+                        --label-add "traefik.http.routers.hostcraft-web-http.rule=$HOST_RULE" \
                         --label-add "traefik.http.routers.hostcraft-web-http.entrypoints=web" \
                         --label-add "traefik.http.routers.hostcraft-web-http.middlewares=redirect-to-https" \
                         --label-add "traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https" \
@@ -614,7 +617,7 @@ if [ "$setup_traefik" = "yes" ] && [ -n "$TRAEFIK_EMAIL" ]; then
                     docker service update \
                         --label-add "traefik.enable=true" \
                         --label-add "traefik.docker.network=traefik-public" \
-                        --label-add "traefik.http.routers.hostcraft-web.rule=Host(\\\`$hostcraft_domain\\\`)" \
+                        --label-add "traefik.http.routers.hostcraft-web.rule=$HOST_RULE" \
                         --label-add "traefik.http.routers.hostcraft-web.entrypoints=web" \
                         --label-add "traefik.http.routers.hostcraft-web.service=hostcraft-web" \
                         --label-add "traefik.http.services.hostcraft-web.loadbalancer.server.port=8080" \
