@@ -9,38 +9,12 @@ public static class DbSeeder
 {
     public static async Task SeedAsync(HostCraftDbContext context)
     {
-        // Ensure default user exists for single-user mode
-        await EnsureDefaultUserAsync(context);
+        // NOTE: We no longer seed a default user here.
+        // Users must complete the /setup page to create their admin account.
+        // This ensures proper password hashing and security.
 
         // Only ensure localhost server is configured if Docker is available
         await EnsureLocalhostServerAsync(context);
-    }
-
-    private static async Task EnsureDefaultUserAsync(HostCraftDbContext context)
-    {
-        // Check if any user exists
-        var userExists = await context.Users.AnyAsync();
-
-        if (userExists)
-        {
-            return;
-        }
-
-        // Create default admin user for single-user mode
-        // In single-user mode, authentication is not enforced, so password doesn't matter
-        var defaultUser = new User
-        {
-            Id = 1, // Explicitly set ID to 1 for single-user mode compatibility
-            Uuid = Guid.NewGuid(),
-            Email = "admin@hostcraft.local",
-            PasswordHash = "not-used-in-single-user-mode",
-            Name = "Admin",
-            IsAdmin = true,
-            CreatedAt = DateTime.UtcNow
-        };
-
-        context.Users.Add(defaultUser);
-        await context.SaveChangesAsync();
     }
     
     private static async Task EnsureLocalhostServerAsync(HostCraftDbContext context)
