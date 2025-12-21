@@ -1,4 +1,5 @@
 using System.Text;
+using Docker.DotNet;
 using Docker.DotNet.Models;
 using HostCraft.Core.Entities;
 using HostCraft.Core.Enums;
@@ -472,56 +473,54 @@ public class ProxyService : IProxyService
     {
         try
         {
-            // Build docker service update command with all label arguments
-            var arguments = new System.Text.StringBuilder("service update");
-            
-            // Add all labels as --label-add arguments
+            _logger.LogInformation("Applying {LabelCount} labels to hostcraft-web service using Docker API", labels.Count);
+
+            // Connect to Docker socket directly (works inside container with mounted socket)
+            using var dockerClient = new DockerClientConfiguration(
+                new Uri("unix:///var/run/docker.sock")).CreateClient();
+
+            // Find the hostcraft-web service (could be named hostcraft_hostcraft-web or hostcraft-web depending on deployment)
+            var services = await dockerClient.Swarm.ListServicesAsync(cancellationToken: cancellationToken);
+            var webService = services.FirstOrDefault(s =>
+                s.Spec.Name.Contains("hostcraft-web", StringComparison.OrdinalIgnoreCase) ||
+                s.Spec.Name.Contains("hostcraft_hostcraft-web", StringComparison.OrdinalIgnoreCase));
+
+            if (webService == null)
+            {
+                _logger.LogWarning("Could not find hostcraft-web service. Available services: {Services}",
+                    string.Join(", ", services.Select(s => s.Spec.Name)));
+                return;
+            }
+
+            _logger.LogInformation("Found service: {ServiceName} (ID: {ServiceId})", webService.Spec.Name, webService.ID);
+
+            // Get current service spec and update labels
+            var currentSpec = webService.Spec;
+
+            // Merge new labels with existing ones
+            currentSpec.Labels ??= new Dictionary<string, string>();
             foreach (var label in labels)
             {
-                arguments.Append($" --label-add \"{label.Key}={label.Value}\"");
+                currentSpec.Labels[label.Key] = label.Value;
             }
-            
-            // Force update to apply changes
-            arguments.Append(" --force hostcraft_hostcraft-web");
-            
-            var commandArgs = arguments.ToString();
-            
-            // Use a shell command to update the service since we don't have a Server entity for localhost
-            // This is running on the same machine as HostCraft, so we can execute docker commands directly
-            var process = new System.Diagnostics.Process
+
+            // Update the service with new labels
+            var updateParams = new ServiceUpdateParameters
             {
-                StartInfo = new System.Diagnostics.ProcessStartInfo
-                {
-                    FileName = "docker",
-                    Arguments = commandArgs,
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    UseShellExecute = false,
-                    CreateNoWindow = true
-                }
+                Service = currentSpec,
+                Version = (long)webService.Version.Index
             };
 
-            _logger.LogInformation("Executing: docker {Command}", commandArgs);
-            
-            process.Start();
-            var output = await process.StandardOutput.ReadToEndAsync(cancellationToken);
-            var error = await process.StandardError.ReadToEndAsync(cancellationToken);
-            await process.WaitForExitAsync(cancellationToken);
+            await dockerClient.Swarm.UpdateServiceAsync(webService.ID, updateParams, cancellationToken);
 
-            if (process.ExitCode != 0)
-            {
-                _logger.LogWarning("Failed to update hostcraft-web service. Exit code: {ExitCode}, Error: {Error}", 
-                    process.ExitCode, error);
-                throw new Exception($"Docker service update failed: {error}");
-            }
-
-            _logger.LogInformation("Successfully updated hostcraft-web service with {LabelCount} labels. Output: {Output}", 
-                labels.Count, output);
+            _logger.LogInformation("Successfully updated {ServiceName} service with {LabelCount} labels",
+                webService.Spec.Name, labels.Count);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to apply labels to hostcraft-web service");
-            throw;
+            // Don't throw - this is a non-critical operation
+            // The service will work, just without the custom domain configuration
         }
     }
 }

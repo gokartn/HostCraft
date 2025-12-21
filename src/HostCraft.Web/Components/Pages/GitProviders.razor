@@ -69,15 +69,15 @@
                                     }
                                     else
                                     {
-                                        <span class="provider-icon">@GetProviderIcon(provider.Type)</span>
+                                        <span class="provider-icon">@GetProviderIconFromString(provider.Type)</span>
                                     }
                                 </div>
                                 <div class="provider-details">
                                     <h3>@provider.Name</h3>
                                     <p class="provider-username">@@@provider.Username</p>
                                     <div class="provider-meta">
-                                        <span class="provider-type-badge @provider.Type.ToString().ToLower()">
-                                            @GetProviderIcon(provider.Type) @provider.Type
+                                        <span class="provider-type-badge @provider.Type.ToLower()">
+                                            @GetProviderIconFromString(provider.Type) @provider.Type
                                         </span>
                                         @if (provider.IsActive)
                                         {
@@ -798,6 +798,15 @@
         _ => "📦"
     };
 
+    private string GetProviderIconFromString(string type) => type?.ToLower() switch
+    {
+        "github" => "🐙",
+        "gitlab" => "🦊",
+        "bitbucket" => "🪣",
+        "gitea" => "🍵",
+        _ => "📦"
+    };
+
     private string FormatDate(DateTime date)
     {
         var span = DateTime.UtcNow - date;
@@ -816,7 +825,7 @@
     public class GitProviderDto
     {
         public int Id { get; set; }
-        public GitProviderType Type { get; set; }
+        public string Type { get; set; } = "";
         public string Name { get; set; } = "";
         public string Username { get; set; } = "";
         public string? AvatarUrl { get; set; }
