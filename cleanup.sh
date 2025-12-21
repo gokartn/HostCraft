@@ -57,7 +57,7 @@ echo "🗑️  Step 5: Removing Traefik resources..."
 docker ps -a --filter "name=traefik" --format "{{.ID}}" | xargs -r docker rm -f 2>/dev/null || true
 docker volume ls --filter "name=traefik" --format "{{.Name}}" | xargs -r docker volume rm 2>/dev/null || true
 
-echo ""7
+echo ""
 echo "🗑️  Step 6: Removing all HostCraft networks..."
 docker network ls --filter "name=hostcraft" --format "{{.Name}}" | xargs -r docker network rm 2>/dev/null || true
 docker network ls --filter "name=traefik-public" --format "{{.Name}}" | xargs -r docker network rm 2>/dev/null || true
@@ -94,7 +94,7 @@ case $remove_images in
         ;;
 esac
 
-echo ""1
+echo ""
 echo "🗑️  Step 10: Removing installation directory..."
 read -p "Remove the HostCraft installation directory ($(pwd))? (yes/no): " remove_dir
 case $remove_dir in
@@ -109,7 +109,7 @@ case $remove_dir in
         ;;
 esac
 
-echo ""and Traefik have
+echo ""
 echo "✅ HostCraft has been completely removed from the system!"
 echo ""
 echo "All containers, volumes, networks, and data have been deleted."

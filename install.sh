@@ -4,6 +4,44 @@ set -e
 echo "🚀 HostCraft Installation Script"
 echo "================================="
 echo ""
+echo "Press Enter to accept the default option shown in [brackets]"
+echo ""
+
+# Default values
+DEFAULT_POSTGRES_PASSWORD="HostCraft2024!SecureDefault"
+
+# Database password configuration
+echo "🗄️  Database Password Configuration"
+echo "------------------------------------"
+read -p "Set a custom database password? [no]: " custom_password
+custom_password=${custom_password:-no}
+
+case $custom_password in
+    yes|y|Y|YES)
+        while true; do
+            echo ""
+            read -s -p "Enter your database password: " POSTGRES_PASSWORD
+            echo ""
+            read -s -p "Confirm your database password: " POSTGRES_PASSWORD_CONFIRM
+            echo ""
+            if [ "$POSTGRES_PASSWORD" != "$POSTGRES_PASSWORD_CONFIRM" ]; then
+                echo "❌ Passwords do not match. Please try again."
+                continue
+            fi
+            if [ -z "$POSTGRES_PASSWORD" ]; then
+                echo "❌ Password cannot be empty. Please try again."
+                continue
+            fi
+            echo "✅ Custom database password set"
+            break
+        done
+        ;;
+    *)
+        POSTGRES_PASSWORD="$DEFAULT_POSTGRES_PASSWORD"
+        echo "✅ Using default database password"
+        ;;
+esac
+echo ""
 
 # Generate secure encryption key
 echo "🔐 Generating encryption key..."
@@ -11,189 +49,176 @@ ENCRYPTION_KEY=$(openssl rand -base64 32)
 echo "   ✅ Encryption key generated"
 echo ""
 
-# Generate secure database password
-echo "🗄️  Generating database password..."
-POSTGRES_PASSWORD=$(openssl rand -base64 16 | tr -d "=+/" | cut -c1-16)
-echo "   ✅ Database password generated"
-echo ""
-
 # Export variables for docker commands
 export ENCRYPTION_KEY
 export POSTGRES_PASSWORD
-
-echo "🔑 Generated Credentials:"
-echo "   🗄️  Database Password: ${POSTGRES_PASSWORD}"
-echo "   🔐 Encryption Key: ${ENCRYPTION_KEY}"
-echo "   💾 These credentials are stored in environment variables"
-echo ""
-echo "⚠️  IMPORTANT: Keep these credentials secure!"
-echo "   They are only available during this installation session."
-echo ""
 
 # Check if Docker is installed
 if ! command -v docker &> /dev/null; then
     echo "⚠️  Docker is not installed on this system."
     echo ""
-    while true; do
-        read -p "Would you like to install Docker now? (yes/no): " install_docker
-        case $install_docker in
-            yes|y|Y|YES) break;;
-            no|n|N|NO) 
-                echo "❌ Docker is required to run HostCraft."
-                echo "Please install Docker from: https://docs.docker.com/engine/install/"
+    read -p "Install Docker now? [yes]: " install_docker
+    install_docker=${install_docker:-yes}
+
+    case $install_docker in
+        yes|y|Y|YES|"")
+            echo "📦 Installing Docker..."
+
+            # Detect OS and install Docker
+            if [ -f /etc/os-release ]; then
+                . /etc/os-release
+                OS=$ID
+            else
+                echo "❌ Cannot detect OS. Please install Docker manually."
                 exit 1
-                ;;
-            *) echo "❌ Invalid input. Please enter 'yes' or 'no'.";;
-        esac
-    done
-    
-    if true; then
-        echo "📦 Installing Docker..."
-        
-        # Detect OS and install Docker
-        if [ -f /etc/os-release ]; then
-            . /etc/os-release
-            OS=$ID
-        else
-            echo "❌ Cannot detect OS. Please install Docker manually."
+            fi
+
+            case $OS in
+                ubuntu|debian)
+                    echo "Installing Docker on Ubuntu/Debian..."
+                    curl -fsSL https://get.docker.com -o get-docker.sh
+                    sh get-docker.sh
+                    rm get-docker.sh
+                    systemctl enable docker
+                    systemctl start docker
+                    ;;
+                centos|rhel|fedora)
+                    echo "Installing Docker on CentOS/RHEL/Fedora..."
+                    curl -fsSL https://get.docker.com -o get-docker.sh
+                    sh get-docker.sh
+                    rm get-docker.sh
+                    systemctl enable docker
+                    systemctl start docker
+                    ;;
+                *)
+                    echo "❌ Unsupported OS: $OS"
+                    echo "Please install Docker manually from: https://docs.docker.com/engine/install/"
+                    exit 1
+                    ;;
+            esac
+
+            echo "✅ Docker installed successfully"
+            echo ""
+            ;;
+        *)
+            echo "❌ Docker is required to run HostCraft."
+            echo "Please install Docker from: https://docs.docker.com/engine/install/"
             exit 1
-        fi
-        
-        case $OS in
-            ubuntu|debian)
-                echo "Installing Docker on Ubuntu/Debian..."
-                curl -fsSL https://get.docker.com -o get-docker.sh
-                sh get-docker.sh
-                rm get-docker.sh
-                systemctl enable docker
-                systemctl start docker
-                ;;
-            centos|rhel|fedora)
-                echo "Installing Docker on CentOS/RHEL/Fedora..."
-                curl -fsSL https://get.docker.com -o get-docker.sh
-                sh get-docker.sh
-                rm get-docker.sh
-                systemctl enable docker
-                systemctl start docker
-                ;;
-            *)
-                echo "❌ Unsupported OS: $OS"
-                echo "Please install Docker manually from: https://docs.docker.com/engine/install/"
-                exit 1
-                ;;
-        esac
-        
-        echo "✅ Docker installed successfully"
-        echo ""
-    fi
+            ;;
+    esac
 fi
 
 echo "✅ Docker is installed"
 echo ""
 
 # Ask about Docker Swarm initialization
-echo "Docker Swarm Configuration:"
-while true; do
-    read -p "Would you like to initialize Docker Swarm? (yes/no): " init_swarm
-    case $init_swarm in
-        yes|y|Y|YES) init_swarm="yes"; break;;
-        no|n|N|NO) init_swarm="no"; break;;
-        *) echo "❌ Invalid input. Please enter 'yes' or 'no'.";;
-    esac
-done
+echo "🐝 Docker Swarm Configuration"
+echo "-----------------------------"
+read -p "Initialize Docker Swarm? [yes]: " init_swarm
+init_swarm=${init_swarm:-yes}
 
 SWARM_MANAGER="false"
-if [ "$init_swarm" = "yes" ]; then
-    # Check if already part of a swarm
-    if docker info 2>/dev/null | grep -q "Swarm: active"; then
-        echo "✅ Docker Swarm is already initialized"
-        SWARM_MANAGER="true"
-    else
-        echo "🔧 Initializing Docker Swarm..."
-        docker swarm init 2>/dev/null
-        if [ $? -eq 0 ]; then
-            echo "✅ Docker Swarm initialized successfully"
+case $init_swarm in
+    yes|y|Y|YES|"")
+        init_swarm="yes"
+        # Check if already part of a swarm
+        if docker info 2>/dev/null | grep -q "Swarm: active"; then
+            echo "✅ Docker Swarm is already initialized"
             SWARM_MANAGER="true"
         else
-            echo "⚠️  Failed to initialize swarm (may need to specify --advertise-addr)"
-            echo "You can initialize it manually later with: docker swarm init"
+            echo "🔧 Initializing Docker Swarm..."
+            if docker swarm init 2>/dev/null; then
+                echo "✅ Docker Swarm initialized successfully"
+                SWARM_MANAGER="true"
+            else
+                echo "⚠️  Failed to initialize swarm (may need to specify --advertise-addr)"
+                echo "You can initialize it manually later with: docker swarm init"
+            fi
         fi
-    fi
-    echo ""
-    
-    # Ask about Traefik setup if swarm is enabled
-    echo "Traefik Reverse Proxy Configuration:"
+        ;;
+    *)
+        init_swarm="no"
+        echo "⏭️  Skipping Docker Swarm initialization"
+        ;;
+esac
+echo ""
+
+# Ask about Traefik setup if swarm is enabled
+setup_traefik="no"
+if [ "$init_swarm" = "yes" ]; then
+    echo "🌐 Traefik Reverse Proxy Configuration"
+    echo "--------------------------------------"
     echo "Traefik provides automatic SSL certificates (Let's Encrypt) and domain routing."
-    echo ""
-    while true; do
-        read -p "Would you like to set up Traefik reverse proxy? (yes/no): " setup_traefik
-        case $setup_traefik in
-            yes|y|Y|YES) setup_traefik="yes"; break;;
-            no|n|N|NO) setup_traefik="no"; break;;
-            *) echo "❌ Invalid input. Please enter 'yes' or 'no'.";;
-        esac
-    done
-    
-    if [ "$setup_traefik" = "yes" ]; then
-        echo ""
-        read -p "📧 Enter your email for Let's Encrypt notifications: " TRAEFIK_EMAIL
-        
-        if [ -z "$TRAEFIK_EMAIL" ]; then
-            echo "⚠️  No email provided. Skipping Traefik setup."
-            setup_traefik="no"
-        else
-            # Always expose Traefik dashboard on port 8080 for management
-            TRAEFIK_DASHBOARD_PORT="8080"
-            echo "✅ Traefik dashboard will be accessible on port 8080"
+    read -p "Set up Traefik reverse proxy? [yes]: " setup_traefik
+    setup_traefik=${setup_traefik:-yes}
+
+    case $setup_traefik in
+        yes|y|Y|YES|"")
+            setup_traefik="yes"
             echo ""
-        fi
-    fi
+            read -p "📧 Enter your email for Let's Encrypt notifications (required): " TRAEFIK_EMAIL
+
+            if [ -z "$TRAEFIK_EMAIL" ]; then
+                echo "⚠️  No email provided. Skipping Traefik setup."
+                setup_traefik="no"
+            else
+                TRAEFIK_DASHBOARD_PORT="8080"
+                echo "✅ Traefik will be configured with email: $TRAEFIK_EMAIL"
+            fi
+            ;;
+        *)
+            setup_traefik="no"
+            echo "⏭️  Skipping Traefik setup"
+            ;;
+    esac
     echo ""
 fi
 
 # Ask about localhost server configuration
-echo "Server Configuration:"
-echo "1) Configure localhost as a Docker host (recommended if running locally)"
-echo "2) UI only (manage remote servers, no localhost auto-configuration)"
-echo ""
-while true; do
-    read -p "Select option (1 or 2): " server_option
-    case $server_option in
-        1|2) break;;
-        *) echo "❌ Invalid input. Please enter '1' or '2'.";;
-    esac
-done
+echo "🖥️  Server Configuration"
+echo "------------------------"
+echo "1) Configure localhost as a Docker host (recommended)"
+echo "2) UI only (manage remote servers only)"
+read -p "Select option [1]: " server_option
+server_option=${server_option:-1}
 
-if [ "$server_option" = "1" ]; then
-    CONFIGURE_LOCALHOST="true"
-    echo "✅ Will configure localhost server"
-    
-    # If swarm is initialized, ask if localhost should be swarm manager
-    if [ "$SWARM_MANAGER" = "true" ]; then
-        echo ""
-        while true; do
-            read -p "Configure localhost as Swarm Manager? (yes/no): " localhost_swarm
+case $server_option in
+    1|"")
+        CONFIGURE_LOCALHOST="true"
+        echo "✅ Will configure localhost server"
+
+        # If swarm is initialized, ask if localhost should be swarm manager
+        if [ "$SWARM_MANAGER" = "true" ]; then
+            echo ""
+            read -p "Configure localhost as Swarm Manager? [yes]: " localhost_swarm
+            localhost_swarm=${localhost_swarm:-yes}
+
             case $localhost_swarm in
-                yes|y|Y|YES) localhost_swarm="yes"; break;;
-                no|n|N|NO) localhost_swarm="no"; break;;
-                *) echo "❌ Invalid input. Please enter 'yes' or 'no'.";;
+                yes|y|Y|YES|"")
+                    LOCALHOST_SWARM_MANAGER="true"
+                    echo "✅ Localhost will be configured as Swarm Manager"
+                    ;;
+                *)
+                    LOCALHOST_SWARM_MANAGER="false"
+                    echo "✅ Localhost will be configured as standalone Docker host"
+                    ;;
             esac
-        done
-        if [ "$localhost_swarm" = "yes" ]; then
-            LOCALHOST_SWARM_MANAGER="true"
-            echo "✅ Localhost will be configured as Swarm Manager"
         else
             LOCALHOST_SWARM_MANAGER="false"
-            echo "✅ Localhost will be configured as standalone Docker host"
         fi
-    else
+        ;;
+    2)
+        CONFIGURE_LOCALHOST="false"
         LOCALHOST_SWARM_MANAGER="false"
-    fi
-elif [ "$server_option" = "2" ]; then
-    CONFIGURE_LOCALHOST="false"
-    LOCALHOST_SWARM_MANAGER="false"
-    echo "✅ UI only mode - no localhost auto-configuration"
-fi
+        echo "✅ UI only mode - no localhost auto-configuration"
+        ;;
+    *)
+        # Default to option 1
+        CONFIGURE_LOCALHOST="true"
+        LOCALHOST_SWARM_MANAGER="false"
+        echo "✅ Will configure localhost server (default)"
+        ;;
+esac
 echo ""
 
 # Check if Docker Compose is available
@@ -219,7 +244,6 @@ echo ""
 if [ "$SWARM_ACTIVE" = "true" ]; then
     echo "🧹 Cleaning up existing stack..."
     docker stack rm hostcraft 2>/dev/null || true
-    # Wait for stack removal to complete
     echo "   Waiting for services to stop..."
     sleep 10
 else
@@ -235,13 +259,12 @@ echo ""
 
 echo "🐳 Starting HostCraft..."
 if [ "$SWARM_ACTIVE" = "true" ]; then
-    # Deploy as Docker Swarm stack
     echo "   Deploying as Docker Swarm stack..."
-    
+
     # Create temporary compose file with substituted variables
     export POSTGRES_PASSWORD ENCRYPTION_KEY
     envsubst < docker-compose.yml > /tmp/docker-compose-substituted.yml
-    
+
     if [ "$CONFIGURE_LOCALHOST" = "true" ]; then
         if [ "$LOCALHOST_SWARM_MANAGER" = "true" ]; then
             LOCALHOST_IS_SWARM_MANAGER=true docker stack deploy -c /tmp/docker-compose-substituted.yml hostcraft
@@ -251,21 +274,18 @@ if [ "$SWARM_ACTIVE" = "true" ]; then
     else
         SKIP_LOCALHOST_SEED=true docker stack deploy -c /tmp/docker-compose-substituted.yml hostcraft
     fi
-    
-    # Clean up temporary file
+
     rm -f /tmp/docker-compose-substituted.yml
-    
+
     echo "   ✅ Stack deployed successfully"
     echo "   📊 Check status: docker stack ps hostcraft"
     echo "   📋 View services: docker service ls"
 else
-    # Deploy with Docker Compose
     echo "   Deploying with Docker Compose..."
-    
-    # Create temporary compose file with substituted variables
+
     export POSTGRES_PASSWORD ENCRYPTION_KEY
     envsubst < docker-compose.yml > /tmp/docker-compose-substituted.yml
-    
+
     if [ "$CONFIGURE_LOCALHOST" = "true" ]; then
         if [ "$LOCALHOST_SWARM_MANAGER" = "true" ]; then
             LOCALHOST_IS_SWARM_MANAGER=true docker compose -f /tmp/docker-compose-substituted.yml up -d
@@ -275,10 +295,9 @@ else
     else
         SKIP_LOCALHOST_SEED=true docker compose -f /tmp/docker-compose-substituted.yml up -d
     fi
-    
-    # Clean up temporary file
+
     rm -f /tmp/docker-compose-substituted.yml
-    
+
     echo "   ✅ Containers started successfully"
 fi
 echo ""
@@ -288,7 +307,6 @@ echo "⏳ Waiting for PostgreSQL to be ready..."
 sleep 10
 
 if [ "$SWARM_ACTIVE" = "true" ]; then
-    # In swarm mode, find the postgres container dynamically
     POSTGRES_CONTAINER=""
     for i in {1..30}; do
         POSTGRES_CONTAINER=$(docker ps --filter "label=com.docker.swarm.service.name=hostcraft_postgres" --format "{{.ID}}" | head -n 1)
@@ -298,7 +316,7 @@ if [ "$SWARM_ACTIVE" = "true" ]; then
         echo "   Waiting for postgres service to start... (attempt $i/30)"
         sleep 2
     done
-    
+
     if [ -z "$POSTGRES_CONTAINER" ]; then
         echo "⚠️  Warning: Could not find postgres container"
     else
@@ -309,7 +327,6 @@ if [ "$SWARM_ACTIVE" = "true" ]; then
         echo "✅ PostgreSQL is ready"
     fi
 else
-    # In compose mode, use the traditional container name
     until docker exec hostcraft-postgres-1 pg_isready -U hostcraft &>/dev/null; do
         echo "   PostgreSQL is not ready yet, waiting..."
         sleep 2
@@ -332,14 +349,10 @@ else
     POSTGRES_TARGET="hostcraft-postgres-1"
 fi
 
-# Check if any users exist
 USER_COUNT=$(docker exec -i "$POSTGRES_TARGET" psql -U hostcraft -d hostcraft -t -c "SELECT COUNT(*) FROM \"Users\"" 2>/dev/null | tr -d ' ' || echo "0")
 
 if [ "$USER_COUNT" = "0" ] || [ -z "$USER_COUNT" ]; then
     echo "   ℹ️  No admin users found - initial setup required"
-    echo ""
-    echo "   🔐 IMPORTANT: Complete setup at the /setup page"
-    echo "   You will create your admin account there with a secure password."
     SETUP_REQUIRED="true"
 else
     echo "   ✅ Admin user already exists - setup complete"
@@ -418,18 +431,18 @@ fi
 echo ""
 
 # Setup Traefik if requested
+domain_configured=false
 if [ "$setup_traefik" = "yes" ] && [ -n "$TRAEFIK_EMAIL" ]; then
     echo "🌐 Setting up Traefik reverse proxy..."
     echo ""
-    
+
     # Create Traefik network
     echo "📦 Creating traefik-public network..."
     docker network create --driver=overlay traefik-public 2>/dev/null || echo "   Network already exists"
-    
+
     # Create Traefik compose file
     TRAEFIK_COMPOSE="/tmp/traefik-compose.yml"
 
-    # Use sed to substitute the email in the template
     cat > "$TRAEFIK_COMPOSE" << 'EOF'
 version: '3.8'
 
@@ -483,137 +496,93 @@ networks:
     external: true
 EOF
 
-    # Replace the placeholder with the actual email
     sed -i "s/TRAEFIK_EMAIL_PLACEHOLDER/${TRAEFIK_EMAIL}/g" "$TRAEFIK_COMPOSE"
 
     echo "Deploying Traefik..."
     docker stack deploy -c "$TRAEFIK_COMPOSE" traefik
-    
+
     echo ""
     echo "⏳ Waiting for Traefik to start..."
     sleep 5
-    
-    # Check if Traefik is running
+
     if docker service ls | grep -q "traefik_traefik"; then
         echo "✅ Traefik deployed successfully!"
-        
-        # Connect HostCraft services to Traefik network
+
         echo "🔗 Connecting HostCraft services to Traefik network..."
         docker service update --network-add traefik-public hostcraft_web 2>/dev/null || true
         echo "✅ HostCraft web service connected to Traefik"
         echo ""
-        
+
         # Ask if user wants to configure domain now
-        echo "Domain Configuration"
-        echo "============================================================="
-        echo "Would you like to configure a domain for HostCraft now?"
-        echo "This will make HostCraft accessible via your domain with HTTPS."
-        echo ""
-        echo "You can also configure this later in the Web UI (Settings -> HostCraft Domain & SSL)"
-        while true; do
-            read -p "Configure domain now? (yes/no): " configure_domain
-            case $configure_domain in
-                yes|y|Y|YES) configure_domain="yes"; break;;
-                no|n|N|NO) configure_domain="no"; break;;
-                *) echo "❌ Invalid input. Please enter 'yes' or 'no'.";;
-            esac
-        done
-        
-        if [ "$configure_domain" = "yes" ]; then
-            echo ""
-            read -p "Enter your domain (e.g., hostcraft.example.com): " hostcraft_domain
-            
-            while true; do
-                read -p "Enable HTTPS with Let's Encrypt? (yes/no): " enable_https
-                case $enable_https in
-                    yes|y|Y|YES) enable_https="yes"; break;;
-                    no|n|N|NO) enable_https="no"; break;;
-                    *) echo "❌ Invalid input. Please enter 'yes' or 'no'.";;
-                esac
-            done
-            
-            if [ -n "$hostcraft_domain" ]; then
+        echo "🌐 Domain Configuration"
+        echo "-----------------------"
+        echo "You can configure a domain now or later in the Web UI."
+        read -p "Configure domain now? [yes]: " configure_domain
+        configure_domain=${configure_domain:-yes}
+
+        case $configure_domain in
+            yes|y|Y|YES|"")
                 echo ""
-                echo "🔧 Applying Traefik configuration to HostCraft..."
-                
-                # Construct Traefik rule strings safely
-                HOST_RULE=$(printf "Host(\`%s\`)" "$hostcraft_domain")
-                
-                # Apply Traefik labels to HostCraft web service
-                if [ "$enable_https" = "yes" ]; then
-                    # HTTPS configuration with Let's Encrypt
-                    docker service update \
-                        --label-add "traefik.enable=true" \
-                        --label-add "traefik.docker.network=traefik-public" \
-                        --label-add "traefik.http.routers.hostcraft-web.rule=$HOST_RULE" \
-                        --label-add "traefik.http.routers.hostcraft-web.entrypoints=websecure" \
-                        --label-add "traefik.http.routers.hostcraft-web.tls=true" \
-                        --label-add "traefik.http.routers.hostcraft-web.tls.certresolver=letsencrypt" \
-                        --label-add "traefik.http.routers.hostcraft-web.service=hostcraft-web" \
-                        --label-add "traefik.http.services.hostcraft-web.loadbalancer.server.port=8080" \
-                        --label-add "traefik.http.routers.hostcraft-web-http.rule=$HOST_RULE" \
-                        --label-add "traefik.http.routers.hostcraft-web-http.entrypoints=web" \
-                        --label-add "traefik.http.routers.hostcraft-web-http.middlewares=redirect-to-https" \
-                        --label-add "traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https" \
-                        --label-add "traefik.http.middlewares.redirect-to-https.redirectscheme.permanent=true" \
-                        --force hostcraft_web
-                else
-                    # HTTP only configuration
-                    docker service update \
-                        --label-add "traefik.enable=true" \
-                        --label-add "traefik.docker.network=traefik-public" \
-                        --label-add "traefik.http.routers.hostcraft-web.rule=$HOST_RULE" \
-                        --label-add "traefik.http.routers.hostcraft-web.entrypoints=web" \
-                        --label-add "traefik.http.routers.hostcraft-web.service=hostcraft-web" \
-                        --label-add "traefik.http.services.hostcraft-web.loadbalancer.server.port=8080" \
-                        --force hostcraft_web
-                fi
-                
-                if [ $? -eq 0 ]; then
-                    echo "✅ Traefik labels applied successfully"
-                    
-                    # Use Traefik email for Let's Encrypt (already collected earlier)
-                    letsencrypt_email="$TRAEFIK_EMAIL"
-                    
+                read -p "Enter your domain (e.g., hostcraft.example.com): " hostcraft_domain
+
+                if [ -n "$hostcraft_domain" ]; then
+                    read -p "Enable HTTPS with Let's Encrypt? [yes]: " enable_https
+                    enable_https=${enable_https:-yes}
+
                     echo ""
-                    echo "Traefik routing configured successfully!"
-                    echo ""
-                    echo "Final Configuration Step"
-                    echo "============================================================="
-                    echo "To complete the setup, save your domain settings in the HostCraft UI:"
-                    echo ""
-                    echo "   1. Open: https://$hostcraft_domain/settings"
-                    echo "   2. HostCraft Domain: $hostcraft_domain"
-                    if [ "$enable_https" = "yes" ]; then
-                        echo "   3. Enable HTTPS: checked"
-                        echo "   4. Let's Encrypt Email: $letsencrypt_email"
+                    echo "🔧 Applying Traefik configuration to HostCraft..."
+
+                    HOST_RULE=$(printf "Host(\`%s\`)" "$hostcraft_domain")
+
+                    case $enable_https in
+                        yes|y|Y|YES|"")
+                            docker service update \
+                                --label-add "traefik.enable=true" \
+                                --label-add "traefik.docker.network=traefik-public" \
+                                --label-add "traefik.http.routers.hostcraft-web.rule=$HOST_RULE" \
+                                --label-add "traefik.http.routers.hostcraft-web.entrypoints=websecure" \
+                                --label-add "traefik.http.routers.hostcraft-web.tls=true" \
+                                --label-add "traefik.http.routers.hostcraft-web.tls.certresolver=letsencrypt" \
+                                --label-add "traefik.http.routers.hostcraft-web.service=hostcraft-web" \
+                                --label-add "traefik.http.services.hostcraft-web.loadbalancer.server.port=8080" \
+                                --label-add "traefik.http.routers.hostcraft-web-http.rule=$HOST_RULE" \
+                                --label-add "traefik.http.routers.hostcraft-web-http.entrypoints=web" \
+                                --label-add "traefik.http.routers.hostcraft-web-http.middlewares=redirect-to-https" \
+                                --label-add "traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https" \
+                                --label-add "traefik.http.middlewares.redirect-to-https.redirectscheme.permanent=true" \
+                                --force hostcraft_web
+                            ;;
+                        *)
+                            docker service update \
+                                --label-add "traefik.enable=true" \
+                                --label-add "traefik.docker.network=traefik-public" \
+                                --label-add "traefik.http.routers.hostcraft-web.rule=$HOST_RULE" \
+                                --label-add "traefik.http.routers.hostcraft-web.entrypoints=web" \
+                                --label-add "traefik.http.routers.hostcraft-web.service=hostcraft-web" \
+                                --label-add "traefik.http.services.hostcraft-web.loadbalancer.server.port=8080" \
+                                --force hostcraft_web
+                            ;;
+                    esac
+
+                    if [ $? -eq 0 ]; then
+                        echo "✅ Domain configured: $hostcraft_domain"
+                        domain_configured=true
                     else
-                        echo "   3. Enable HTTPS: unchecked"
+                        echo "⚠️  Failed to apply domain configuration. Configure it later in the Web UI."
                     fi
-                    echo "   5. Click 'Save Configuration'"
-                    echo ""
-                    echo "The Traefik routing is already active. This step just saves the"
-                    echo "settings to your database so they persist after restarts."
-                    echo ""
-                    
-                    domain_configured=true
                 else
-                    echo "⚠️  Failed to apply domain configuration. You can configure it later in the Web UI."
-                    domain_configured=false
+                    echo "⚠️  No domain entered. Configure it later in the Web UI."
                 fi
-            else
-                echo "⚠️  No domain entered. You can configure it later in the Web UI."
-                domain_configured=false
-            fi
-        else
-            domain_configured=false
-        fi
+                ;;
+            *)
+                echo "⏭️  Skipping domain configuration. Configure it later in Settings -> Domain & SSL"
+                ;;
+        esac
         echo ""
     else
         echo "⚠️  Traefik deployment may have issues. Check logs: docker service logs traefik_traefik"
     fi
-    
-    # Cleanup
+
     rm -f "$TRAEFIK_COMPOSE"
 fi
 
@@ -625,7 +594,7 @@ if [ "$SWARM_ACTIVE" = "true" ]; then
     docker service ls --filter label=hostcraft.managed=true
     echo ""
     echo "Tasks:"
-    docker stack ps hostcraft --no-trunc
+    docker stack ps hostcraft --no-trunc 2>/dev/null || docker stack ps hostcraft
 else
     docker compose ps
 fi
@@ -640,15 +609,13 @@ if [ "$setup_traefik" = "yes" ] && [ "$domain_configured" = "true" ]; then
     echo "   🔧 API: http://$(hostname -I | awk '{print $1}'):5100"
     echo "   📈 Traefik Dashboard: http://$(hostname -I | awk '{print $1}'):8080"
 else
-    echo "   Web UI: http://$(hostname -I | awk '{print $1}'):5000"
-    echo "   API:    http://$(hostname -I | awk '{print $1}'):5100"
+    echo "   🌐 Web UI: http://$(hostname -I | awk '{print $1}'):5000"
+    echo "   🔧 API:    http://$(hostname -I | awk '{print $1}'):5100"
     if [ "$setup_traefik" = "yes" ]; then
-        echo "   Traefik Dashboard: http://$(hostname -I | awk '{print $1}'):8080"
+        echo "   📈 Traefik Dashboard: http://$(hostname -I | awk '{print $1}'):8080"
         echo ""
         echo "   💡 To enable domain access with HTTPS:"
-        echo "      1. Open the Web UI above"
-        echo "      2. Go to Settings -> HostCraft Domain & SSL"
-        echo "      3. Enter your domain and enable HTTPS"
+        echo "      Go to Settings -> HostCraft Domain & SSL"
     fi
 fi
 echo ""
@@ -666,59 +633,25 @@ if [ "$SETUP_REQUIRED" = "true" ]; then
     echo "      - Your email address"
     echo "      - A secure password (8+ chars, upper, lower, number)"
     echo ""
-    echo "   This admin account will have full access to HostCraft."
     echo "============================================================="
     echo ""
 fi
 
 if [ "$SWARM_ACTIVE" = "true" ]; then
     echo "🐝 Deployment Mode: Docker Swarm Stack"
-    echo "   📊 Monitor services: docker service ls"
-    echo "   📋 View tasks: docker stack ps hostcraft"
-    echo "   📝 Service logs: docker service logs hostcraft_web"
-    echo "   🔄 Update service: docker service update hostcraft_web"
-    echo ""
-    if [ "$CONFIGURE_LOCALHOST" = "true" ]; then
-        if [ "$LOCALHOST_SWARM_MANAGER" = "true" ]; then
-            echo "🖥️  Localhost server configured as Docker Swarm Manager!"
-            echo "📋 Get worker join token: docker swarm join-token worker"
-            echo "📋 Get manager join token: docker swarm join-token manager"
-            echo ""
-        else
-            echo "🖥️  Localhost server has been auto-configured and is ready to use!"
-        fi
-    fi
-    echo ""
-    
-    if [ "$setup_traefik" = "yes" ]; then
-        echo "🌐 Traefik Reverse Proxy:"
-        echo "   ✅ Traefik is running and ready for domain configuration"
-        echo "   📧 Let's Encrypt Email: $TRAEFIK_EMAIL"
-        echo "   📊 Dashboard: http://$(hostname -I | awk '{print $1}'):8080"
+    echo "   📊 Monitor: docker service ls"
+    echo "   📋 Tasks: docker stack ps hostcraft"
+    echo "   📝 Logs: docker service logs hostcraft_web"
+    if [ "$CONFIGURE_LOCALHOST" = "true" ] && [ "$LOCALHOST_SWARM_MANAGER" = "true" ]; then
         echo ""
-        echo "   Next steps:"
-        echo "   1. Ensure your domain DNS points to this server"
-        echo "   2. Go to Settings -> HostCraft Domain & SSL"
-        echo "   3. Enter your domain and enable HTTPS"
-        echo "   4. HostCraft will automatically configure and restart"
-        echo ""
-        echo "   📝 Traefik logs: docker service logs traefik_traefik -f"
+        echo "   📋 Worker join token: docker swarm join-token worker"
+        echo "   📋 Manager join token: docker swarm join-token manager"
     fi
-    echo ""
-    echo "✨ Services will automatically restart after reboot!"
 else
     echo "🐳 Deployment Mode: Docker Compose (Standalone)"
-    echo "   📊 Monitor containers: docker compose ps"
-    echo "   📝 View logs: docker compose logs -f"
+    echo "   📊 Monitor: docker compose ps"
+    echo "   📝 Logs: docker compose logs -f"
     echo "   🔄 Restart: docker compose restart"
-    echo ""
-    if [ "$CONFIGURE_LOCALHOST" = "true" ]; then
-        echo "🖥️  Localhost server has been auto-configured and is ready to use!"
-    else
-        echo "🖥️  UI only mode - add your servers manually through the web interface."
-    fi
-    echo ""
-    echo "✨ Containers will automatically restart after reboot (restart: unless-stopped)!"
 fi
 echo ""
 echo "🎉 HostCraft is ready to use!"
