@@ -92,9 +92,9 @@ HostCraft automatically encrypts sensitive data stored in the database using AES
    export ENCRYPTION_KEY="your-generated-key-here"
    ```
 
-3. **For Docker Compose, create a `.env` file:**
+3. **For Docker Compose, set additional environment variables:**
    ```bash
-   ENCRYPTION_KEY=your-generated-key-here
+   export POSTGRES_PASSWORD="your-secure-database-password"
    ```
 
 **⚠️ CRITICAL SECURITY WARNING:**
@@ -102,6 +102,7 @@ HostCraft automatically encrypts sensitive data stored in the database using AES
 - Store the key in a secure secret manager (AWS Secrets Manager, Azure Key Vault, etc.)
 - Never commit the key to version control
 - Rotate keys periodically using the built-in key rotation feature
+- **Environment variables are preferred over .env files for security**
 
 ### Authentication & Authorization
 
