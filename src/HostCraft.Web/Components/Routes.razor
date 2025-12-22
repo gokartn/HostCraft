@@ -80,13 +80,17 @@
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        Logger.LogInformation("OnAfterRenderAsync called. firstRender={FirstRender}, _hasCheckedAuth={HasCheckedAuth}", firstRender, _hasCheckedAuth);
+
         if (firstRender && !_hasCheckedAuth)
         {
             _hasCheckedAuth = true;
+            Logger.LogInformation("Starting auth check in OnAfterRenderAsync");
 
             // Check authentication after first render when JS interop is available
             await CheckAuthenticationStatus();
             IsCheckingAuth = false;
+            Logger.LogInformation("Auth check complete, calling StateHasChanged");
             StateHasChanged();
         }
     }
@@ -124,13 +128,16 @@
     {
         try
         {
+            Logger.LogInformation("Starting authentication check...");
+
             // Initialize authentication service
             await AuthService.InitializeAsync();
+            Logger.LogInformation("AuthService.InitializeAsync completed");
 
             // Check if user is authenticated
             var authState = await AuthStateProvider.GetAuthenticationStateAsync();
             IsAuthenticated = authState.User?.Identity?.IsAuthenticated == true;
-            
+
             Logger.LogInformation("Authentication check completed. IsAuthenticated: {IsAuthenticated}", IsAuthenticated);
         }
         catch (Exception ex)
