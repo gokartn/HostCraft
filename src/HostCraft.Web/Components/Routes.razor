@@ -8,6 +8,18 @@
 
 <Router AppAssembly="typeof(Program).Assembly" NotFoundPage="typeof(Pages.NotFound)">
     <Found Context="routeData">
+        @{
+            // Handle redirects
+            if (!IsCheckingSetup && SetupRequired && routeData.PageType != typeof(Pages.Setup))
+            {
+                Navigation.NavigateTo("/setup", forceLoad: false);
+            }
+            else if (!IsCheckingSetup && !SetupRequired && !IsPublicPage(routeData.PageType) && !IsCheckingAuth && !IsAuthenticated)
+            {
+                Navigation.NavigateTo("/login", forceLoad: false);
+            }
+        }
+
         @if (IsCheckingSetup)
         {
             <div class="setup-check-loading">
@@ -17,8 +29,10 @@
         }
         else if (SetupRequired && routeData.PageType != typeof(Pages.Setup))
         {
-            Navigation.NavigateTo("/setup");
-            <div>Redirecting to setup...</div>
+            <div class="setup-check-loading">
+                <div class="spinner"></div>
+                <p>Redirecting to setup...</p>
+            </div>
         }
         else if (IsPublicPage(routeData.PageType))
         {
@@ -35,8 +49,10 @@
         }
         else if (!IsAuthenticated)
         {
-            Navigation.NavigateTo("/login");
-            <div>Redirecting to login...</div>
+            <div class="setup-check-loading">
+                <div class="spinner"></div>
+                <p>Redirecting to login...</p>
+            </div>
         }
         else
         {
@@ -58,7 +74,7 @@
 
     protected override async Task OnInitializedAsync()
     {
-        // Only check setup status during initialization (doesn't require JS)
+        // Check setup status during initialization (doesn't require JS)
         await CheckSetupStatus();
     }
 
