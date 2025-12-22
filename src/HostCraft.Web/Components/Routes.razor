@@ -1,4 +1,5 @@
-﻿@inject HttpClient Http
+﻿@rendermode InteractiveServer
+@inject HttpClient Http
 @inject NavigationManager Navigation
 @inject ILogger<Routes> Logger
 @inject AuthenticationStateProvider AuthStateProvider
@@ -70,7 +71,6 @@
     private bool SetupRequired = false;
     private bool IsAuthenticated = false;
     private bool IsCheckingAuth = true;
-    private bool _hasCheckedAuth = false;
 
     protected override async Task OnInitializedAsync()
     {
@@ -80,17 +80,14 @@
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        Logger.LogInformation("OnAfterRenderAsync called. firstRender={FirstRender}, _hasCheckedAuth={HasCheckedAuth}", firstRender, _hasCheckedAuth);
-
-        if (firstRender && !_hasCheckedAuth)
+        if (firstRender)
         {
-            _hasCheckedAuth = true;
-            Logger.LogInformation("Starting auth check in OnAfterRenderAsync");
+            Logger.LogInformation("OnAfterRenderAsync - first render, checking auth");
 
             // Check authentication after first render when JS interop is available
             await CheckAuthenticationStatus();
             IsCheckingAuth = false;
-            Logger.LogInformation("Auth check complete, calling StateHasChanged");
+            Logger.LogInformation("Auth check complete. IsAuthenticated={IsAuthenticated}", IsAuthenticated);
             StateHasChanged();
         }
     }

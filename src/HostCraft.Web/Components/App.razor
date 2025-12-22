@@ -42,11 +42,5 @@
 </html>
 
 @code {
-    [Inject]
-    private IWebAuthService AuthService { get; set; } = default!;
-
-    protected override async Task OnInitializedAsync()
-    {
-        await AuthService.InitializeAsync();
-    }
+    // Removed OnInitializedAsync to avoid JS interop issues in server mode
 }
