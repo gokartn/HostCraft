@@ -1,5 +1,6 @@
 ﻿@rendermode InteractiveServer
 @inject HttpClient Http
+@implements IDisposable
 @inject NavigationManager Navigation
 @inject ILogger<Routes> Logger
 @inject AuthenticationStateProvider AuthStateProvider
@@ -74,6 +75,9 @@
 
     protected override async Task OnInitializedAsync()
     {
+        // Subscribe to authentication state changes
+        AuthStateProvider.AuthenticationStateChanged += OnAuthenticationStateChanged;
+
         // Check setup status during initialization (doesn't require JS)
         await CheckSetupStatus();
     }
@@ -89,6 +93,19 @@
             IsCheckingAuth = false;
             Logger.LogInformation("Auth check complete. IsAuthenticated={IsAuthenticated}", IsAuthenticated);
             StateHasChanged();
+        }
+    }
+
+    private async void OnAuthenticationStateChanged(Task<AuthenticationState> task)
+    {
+        var authState = await task;
+        var wasAuthenticated = IsAuthenticated;
+        IsAuthenticated = authState.User?.Identity?.IsAuthenticated == true;
+
+        if (wasAuthenticated != IsAuthenticated)
+        {
+            Logger.LogInformation("Authentication state changed. IsAuthenticated: {IsAuthenticated}", IsAuthenticated);
+            await InvokeAsync(StateHasChanged);
         }
     }
 
@@ -156,6 +173,11 @@
         };
 
         return publicPages.Contains(pageType);
+    }
+
+    public void Dispose()
+    {
+        AuthStateProvider.AuthenticationStateChanged -= OnAuthenticationStateChanged;
     }
 }
 
