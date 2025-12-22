@@ -171,7 +171,7 @@
             if (result.Success)
             {
                 Logger.LogInformation("Login successful for user: {Email}", loginModel.Email);
-                Navigation.NavigateTo("/", forceLoad: true);
+                Navigation.NavigateTo("/", forceLoad: false);
             }
             else
             {
