@@ -21,18 +21,32 @@ public class AuthenticationHandler : DelegatingHandler
     {
         try
         {
-            // Get the current token
-            var token = await _authService.GetTokenAsync();
+            // Don't add authentication to anonymous endpoints
+            var isAnonymousEndpoint = request.RequestUri?.PathAndQuery.Contains("api/auth/setup-required") == true ||
+                                     request.RequestUri?.PathAndQuery.Contains("api/auth/setup") == true ||
+                                     request.RequestUri?.PathAndQuery.Contains("api/auth/login") == true ||
+                                     request.RequestUri?.PathAndQuery.Contains("api/auth/refresh") == true ||
+                                     request.RequestUri?.PathAndQuery.Contains("api/auth/2fa/verify") == true;
 
-            if (!string.IsNullOrEmpty(token))
+            if (!isAnonymousEndpoint)
             {
-                // Add authorization header if we have a token
-                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-                _logger.LogDebug("Added JWT token to request: {Method} {Url}", request.Method, request.RequestUri);
+                // Get the current token
+                var token = await _authService.GetTokenAsync();
+
+                if (!string.IsNullOrEmpty(token))
+                {
+                    // Add authorization header if we have a token
+                    request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+                    _logger.LogDebug("Added JWT token to request: {Method} {Url}", request.Method, request.RequestUri);
+                }
+                else
+                {
+                    _logger.LogDebug("No JWT token available for request: {Method} {Url}", request.Method, request.RequestUri);
+                }
             }
             else
             {
-                _logger.LogDebug("No JWT token available for request: {Method} {Url}", request.Method, request.RequestUri);
+                _logger.LogDebug("Skipping authentication for anonymous endpoint: {Method} {Url}", request.Method, request.RequestUri);
             }
         }
         catch (Exception ex)
