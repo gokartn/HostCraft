@@ -456,8 +456,6 @@ services:
       - --providers.docker.network=traefik-public
       - --entrypoints.web.address=:80
       - --entrypoints.websecure.address=:443
-      - --entrypoints.web.http.redirections.entrypoint.to=websecure
-      - --entrypoints.web.http.redirections.entrypoint.scheme=https
       - --api.dashboard=true
       - --certificatesresolvers.letsencrypt.acme.email=TRAEFIK_EMAIL_PLACEHOLDER
       - --certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json
@@ -523,6 +521,10 @@ EOF
         case $configure_domain in
             yes|y|Y|YES|"")
                 echo ""
+                echo "⚠️  IMPORTANT: Before continuing, ensure your domain's DNS A record"
+                echo "   points to this server's public IP address. Let's Encrypt requires"
+                echo "   this to validate domain ownership via HTTP-01 challenge."
+                echo ""
                 read -p "Enter your domain (e.g., hostcraft.example.com): " hostcraft_domain
 
                 if [ -n "$hostcraft_domain" ]; then
@@ -567,6 +569,18 @@ EOF
                     if [ $? -eq 0 ]; then
                         echo "✅ Domain configured: $hostcraft_domain"
                         domain_configured=true
+                        echo ""
+                        echo "📝 Certificate Issuance Information:"
+                        echo "   • Let's Encrypt will validate domain ownership via HTTP-01 challenge"
+                        echo "   • This process may take 1-3 minutes to complete"
+                        echo "   • Check certificate status at: https://$hostcraft_domain"
+                        echo "   • View Traefik logs: docker service logs traefik_traefik -f"
+                        echo ""
+                        echo "⚠️  If certificate issuance fails, verify:"
+                        echo "   1. DNS A record for $hostcraft_domain points to this server"
+                        echo "   2. Ports 80 and 443 are open in firewall"
+                        echo "   3. No other service is using ports 80/443"
+                        echo ""
                     else
                         echo "⚠️  Failed to apply domain configuration. Configure it later in the Web UI."
                     fi
