@@ -1,0 +1,476 @@
+@page "/setup"
+@rendermode InteractiveServer
+@layout EmptyLayout
+@inject HttpClient Http
+@inject NavigationManager Navigation
+@inject IJSRuntime JSRuntime
+
+@using HostCraft.Web.Models
+
+<PageTitle>HostCraft Setup</PageTitle>
+
+<div class="setup-container">
+    <div class="setup-card">
+        @if (IsLoading)
+        {
+            <div class="setup-loading">
+                <div class="spinner"></div>
+                <p>Checking setup status...</p>
+            </div>
+        }
+        else if (!SetupRequired)
+        {
+            <div class="setup-header">
+                <div class="logo-icon">🚀</div>
+                <h1>Setup Complete</h1>
+                <p>HostCraft has already been configured.</p>
+            </div>
+            <div class="setup-actions">
+                <button class="btn btn-primary" @onclick="NavigateToLogin">Go to Login</button>
+            </div>
+        }
+        else
+        {
+            <div class="setup-header">
+                <div class="logo-icon">🚀</div>
+                <h1>Welcome to HostCraft</h1>
+                <p>Let's set up your first administrator account.</p>
+            </div>
+
+            <EditForm Model="@Model" OnSubmit="HandleSetup" FormName="setupForm">
+
+                <div class="form-group">
+                    <label for="name">Name</label>
+                    <InputText id="name" @bind-Value="Model.Name" class="form-control" placeholder="Your name" />
+                    @if (ValidationErrors.ContainsKey("Name"))
+                    {
+                        <div class="validation-error">@ValidationErrors["Name"]</div>
+                    }
+                </div>
+
+                <div class="form-group">
+                    <label for="email">Email</label>
+                    <InputText id="email" @bind-Value="Model.Email" type="email" class="form-control" placeholder="admin@example.com" />
+                    @if (ValidationErrors.ContainsKey("Email"))
+                    {
+                        <div class="validation-error">@ValidationErrors["Email"]</div>
+                    }
+                </div>
+
+                <div class="form-group">
+                    <label for="password">Password</label>
+                    <InputText id="password" @bind-Value="Model.Password" type="password" class="form-control" placeholder="Min. 8 characters" />
+                    @if (ValidationErrors.ContainsKey("Password"))
+                    {
+                        <div class="validation-error">@ValidationErrors["Password"]</div>
+                    }
+                    <small class="form-hint">Must contain uppercase, lowercase, and a number</small>
+                </div>
+
+                <div class="form-group">
+                    <label for="confirmPassword">Confirm Password</label>
+                    <InputText id="confirmPassword" @bind-Value="Model.ConfirmPassword" type="password" class="form-control" placeholder="Confirm your password" />
+                    @if (ValidationErrors.ContainsKey("ConfirmPassword"))
+                    {
+                        <div class="validation-error">@ValidationErrors["ConfirmPassword"]</div>
+                    }
+                </div>
+
+                @if (!string.IsNullOrEmpty(ErrorMessage))
+                {
+                    <div class="alert alert-error">@ErrorMessage</div>
+                }
+
+                <div class="setup-actions">
+                    <button type="submit" class="btn btn-primary btn-lg" disabled="@IsSubmitting">
+                        @if (IsSubmitting)
+                        {
+                            <span class="spinner-sm"></span>
+                            <span>Setting up...</span>
+                        }
+                        else
+                        {
+                            <span>Complete Setup</span>
+                        }
+                    </button>
+                </div>
+            </EditForm>
+        }
+    </div>
+</div>
+
+@code {
+    [Inject] ILogger<Setup> Logger { get; set; } = null!;
+
+    private bool IsLoading = true;
+    private bool SetupRequired = false;
+    private bool IsSubmitting = false;
+    private string ErrorMessage = "";
+    private Dictionary<string, string> ValidationErrors { get; set; } = new();
+    private SetupRequest Model { get; set; } = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await CheckSetupStatus();
+    }
+
+    private async Task CheckSetupStatus()
+    {
+        try
+        {
+            var response = await Http.GetAsync("api/auth/setup-required");
+            if (response.IsSuccessStatusCode)
+            {
+                var result = await response.Content.ReadFromJsonAsync<SetupStatusResponse>();
+                SetupRequired = result?.SetupRequired ?? true;
+                Logger.LogInformation("Setup page: API returned SetupRequired={SetupRequired}", SetupRequired);
+            }
+            else
+            {
+                Logger.LogWarning("Failed to check setup status: {StatusCode}, assuming setup required", response.StatusCode);
+                SetupRequired = true;
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error checking setup status, assuming setup required");
+            SetupRequired = true;
+        }
+        finally
+        {
+            IsLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task HandleSetup()
+    {
+        Logger.LogInformation("HandleSetup called - form submitted");
+
+        // Clear previous errors
+        ErrorMessage = "";
+        ValidationErrors.Clear();
+
+        // Validate all fields
+        bool isValid = true;
+
+        if (string.IsNullOrWhiteSpace(Model.Name))
+        {
+            ValidationErrors["Name"] = "Name is required.";
+            isValid = false;
+        }
+
+        if (string.IsNullOrWhiteSpace(Model.Email))
+        {
+            ValidationErrors["Email"] = "Email is required.";
+            isValid = false;
+        }
+        else if (!IsValidEmail(Model.Email))
+        {
+            ValidationErrors["Email"] = "Please enter a valid email address.";
+            isValid = false;
+        }
+
+        if (string.IsNullOrWhiteSpace(Model.Password))
+        {
+            ValidationErrors["Password"] = "Password is required.";
+            isValid = false;
+        }
+        else if (Model.Password.Length < 8)
+        {
+            ValidationErrors["Password"] = "Password must be at least 8 characters.";
+            isValid = false;
+        }
+        else if (!Model.IsPasswordStrong())
+        {
+            ValidationErrors["Password"] = "Password must contain uppercase, lowercase, and a digit.";
+            isValid = false;
+        }
+
+        if (string.IsNullOrWhiteSpace(Model.ConfirmPassword))
+        {
+            ValidationErrors["ConfirmPassword"] = "Please confirm your password.";
+            isValid = false;
+        }
+        else if (Model.ConfirmPassword != Model.Password)
+        {
+            ValidationErrors["ConfirmPassword"] = "Passwords do not match.";
+            isValid = false;
+        }
+
+        if (!isValid)
+        {
+            StateHasChanged();
+            return;
+        }
+
+        Logger.LogInformation("Setup validation passed - Name: '{Name}', Email: '{Email}'",
+            Model.Name, Model.Email);
+
+        IsSubmitting = true;
+
+        try
+        {
+            // Send only the fields the API expects (Email, Password, Name)
+            var apiRequest = new
+            {
+                Email = Model.Email.Trim(),
+                Name = Model.Name.Trim(),
+                Password = Model.Password
+            };
+
+            var response = await Http.PostAsJsonAsync("api/auth/setup", apiRequest);
+
+            if (response.IsSuccessStatusCode)
+            {
+                Navigation.NavigateTo("/login?setup=complete", forceLoad: true);
+            }
+            else
+            {
+                var errorContent = await response.Content.ReadAsStringAsync();
+                // Try to extract error message from JSON response
+                try
+                {
+                    var errorDoc = System.Text.Json.JsonDocument.Parse(errorContent);
+                    if (errorDoc.RootElement.TryGetProperty("error", out var errorProp))
+                    {
+                        ErrorMessage = errorProp.GetString() ?? "Setup failed";
+                    }
+                    else
+                    {
+                        ErrorMessage = errorContent;
+                    }
+                }
+                catch
+                {
+                    ErrorMessage = errorContent;
+                }
+            }
+        }
+        catch (HttpRequestException ex)
+        {
+            Logger.LogError(ex, "HTTP error during setup - StatusCode: {StatusCode}", ex.StatusCode);
+            ErrorMessage = $"Failed to connect to HostCraft API: {ex.Message}";
+        }
+        catch (TaskCanceledException ex)
+        {
+            Logger.LogError(ex, "Timeout during setup");
+            ErrorMessage = "Setup request timed out. The API may still be starting up. Please wait and try again.";
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error during setup: {Message}", ex.Message);
+            ErrorMessage = $"Setup failed: {ex.Message}";
+        }
+        finally
+        {
+            IsSubmitting = false;
+            StateHasChanged();
+        }
+    }
+
+    private void NavigateToLogin()
+    {
+        Navigation.NavigateTo("/login", forceLoad: true);
+    }
+
+    private bool IsValidEmail(string email)
+    {
+        try
+        {
+            var addr = new System.Net.Mail.MailAddress(email);
+            return addr.Address == email;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+}
+
+<style>
+.setup-container {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    background: linear-gradient(135deg, #0a0e27 0%, #1a2344 50%, #141b3a 100%);
+    padding: 20px;
+}
+
+.setup-card {
+    background: rgba(20, 27, 58, 0.9);
+    border: 1px solid rgba(99, 102, 241, 0.2);
+    border-radius: 16px;
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4), 0 0 40px rgba(99, 102, 241, 0.1);
+    padding: 48px;
+    width: 100%;
+    max-width: 480px;
+    backdrop-filter: blur(10px);
+}
+
+.setup-header {
+    text-align: center;
+    margin-bottom: 32px;
+}
+
+.logo-icon {
+    font-size: 4rem;
+    margin-bottom: 16px;
+    filter: drop-shadow(0 0 20px rgba(99, 102, 241, 0.5));
+}
+
+.setup-header h1 {
+    color: #ffffff;
+    margin: 0 0 8px 0;
+    font-size: 28px;
+    font-weight: 700;
+    background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+.setup-header p {
+    color: #a0a0b8;
+    margin: 0;
+    font-size: 1rem;
+}
+
+.setup-loading {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 48px;
+    color: #a0a0b8;
+}
+
+.setup-loading .spinner {
+    width: 48px;
+    height: 48px;
+    border: 3px solid rgba(99, 102, 241, 0.2);
+    border-top-color: #6366f1;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin-bottom: 16px;
+}
+
+.form-group {
+    margin-bottom: 20px;
+}
+
+.form-group label {
+    display: block;
+    margin-bottom: 8px;
+    color: #e2e8f0;
+    font-weight: 500;
+    font-size: 14px;
+}
+
+.form-control {
+    width: 100%;
+    padding: 14px 16px;
+    background: rgba(10, 14, 39, 0.6);
+    border: 1px solid rgba(99, 102, 241, 0.2);
+    border-radius: 10px;
+    font-size: 16px;
+    color: #ffffff;
+    transition: all 0.2s ease;
+    box-sizing: border-box;
+}
+
+.form-control:focus {
+    outline: none;
+    border-color: #6366f1;
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);
+}
+
+.form-control::placeholder {
+    color: #6b6b85;
+}
+
+.form-hint {
+    display: block;
+    margin-top: 6px;
+    color: #6b6b85;
+    font-size: 12px;
+}
+
+.validation-error {
+    display: block;
+    margin-top: 6px;
+    color: #f87171;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+.setup-actions {
+    margin-top: 32px;
+}
+
+.btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 14px 24px;
+    font-size: 16px;
+    font-weight: 600;
+    border: none;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    width: 100%;
+}
+
+.btn-primary {
+    background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+    color: white;
+    box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+}
+
+.btn-primary:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 20px rgba(99, 102, 241, 0.4);
+}
+
+.btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none;
+}
+
+.btn-lg {
+    padding: 16px 28px;
+    font-size: 17px;
+}
+
+.spinner-sm {
+    width: 18px;
+    height: 18px;
+    border: 2px solid rgba(255, 255, 255, 0.3);
+    border-top: 2px solid currentColor;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+.alert {
+    padding: 14px 16px;
+    border-radius: 10px;
+    margin-bottom: 20px;
+    font-weight: 500;
+    font-size: 14px;
+}
+
+.alert-error {
+    background-color: rgba(239, 68, 68, 0.1);
+    color: #f87171;
+    border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+@@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+</style>

@@ -1,0 +1,271 @@
+name: Create Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g., 0.0.1-alpha, 0.1.0-beta, 1.0.0)'
+        required: true
+        type: string
+      prerelease:
+        description: 'Mark as pre-release'
+        required: false
+        type: boolean
+        default: true
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    # Security: Only allow repository owner to create releases
+    if: github.actor == 'gokartn' || github.actor == 'firefighter'
+    permissions:
+      contents: write
+      packages: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4.1.1
+        with:
+          fetch-depth: 0  # Full history for changelog
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4.0.0
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore dependencies
+        run: dotnet restore HostCraft.sln
+
+      - name: Build solution
+        run: dotnet build HostCraft.sln --configuration Release --no-restore
+
+      - name: Run tests
+        run: dotnet test HostCraft.sln --configuration Release --no-build --verbosity normal
+
+      - name: Update VERSION file
+        run: echo "${{ inputs.version }}" > VERSION
+
+      - name: Publish API
+        run: dotnet publish src/HostCraft.Api/HostCraft.Api.csproj -c Release -o ./publish/api --no-build
+
+      - name: Publish Web
+        run: dotnet publish src/HostCraft.Web/HostCraft.Web.csproj -c Release -o ./publish/web --no-build
+
+      - name: Create release archive
+        run: |
+          mkdir -p release-artifacts
+
+          # Create API archive
+          cd publish/api
+          tar -czf ../../release-artifacts/hostcraft-api-${{ inputs.version }}.tar.gz .
+          cd ../..
+
+          # Create Web archive
+          cd publish/web
+          tar -czf ../../release-artifacts/hostcraft-web-${{ inputs.version }}.tar.gz .
+          cd ../..
+
+          # Create install script archive
+          tar -czf release-artifacts/hostcraft-install-${{ inputs.version }}.tar.gz install.sh uninstall.sh cleanup.sh docker-compose.yml scripts/
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3.0.0
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3.0.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push API Docker image
+        uses: docker/build-push-action@v5.1.0
+        with:
+          context: .
+          file: ./src/HostCraft.Api/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/hostcraft-api:${{ inputs.version }}
+            ghcr.io/${{ github.repository_owner }}/hostcraft-api:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push Web Docker image
+        uses: docker/build-push-action@v5.1.0
+        with:
+          context: .
+          file: ./src/HostCraft.Web/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/hostcraft-web:${{ inputs.version }}
+            ghcr.io/${{ github.repository_owner }}/hostcraft-web:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          # Get commits since last tag
+          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          if [ -z "$LAST_TAG" ]; then
+            COMMITS=$(git log --pretty=format:"- %s (%h)" --no-merges)
+          else
+            COMMITS=$(git log ${LAST_TAG}..HEAD --pretty=format:"- %s (%h)" --no-merges)
+          fi
+
+          # Create changelog content
+          cat > CHANGELOG.md << EOF
+          # HostCraft ${{ inputs.version }}
+
+          ## What's Changed
+
+          ${COMMITS}
+
+          ## Installation
+
+          ### Using Docker Compose (Recommended - Secure Method)
+
+          \`\`\`bash
+          # Download the install script
+          curl -fsSL -o install.sh https://github.com/${{ github.repository }}/releases/download/v${{ inputs.version }}/install.sh
+
+          # Review the script (IMPORTANT: Always review scripts before running)
+          less install.sh
+          # or: cat install.sh
+
+          # Make it executable and run
+          chmod +x install.sh
+          ./install.sh
+          \`\`\`
+
+          ### Uninstallation
+
+          HostCraft provides two cleanup options:
+
+          **Quick Uninstall (keeps data):**
+          \`\`\`bash
+          # Download and run
+          curl -fsSL -o uninstall.sh https://github.com/${{ github.repository }}/releases/download/v${{ inputs.version }}/uninstall.sh
+          chmod +x uninstall.sh
+          ./uninstall.sh
+          \`\`\`
+
+          **Complete Removal (deletes ALL data):**
+          \`\`\`bash
+          # Download and run
+          curl -fsSL -o cleanup.sh https://github.com/${{ github.repository }}/releases/download/v${{ inputs.version }}/cleanup.sh
+          chmod +x cleanup.sh
+          ./cleanup.sh
+          \`\`\`
+
+          ### Using Docker Images
+
+          \`\`\`bash
+          # Pull the images
+          docker pull ghcr.io/${{ github.repository_owner }}/hostcraft-api:${{ inputs.version }}
+          docker pull ghcr.io/${{ github.repository_owner }}/hostcraft-web:${{ inputs.version }}
+          \`\`\`
+
+          ### Manual Installation
+
+          1. Download the release archives
+          2. Extract to your desired location
+          3. Run the installation script
+
+          ## System Requirements
+
+          - Docker 24.0+
+          - Docker Compose v2.20+
+          - PostgreSQL 18+ (included in docker-compose)
+          - 2GB+ RAM recommended
+          - 10GB+ disk space
+
+          ## Documentation
+
+          - [Installation Guide](https://github.com/${{ github.repository }}/blob/main/README.md)
+          - [Architecture Overview](https://github.com/${{ github.repository }}/blob/main/CLAUDE.md)
+          - [Backup System Guide](https://github.com/${{ github.repository }}/blob/main/docs/BACKUP-SYSTEM-PROGRESS.md)
+
+          ## Docker Images
+
+          - API: \`ghcr.io/${{ github.repository_owner }}/hostcraft-api:${{ inputs.version }}\`
+          - Web: \`ghcr.io/${{ github.repository_owner }}/hostcraft-web:${{ inputs.version }}\`
+
+          ## Full Changelog
+
+          See all changes: https://github.com/${{ github.repository }}/compare/${LAST_TAG}...v${{ inputs.version }}
+          EOF
+
+          echo "changelog_file=CHANGELOG.md" >> $GITHUB_OUTPUT
+
+      - name: Create Git tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "v${{ inputs.version }}" -m "Release v${{ inputs.version }}"
+          git push origin "v${{ inputs.version }}"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2.0.2
+        with:
+          tag_name: v${{ inputs.version }}
+          name: HostCraft v${{ inputs.version }}
+          body_path: ${{ steps.changelog.outputs.changelog_file }}
+          draft: false
+          prerelease: ${{ inputs.prerelease }}
+          files: |
+            release-artifacts/*.tar.gz
+            install.sh
+            uninstall.sh
+            cleanup.sh
+            docker-compose.yml
+            docker-compose.prod.yml
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update version in code
+        run: |
+          # Update VERSION file
+          echo "${{ inputs.version }}" > VERSION
+          
+          # Update version in NavMenu.razor
+          sed -i 's/private string currentVersion = ".*";/private string currentVersion = "${{ inputs.version }}";/' src/HostCraft.Web/Components/Layout/NavMenu.razor
+
+          # Update version in CLAUDE.md
+          sed -i 's/\*\*Version:\*\* .*/\*\*Version:\*\* ${{ inputs.version }}/' CLAUDE.md
+
+      - name: Commit version updates
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add VERSION src/HostCraft.Web/Components/Layout/NavMenu.razor CLAUDE.md
+          git commit -m "chore: bump version to ${{ inputs.version }}" || echo "No changes to commit"
+          git push origin main || echo "No changes to push"
+
+      - name: Create release summary
+        run: |
+          echo "## 🎉 Release v${{ inputs.version }} Created Successfully!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Release Details" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version:** ${{ inputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Pre-release:** ${{ inputs.prerelease }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Docker Images:**" >> $GITHUB_STEP_SUMMARY
+          echo "  - \`ghcr.io/${{ github.repository_owner }}/hostcraft-api:${{ inputs.version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "  - \`ghcr.io/${{ github.repository_owner }}/hostcraft-web:${{ inputs.version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Installation" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+          echo "# Download the install script" >> $GITHUB_STEP_SUMMARY
+          echo "curl -fsSL -o install.sh https://github.com/${{ github.repository }}/releases/download/v${{ inputs.version }}/install.sh" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "# Review the script (recommended)" >> $GITHUB_STEP_SUMMARY
+          echo "less install.sh" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "# Make it executable and run" >> $GITHUB_STEP_SUMMARY
+          echo "chmod +x install.sh" >> $GITHUB_STEP_SUMMARY
+          echo "./install.sh" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Links" >> $GITHUB_STEP_SUMMARY
+          echo "- [Release Page](https://github.com/${{ github.repository }}/releases/tag/v${{ inputs.version }})" >> $GITHUB_STEP_SUMMARY
+          echo "- [Docker Images](https://github.com/${{ github.repository }}/pkgs/container/hostcraft-api)" >> $GITHUB_STEP_SUMMARY

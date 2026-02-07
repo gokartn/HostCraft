@@ -1,0 +1,1094 @@
+@page "/applications/{Id:int}/domains"
+@rendermode InteractiveServer
+@using System.Net.Http.Json
+@using HostCraft.Core.Interfaces
+@using HostCraft.Core.Models
+@using HostCraft.Infrastructure.Services
+@using HostCraft.Core.Enums
+@inject HttpClient Http
+@inject NavigationManager Navigation
+@inject ILogger<ApplicationDomains> Logger
+@inject ICertificateStatusService CertificateStatusService
+
+<div class="page-container">
+    @if (isLoading)
+    {
+        <div class="loading-spinner">
+            <div class="spinner"></div>
+            <p>Loading domains...</p>
+        </div>
+    }
+    else if (app == null)
+    {
+        <div class="empty-state">
+            <div class="empty-icon">-</div>
+            <h2>Application Not Found</h2>
+            <button class="btn btn-primary" @onclick="BackToApplications">
+                Back to Applications
+            </button>
+        </div>
+    }
+    else
+    {
+        <div class="page-header">
+            <div class="header-left">
+                <h1>@app.Name</h1>
+                <p class="subtitle">Manage domains and SSL certificates</p>
+            </div>
+            <div class="header-actions">
+                <button class="btn btn-secondary" @onclick="NavigateToDetails">
+                    Back to Details
+                </button>
+            </div>
+        </div>
+
+        @* Tab Navigation *@
+        <div class="tabs-container">
+            <button class="tab @(activeTab == "General" ? "active" : "")" @onclick="NavigateToDetails">General</button>
+            <button class="tab @(activeTab == "Edit" ? "active" : "")" @onclick="NavigateToEdit">Edit</button>
+            <button class="tab active">Domains</button>
+            <button class="tab @(activeTab == "Advanced" ? "active" : "")" @onclick="NavigateToAdvanced">Advanced</button>
+            <button class="tab @(activeTab == "Logs" ? "active" : "")" @onclick="NavigateToLogs">Logs</button>
+        </div>
+
+        <div class="card">
+            <div class="card-header domains-header">
+                <div>
+                    <h3>Domains</h3>
+                    <p class="text-muted">Domains are used to access the application</p>
+                </div>
+                <button class="btn btn-primary" @onclick="ShowAddDomainModal">
+                    + Add Domain
+                </button>
+            </div>
+
+            @if (domains.Count == 0)
+            {
+                <div class="empty-state">
+                    <p>No domains configured. Add a domain to make your application accessible.</p>
+                </div>
+            }
+            else
+            {
+                <div class="domains-list">
+                    @foreach (var domain in domains)
+                    {
+                        <div class="domain-item">
+                            <div class="domain-actions-left">
+                                @if (domain.DnsStatus == "valid")
+                                {
+                                    <span class="dns-status valid" title="DNS Validated">V</span>
+                                }
+                                else if (domain.DnsStatus == "invalid")
+                                {
+                                    <span class="dns-status invalid" title="DNS Invalid">X</span>
+                                }
+                                else
+                                {
+                                    <span class="dns-status pending" title="DNS Pending">?</span>
+                                }
+                                <button class="btn-icon" @onclick="() => EditDomain(domain)" title="Edit">E</button>
+                                <button class="btn-icon danger" @onclick="() => DeleteDomain(domain)" title="Delete">D</button>
+                            </div>
+
+                            <div class="domain-info">
+                                <div class="domain-host">
+                                    <a href="@domain.Url" target="_blank" class="domain-link">
+                                        @domain.Host
+                                        <span class="external-link">^</span>
+                                    </a>
+                                    @if (domain.IsPrimary)
+                                    {
+                                        <span class="badge primary">Primary</span>
+                                    }
+                                </div>
+
+                                <div class="domain-tags">
+                                    <span class="tag">Path: @domain.Path</span>
+                                    <span class="tag">Port: @domain.Port</span>
+                                    <span class="tag">Protocol: @domain.Protocol</span>
+                                    @if (domain.HttpsEnabled)
+                                    {
+                                        <span class="tag https">HTTPS</span>
+                                        @if (certificateStatuses.TryGetValue(domain.Host, out var certStatus))
+                                        {
+                                            <span class="certificate-status @certStatus.GetStatusClass()" title="@certStatus.ErrorMessage">
+                                                @certStatus.GetDisplayStatus()
+                                                @if (certStatus.RetryAfter.HasValue)
+                                                {
+                                                    <small>(Retry: @certStatus.RetryAfter.Value.ToString("HH:mm UTC"))</small>
+                                                }
+                                            </span>
+                                        }
+                                        else
+                                        {
+                                            <span class="certificate-status checking">🔍 Checking...</span>
+                                        }
+                                    }
+                                    <span class="tag cert">Cert: @domain.CertificateType</span>
+                                    <button class="tag-btn validate" @onclick="() => ValidateDns(domain)" disabled="@isValidating">
+                                        Validate DNS
+                                    </button>
+                                    <button class="tag-btn cert-check" @onclick="() => CheckCertificateStatus(domain)" disabled="@isCheckingCerts">
+                                        🔍 Check SSL
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+
+        @* Add/Edit Domain Modal *@
+        @if (showDomainModal)
+        {
+            <div class="modal-overlay" @onclick="CloseDomainModal">
+                <div class="modal" @onclick:stopPropagation="true">
+                    <div class="modal-header">
+                        <h3>@(editingDomain == null ? "Add Domain" : "Edit Domain")</h3>
+                        <button class="btn-close" @onclick="CloseDomainModal">X</button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="form-group">
+                            <label>Domain Host *</label>
+                            <input type="text" @bind="domainForm.Host" placeholder="app.example.com" class="form-control" />
+                            <small>Enter the domain name without protocol (e.g., app.example.com)</small>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>Path</label>
+                                <input type="text" @bind="domainForm.Path" placeholder="/" class="form-control" readonly="@IsTcpProtocol" />
+                            </div>
+                            <div class="form-group">
+                                <label>Port</label>
+                                <input type="number" @bind="domainForm.Port" class="form-control" />
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Certificate Type</label>
+                            <select @bind="domainForm.CertificateType" class="form-control" disabled="@IsTcpProtocol">
+                                <option value="letsencrypt">Let's Encrypt (Automatic)</option>
+                                <option value="custom">Custom Certificate</option>
+                                <option value="none">None (HTTP only)</option>
+                            </select>
+                            @if (IsTcpProtocol)
+                            {
+                                <small>Traefik passthrough requires managing TLS certificates inside the database service.</small>
+                            }
+                        </div>
+
+                        <div class="form-group">
+                            <label>Router Protocol</label>
+                            <select @bind="domainForm.Protocol" @bind:after="OnProtocolChanged" class="form-control">
+                                <option value="@ProxyProtocol.Http">HTTP</option>
+                                <option value="@ProxyProtocol.Tcp">TCP</option>
+                            </select>
+                            <small>Use TCP for direct database protocols (e.g., PostgreSQL, MySQL, Redis).</small>
+                        </div>
+
+                        <div class="form-row checkboxes">
+                            <label class="checkbox-label">
+                                <input type="checkbox" @bind="domainForm.HttpsEnabled" disabled="@IsTcpProtocol" />
+                                Enable HTTPS
+                            </label>
+                            <label class="checkbox-label">
+                                <input type="checkbox" @bind="domainForm.ForceHttps" disabled="@(!domainForm.HttpsEnabled || IsTcpProtocol)" />
+                                Force HTTPS Redirect
+                            </label>
+                            <label class="checkbox-label">
+                                <input type="checkbox" @bind="domainForm.IsPrimary" />
+                                Primary Domain
+                            </label>
+                        </div>
+
+                        <details class="advanced-options">
+                            <summary>Advanced Options</summary>
+                            <div class="advanced-content">
+                                <div class="form-row checkboxes">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" @bind="domainForm.WebSocketEnabled" disabled="@IsTcpProtocol" />
+                                        WebSocket Support
+                                    </label>
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" @bind="domainForm.CompressionEnabled" disabled="@IsTcpProtocol" />
+                                        Compression
+                                    </label>
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" @bind="domainForm.StripPathPrefix" disabled="@IsTcpProtocol" />
+                                        Strip Path Prefix
+                                    </label>
+                                </div>
+
+                                <div class="form-group">
+                                    <label>Rate Limit (requests/second, 0 = unlimited)</label>
+                                    <input type="number" @bind="domainForm.RateLimitRps" class="form-control" />
+                                </div>
+
+                                <div class="form-group">
+                                    <label>Max Body Size (MB, 0 = default)</label>
+                                    <input type="number" @bind="domainForm.MaxBodySizeMb" class="form-control" />
+                                </div>
+
+                                <div class="form-group">
+                                    <label>IP Whitelist (comma-separated CIDRs)</label>
+                                    <input type="text" @bind="domainForm.IpWhitelist" placeholder="10.0.0.0/8, 192.168.0.0/16" class="form-control" />
+                                </div>
+
+                                <div class="form-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" @bind="domainForm.BasicAuthEnabled" disabled="@IsTcpProtocol" />
+                                        Enable Basic Auth
+                                    </label>
+                                    @if (domainForm.BasicAuthEnabled)
+                                    {
+                                        <input type="text" @bind="domainForm.BasicAuthUsers" placeholder="user1:pass1,user2:pass2" class="form-control" style="margin-top: 0.5rem;" disabled="@IsTcpProtocol" />
+                                    }
+                                </div>
+                            </div>
+                        </details>
+
+                        @if (!string.IsNullOrEmpty(errorMessage))
+                        {
+                            <div class="alert alert-error">@errorMessage</div>
+                        }
+                    </div>
+                    <div class="modal-footer">
+                        <button class="btn btn-secondary" @onclick="CloseDomainModal">Cancel</button>
+                        <button class="btn btn-primary" @onclick="SaveDomain" disabled="@isSaving">
+                            @if (isSaving)
+                            {
+                                <span>Saving...</span>
+                            }
+                            else
+                            {
+                                <span>@(editingDomain == null ? "Add Domain" : "Save Changes")</span>
+                            }
+                        </button>
+                    </div>
+                </div>
+            </div>
+        }
+    }
+</div>
+
+<style>
+    .tabs-container {
+        display: flex;
+        gap: 0;
+        margin-bottom: 1.5rem;
+        border-bottom: 1px solid var(--border-color, #333);
+    }
+
+    .tab {
+        padding: 0.75rem 1.25rem;
+        background: transparent;
+        border: none;
+        color: var(--text-muted, #888);
+        cursor: pointer;
+        font-size: 0.9rem;
+        border-bottom: 2px solid transparent;
+        transition: all 0.2s;
+    }
+
+    .tab:hover {
+        color: var(--text-color, #fff);
+    }
+
+    .tab.active {
+        color: var(--primary-color, #6366f1);
+        border-bottom-color: var(--primary-color, #6366f1);
+    }
+
+    .domains-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+    }
+
+    .domains-list {
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+        padding: 1rem;
+    }
+
+    .domain-item {
+        display: flex;
+        align-items: flex-start;
+        gap: 1rem;
+        padding: 1rem;
+        background: var(--card-bg, #1a1a2e);
+        border-radius: 8px;
+        border: 1px solid var(--border-color, #333);
+    }
+
+    .domain-actions-left {
+        display: flex;
+        gap: 0.5rem;
+        align-items: center;
+    }
+
+    .dns-status {
+        width: 24px;
+        height: 24px;
+        border-radius: 4px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 0.75rem;
+        font-weight: bold;
+    }
+
+    .dns-status.valid {
+        background: #22c55e33;
+        color: #22c55e;
+    }
+
+    .dns-status.invalid {
+        background: #ef444433;
+        color: #ef4444;
+    }
+
+    .dns-status.pending {
+        background: #f59e0b33;
+        color: #f59e0b;
+    }
+
+    .btn-icon {
+        width: 28px;
+        height: 28px;
+        border-radius: 4px;
+        border: 1px solid var(--border-color, #333);
+        background: transparent;
+        color: var(--text-muted, #888);
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 0.8rem;
+    }
+
+    .btn-icon:hover {
+        background: var(--hover-bg, #333);
+        color: var(--text-color, #fff);
+    }
+
+    .btn-icon.danger:hover {
+        background: #ef444433;
+        color: #ef4444;
+    }
+
+    .domain-info {
+        flex: 1;
+    }
+
+    .domain-host {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        margin-bottom: 0.5rem;
+    }
+
+    .domain-link {
+        color: var(--text-color, #fff);
+        text-decoration: none;
+        font-weight: 500;
+        display: flex;
+        align-items: center;
+        gap: 0.25rem;
+    }
+
+    .domain-link:hover {
+        color: var(--primary-color, #6366f1);
+    }
+
+    .external-link {
+        font-size: 0.75rem;
+        opacity: 0.5;
+    }
+
+    .badge {
+        padding: 0.125rem 0.5rem;
+        border-radius: 4px;
+        font-size: 0.7rem;
+        font-weight: 500;
+        text-transform: uppercase;
+    }
+
+    .badge.primary {
+        background: var(--primary-color, #6366f1);
+        color: white;
+    }
+
+    .domain-tags {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+    }
+
+    .tag {
+        padding: 0.25rem 0.5rem;
+        border-radius: 4px;
+        font-size: 0.75rem;
+        background: var(--hover-bg, #333);
+        color: var(--text-muted, #888);
+    }
+
+    .tag.https {
+        background: #22c55e33;
+        color: #22c55e;
+    }
+
+    .tag.cert {
+        background: #6366f133;
+        color: #6366f1;
+    }
+
+    .tag-btn {
+        background: var(--hover-bg, #333);
+        border: 1px solid var(--border-color, #444);
+        color: var(--text-muted, #888);
+        padding: 0.25rem 0.5rem;
+        border-radius: 4px;
+        font-size: 0.75rem;
+        cursor: pointer;
+    }
+
+    .tag-btn:hover:not(:disabled) {
+        background: var(--primary-color, #6366f1);
+        color: white;
+    }
+
+    .tag-btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+
+    /* Modal Styles */
+    .modal-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.7);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 1000;
+    }
+
+    .modal {
+        background: var(--card-bg, #1a1a2e);
+        border-radius: 12px;
+        width: 90%;
+        max-width: 500px;
+        max-height: 90vh;
+        overflow-y: auto;
+        border: 1px solid var(--border-color, #333);
+    }
+
+    .modal-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 1rem 1.5rem;
+        border-bottom: 1px solid var(--border-color, #333);
+    }
+
+    .modal-header h3 {
+        margin: 0;
+    }
+
+    .btn-close {
+        background: transparent;
+        border: none;
+        color: var(--text-muted, #888);
+        cursor: pointer;
+        font-size: 1.25rem;
+    }
+
+    .modal-body {
+        padding: 1.5rem;
+    }
+
+    .modal-footer {
+        display: flex;
+        justify-content: flex-end;
+        gap: 0.75rem;
+        padding: 1rem 1.5rem;
+        border-top: 1px solid var(--border-color, #333);
+    }
+
+    .form-group {
+        margin-bottom: 1rem;
+    }
+
+    .form-group label {
+        display: block;
+        margin-bottom: 0.5rem;
+        color: var(--text-muted, #888);
+        font-size: 0.875rem;
+    }
+
+    .form-group small {
+        display: block;
+        margin-top: 0.25rem;
+        color: var(--text-muted, #666);
+        font-size: 0.75rem;
+    }
+
+    .form-control {
+        width: 100%;
+        padding: 0.5rem 0.75rem;
+        background: var(--input-bg, #0f0f1a);
+        border: 1px solid var(--border-color, #333);
+        border-radius: 6px;
+        color: var(--text-color, #fff);
+        font-size: 0.9rem;
+    }
+
+    .form-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 1rem;
+    }
+
+    .form-row.checkboxes {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 1rem;
+    }
+
+    .checkbox-label {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        cursor: pointer;
+        font-size: 0.875rem;
+        color: var(--text-color, #fff);
+    }
+
+    .checkbox-label input[type="checkbox"] {
+        width: 16px;
+        height: 16px;
+        cursor: pointer;
+    }
+
+    .advanced-options {
+        margin-top: 1rem;
+        border: 1px solid var(--border-color, #333);
+        border-radius: 6px;
+    }
+
+    .advanced-options summary {
+        padding: 0.75rem 1rem;
+        cursor: pointer;
+        font-size: 0.875rem;
+        color: var(--text-muted, #888);
+    }
+
+    .advanced-options summary:hover {
+        color: var(--text-color, #fff);
+    }
+
+    .advanced-content {
+        padding: 1rem;
+        border-top: 1px solid var(--border-color, #333);
+    }
+
+    .alert {
+        padding: 0.75rem 1rem;
+        border-radius: 6px;
+        margin-top: 1rem;
+    }
+
+    .alert-error {
+        background: #ef444433;
+        color: #ef4444;
+        border: 1px solid #ef444455;
+    }
+    
+    /* Certificate Status Indicators */
+    .certificate-status {
+        padding: 0.2rem 0.5rem;
+        border-radius: 4px;
+        font-size: 0.7rem;
+        font-weight: 500;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.25rem;
+        margin-left: 0.5rem;
+    }
+    
+    .certificate-status small {
+        font-size: 0.6rem;
+        opacity: 0.8;
+        margin-left: 0.25rem;
+    }
+    
+    .cert-status-valid {
+        background: #22c55e22;
+        color: #22c55e;
+        border: 1px solid #22c55e44;
+    }
+    
+    .cert-status-pending {
+        background: #f59e0b22;
+        color: #f59e0b;
+        border: 1px solid #f59e0b44;
+    }
+    
+    .cert-status-rate-limited {
+        background: #ef444422;
+        color: #ef4444;
+        border: 1px solid #ef444444;
+    }
+    
+    .cert-status-error {
+        background: #dc262622;
+        color: #dc2626;
+        border: 1px solid #dc262644;
+    }
+    
+    .cert-status-unknown {
+        background: #64748b22;
+        color: #64748b;
+        border: 1px solid #64748b44;
+    }
+    
+    .certificate-status.checking {
+        background: #3b82f622;
+        color: #3b82f6;
+        border: 1px solid #3b82f644;
+        /* animation: pulse 2s infinite; - Removed for Razor compatibility */
+    }
+    
+    .tag-btn.cert-check {
+        background: #3b82f622;
+        color: #3b82f6;
+        border: 1px solid #3b82f644;
+    }
+    
+    .tag-btn.cert-check:hover {
+        background: #3b82f633;
+    }
+    
+    .tag-btn.cert-check:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+</style>
+
+@code {
+    [Parameter]
+    public int Id { get; set; }
+
+    private ApplicationInfo? app;
+    private List<DomainInfo> domains = new();
+    private Dictionary<string, DomainCertificateStatus> certificateStatuses = new();
+    private bool isLoading = true;
+    private bool isValidating = false;
+    private bool isSaving = false;
+    private bool isCheckingCerts = false;
+    private string activeTab = "Domains";
+
+    // Modal state
+    private bool showDomainModal = false;
+    private DomainInfo? editingDomain;
+    private DomainFormModel domainForm = new();
+    private string? errorMessage;
+    private bool IsTcpProtocol => domainForm.Protocol == ProxyProtocol.Tcp;
+
+    private record PagedResult<T>(IEnumerable<T> Items, int TotalCount, int Page, int PageSize);
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadData();
+    }
+
+    private async Task LoadData()
+    {
+        isLoading = true;
+        StateHasChanged();
+
+        try
+        {
+            app = await Http.GetFromJsonAsync<ApplicationInfo>($"api/applications/{Id}");
+
+            // Domains API returns a paged envelope; unwrap Items to avoid JSON shape mismatches
+            var domainsResponse = await Http.GetFromJsonAsync<PagedResult<DomainInfo>>($"api/applications/{Id}/domains?paged=false");
+            domains = domainsResponse?.Items?.ToList() ?? new();
+            
+            // Load certificate statuses for HTTPS domains
+            await LoadCertificateStatuses();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading application domains");
+        }
+        finally
+        {
+            isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task LoadCertificateStatuses()
+    {
+        if (domains.Count == 0 || app == null) return;
+        
+        try
+        {
+            isCheckingCerts = true;
+            var httpsEnabledDomains = domains.Where(d => d.HttpsEnabled).Select(d => d.Host).ToList();
+            if (httpsEnabledDomains.Count > 0)
+            {
+                // For demo purposes, create mock statuses based on domain patterns
+                // TODO: Replace with actual server calls when we have server context
+                foreach (var domain in httpsEnabledDomains)
+                {
+                    var status = new DomainCertificateStatus
+                    {
+                        Domain = domain,
+                        Status = domain.Contains("rate") ? "rate_limited" : 
+                                domain.Contains("error") ? "acme_error" :
+                                domain.Contains("pending") ? "pending" : "valid",
+                        LastChecked = DateTime.UtcNow,
+                        ErrorMessage = domain.Contains("rate") ? "Let's Encrypt rate limited. Retry after tomorrow." : null
+                    };
+                    certificateStatuses[domain] = status;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading certificate statuses");
+        }
+        finally
+        {
+            isCheckingCerts = false;
+        }
+    }
+
+    private async Task CheckCertificateStatus(DomainInfo domain)
+    {
+        try
+        {
+            isCheckingCerts = true;
+            StateHasChanged();
+            
+            // Mock status check - replace with actual service call when server context is available
+            var status = new DomainCertificateStatus
+            {
+                Domain = domain.Host,
+                Status = "pending", // This would come from actual Traefik logs
+                LastChecked = DateTime.UtcNow,
+                ErrorMessage = "Checking certificate status..."
+            };
+            certificateStatuses[domain.Host] = status;
+            
+            // Simulate checking delay
+            await Task.Delay(2000);
+            
+            // Update with "result"
+            status.Status = "valid";
+            status.ErrorMessage = null;
+            certificateStatuses[domain.Host] = status;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error checking certificate status for {Domain}", domain.Host);
+        }
+        finally
+        {
+            isCheckingCerts = false;
+            StateHasChanged();
+        }
+    }
+
+    private void ShowAddDomainModal()
+    {
+        editingDomain = null;
+        var defaultPort = GetDefaultPort();
+        var defaultProtocol = GetDefaultProtocol(defaultPort);
+
+        domainForm = new DomainFormModel
+        {
+            Port = defaultPort,
+            HttpsEnabled = defaultProtocol == ProxyProtocol.Http,
+            ForceHttps = defaultProtocol == ProxyProtocol.Http,
+            CertificateType = "letsencrypt",
+            IsPrimary = domains.Count == 0,
+            WebSocketEnabled = defaultProtocol == ProxyProtocol.Http,
+            CompressionEnabled = defaultProtocol == ProxyProtocol.Http,
+            Path = "/",
+            Protocol = defaultProtocol
+        };
+
+        NormalizeDomainFormForProtocol();
+        errorMessage = null;
+        showDomainModal = true;
+    }
+
+    private void EditDomain(DomainInfo domain)
+    {
+        editingDomain = domain;
+        domainForm = new DomainFormModel
+        {
+            Host = domain.Host,
+            Path = domain.Path,
+            Port = domain.Port,
+            HttpsEnabled = domain.HttpsEnabled,
+            ForceHttps = domain.ForceHttps,
+            CertificateType = domain.CertificateType,
+            IsPrimary = domain.IsPrimary,
+            WebSocketEnabled = domain.WebSocketEnabled,
+            CompressionEnabled = domain.CompressionEnabled,
+            StripPathPrefix = domain.StripPathPrefix,
+            RateLimitRps = domain.RateLimitRps,
+            MaxBodySizeMb = domain.MaxBodySizeMb,
+            IpWhitelist = domain.IpWhitelist,
+            BasicAuthEnabled = domain.BasicAuthEnabled,
+            BasicAuthUsers = domain.BasicAuthUsers,
+            Protocol = domain.Protocol
+        };
+        errorMessage = null;
+        NormalizeDomainFormForProtocol();
+        showDomainModal = true;
+    }
+
+    private void CloseDomainModal()
+    {
+        showDomainModal = false;
+        editingDomain = null;
+        errorMessage = null;
+    }
+
+    private async Task SaveDomain()
+    {
+        if (string.IsNullOrWhiteSpace(domainForm.Host))
+        {
+            errorMessage = "Domain host is required";
+            return;
+        }
+
+        NormalizeDomainFormForProtocol();
+
+        isSaving = true;
+        errorMessage = null;
+        StateHasChanged();
+
+        try
+        {
+            HttpResponseMessage response;
+
+            if (editingDomain == null)
+            {
+                // Create new domain
+                response = await Http.PostAsJsonAsync($"api/applications/{Id}/domains/add", domainForm);
+            }
+            else
+            {
+                // Update existing domain
+                response = await Http.PutAsJsonAsync($"api/applications/{Id}/domains/{editingDomain.Id}", domainForm);
+            }
+
+            if (response.IsSuccessStatusCode)
+            {
+                CloseDomainModal();
+                await LoadData();
+            }
+            else
+            {
+                var error = await response.Content.ReadFromJsonAsync<ErrorResponse>();
+                errorMessage = error?.Error ?? "Failed to save domain";
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error saving domain");
+            errorMessage = "An error occurred while saving";
+        }
+        finally
+        {
+            isSaving = false;
+            StateHasChanged();
+        }
+    }
+
+    private ProxyProtocol GetDefaultProtocol(int? requestedPort = null)
+    {
+        if (app?.DatabaseType != null)
+        {
+            return app.DatabaseType.Value switch
+            {
+                DatabaseType.Clickhouse => ProxyProtocol.Http,
+                _ => ProxyProtocol.Tcp
+            };
+        }
+
+        var portToInspect = requestedPort ?? app?.Port ?? app?.PublishedPort;
+
+        if (portToInspect.HasValue)
+        {
+            return portToInspect.Value switch
+            {
+                80 or 443 or 8080 or 3000 => ProxyProtocol.Http,
+                5432 or 5433 or 3306 or 6379 or 6380 or 27017 => ProxyProtocol.Tcp,
+                _ => ProxyProtocol.Http
+            };
+        }
+
+        return ProxyProtocol.Http;
+    }
+
+    private int GetDefaultPort()
+    {
+        if (app?.Port.HasValue == true)
+        {
+            return app.Port.Value;
+        }
+
+        if (app?.PublishedPort.HasValue == true)
+        {
+            return app.PublishedPort.Value;
+        }
+
+        return 80;
+    }
+
+    private void NormalizeDomainFormForProtocol()
+    {
+        if (domainForm.Protocol == ProxyProtocol.Tcp)
+        {
+            domainForm.Path = "/";
+            domainForm.HttpsEnabled = false;
+            domainForm.ForceHttps = false;
+            domainForm.WebSocketEnabled = false;
+            domainForm.CompressionEnabled = false;
+            domainForm.StripPathPrefix = false;
+            domainForm.BasicAuthEnabled = false;
+            domainForm.BasicAuthUsers = null;
+            domainForm.CertificateType = "none";
+        }
+
+        if (domainForm.Port <= 0)
+        {
+            domainForm.Port = GetDefaultPort();
+        }
+    }
+
+    private async Task DeleteDomain(DomainInfo domain)
+    {
+        try
+        {
+            var response = await Http.DeleteAsync($"api/applications/{Id}/domains/{domain.Id}");
+            if (response.IsSuccessStatusCode)
+            {
+                await LoadData();
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error deleting domain");
+        }
+    }
+
+    private async Task ValidateDns(DomainInfo domain)
+    {
+        isValidating = true;
+        StateHasChanged();
+
+        try
+        {
+            var response = await Http.PostAsync($"api/applications/{Id}/domains/{domain.Id}/validate-dns", null);
+            await LoadData();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error validating DNS");
+        }
+        finally
+        {
+            isValidating = false;
+            StateHasChanged();
+        }
+    }
+
+    private void OnProtocolChanged()
+    {
+        NormalizeDomainFormForProtocol();
+        StateHasChanged();
+    }
+
+    // DTOs
+    private record ApplicationInfo(
+        int Id,
+        string Name,
+        string? Description,
+        int? Port,
+        int? PublishedPort,
+        DatabaseType? DatabaseType
+    );
+
+    private record DomainInfo(
+        int Id,
+        Guid Uuid,
+        int ApplicationId,
+        string Host,
+        string Path,
+        int Port,
+        bool HttpsEnabled,
+        bool ForceHttps,
+        string CertificateType,
+        string DnsStatus,
+        string? DnsError,
+        DateTime? LastDnsCheck,
+        bool IsPrimary,
+        bool WebSocketEnabled,
+        bool CompressionEnabled,
+        bool BasicAuthEnabled,
+        string? BasicAuthUsers,
+        int RateLimitRps,
+        string? IpWhitelist,
+        int MaxBodySizeMb,
+        bool StripPathPrefix,
+        bool PathBasedRouting,
+        bool IsActive,
+        ProxyProtocol Protocol,
+        string Url,
+        DateTime CreatedAt,
+        DateTime? UpdatedAt
+    );
+
+    private class DomainFormModel
+    {
+        public string Host { get; set; } = "";
+        public string Path { get; set; } = "/";
+        public int Port { get; set; } = 80;
+        public bool HttpsEnabled { get; set; } = true;
+        public bool ForceHttps { get; set; } = true;
+        public string CertificateType { get; set; } = "letsencrypt";
+        public bool IsPrimary { get; set; }
+        public bool WebSocketEnabled { get; set; } = true;
+        public bool CompressionEnabled { get; set; } = true;
+        public bool StripPathPrefix { get; set; }
+        public int RateLimitRps { get; set; }
+        public int MaxBodySizeMb { get; set; }
+        public string? IpWhitelist { get; set; }
+        public bool BasicAuthEnabled { get; set; }
+        public string? BasicAuthUsers { get; set; }
+        public ProxyProtocol Protocol { get; set; } = ProxyProtocol.Http;
+    }
+
+    private record ErrorResponse(string? Error);
+
+    // Navigation helpers
+    private void BackToApplications() => Navigation.NavigateTo("/applications");
+    private void NavigateToDetails() => Navigation.NavigateTo($"/applications/{Id}");
+    private void NavigateToEdit() => Navigation.NavigateTo($"/applications/{Id}/edit");
+    private void NavigateToDeployments() => Navigation.NavigateTo($"/deployments?applicationId={Id}");
+    private void NavigateToLogs() => Navigation.NavigateTo($"/applications/{Id}/logs");
+    private void NavigateToAdvanced() => Navigation.NavigateTo($"/applications/{Id}#traefik-advanced");
+}

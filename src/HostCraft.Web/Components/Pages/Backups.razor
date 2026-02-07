@@ -1,0 +1,2415 @@
+@page "/backups"
+@rendermode InteractiveServer
+@inject HttpClient Http
+@inject NavigationManager NavigationManager
+@inject ILogger<Backups> Logger
+@inject IJSRuntime JSRuntime
+@using System.Text.Json
+@using Microsoft.JSInterop
+@using Microsoft.AspNetCore.Components.Forms
+
+<PageTitle>Backup Management - HostCraft</PageTitle>
+
+<div class="backups-page">
+    <section class="hero-panel">
+        <div class="hero-copy">
+            <p class="eyebrow">Disaster recovery & data protection</p>
+            <h1>Backup & Restore</h1>
+            <p class="subtitle">Create, manage, and restore system backups with automated scheduling</p>
+        </div>
+        <div class="hero-metrics">
+            <div class="metric-card">
+                <span>Backups</span>
+                <strong>@backups.Count</strong>
+                <p>Total backups</p>
+            </div>
+            <div class="metric-card">
+                <span>Providers</span>
+                <strong>@configurations.Count(c => c.IsActive)</strong>
+                <p>Active storage</p>
+            </div>
+            <div class="metric-card">
+                <span>Latest</span>
+                <strong>@(backups.Any() ? backups.First().StartedAt.ToString("MMM d") : "None")</strong>
+                <p>Last backup</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Tabs -->
+    <div class="tabs-container">
+        <div class="tabs">
+            <button class="tab @(activeTab == "overview" ? "active" : "")" @onclick='() => activeTab = "overview"'>
+                <span class="tab-icon">📊</span>
+                Overview
+            </button>
+            <button class="tab @(activeTab == "providers" ? "active" : "")" @onclick='() => activeTab = "providers"'>
+                <span class="tab-icon">☁️</span>
+                Storage Providers
+            </button>
+        </div>
+    </div>
+
+    <!-- Overview Tab -->
+    @if (activeTab == "overview")
+    {
+        <!-- Backup Actions Section -->
+        <section class="backup-actions-panel">
+        <div>
+            <h2>System Backups</h2>
+            <p>Create and manage complete system backups</p>
+        </div>
+        <div class="action-buttons">
+            <button class="btn btn-primary" @onclick="ShowBackupModal">
+                <span class="icon">💾</span>
+                Create Backup Now
+            </button>
+            <button class="btn btn-secondary" @onclick="ShowUploadModal">
+                <span class="icon">📤</span>
+                Upload Backup
+            </button>
+            <button class="btn btn-secondary" @onclick="LoadBackups">
+                <span class="icon">🔄</span>
+                Refresh
+            </button>
+        </div>
+    </section>
+
+    <!-- Backups List -->
+    @if (loadingBackups)
+    {
+        <div class="loading-state">
+            <div class="spinner"></div>
+            <p>Loading backups...</p>
+        </div>
+    }
+    else if (backups.Count > 0)
+    {
+        <div class="backups-list">
+            <h3>Recent Backups</h3>
+            <div class="backups-table">
+                <div class="table-header">
+                    <div class="col-status">Status</div>
+                    <div class="col-date">Created</div>
+                    <div class="col-size">Size</div>
+                    <div class="col-scope">Scope</div>
+                    <div class="col-counts">Contents</div>
+                    <div class="col-actions">Actions</div>
+                </div>
+                @foreach (var backup in backups.Take(10))
+                {
+                    <div class="table-row @(backup.Status == "Success" ? "success" : backup.Status == "Failed" ? "failed" : "")">
+                        <div class="col-status">
+                            <span class="status-badge status-@backup.Status.ToLower()">@backup.Status</span>
+                        </div>
+                        <div class="col-date">
+                            <div class="date-info">
+                                <span class="date">@backup.StartedAt.ToString("MMM d, yyyy")</span>
+                                <span class="time">@backup.StartedAt.ToString("HH:mm:ss")</span>
+                            </div>
+                        </div>
+                        <div class="col-size">@FormatBytes(backup.SizeBytes)</div>
+                        <div class="col-scope">@backup.Scope</div>
+                        <div class="col-counts">
+                            @if (backup.ServerCount > 0) {<span class="count-badge">🖥️ @backup.ServerCount</span>}
+                            @if (backup.ApplicationCount > 0) {<span class="count-badge">📦 @backup.ApplicationCount</span>}
+                            @if (backup.ProjectCount > 0) {<span class="count-badge">📁 @backup.ProjectCount</span>}
+                        </div>
+                        <div class="col-actions">
+                            <button class="btn btn-icon btn-sm" title="Download" @onclick="() => DownloadBackup(backup.Id)" disabled="@(backup.Status != "Success")">
+                                <span>⬇️</span>
+                            </button>
+                            <button class="btn btn-icon btn-sm" title="Restore" @onclick="() => NavigateToRestore(backup.Id)" disabled="@(backup.Status != "Success")">
+                                <span>♻️</span>
+                            </button>
+                        </div>
+                    </div>
+                }
+            </div>
+        </div>
+    }
+    }
+
+    <!-- Storage Providers Tab -->
+    @if (activeTab == "providers")
+    {
+    @if (loading)
+    {
+        <div class="loading-state">
+            <div class="spinner"></div>
+            <p>Loading backup configurations...</p>
+        </div>
+    }
+    else if (error != null)
+    {
+        <div class="error-banner">
+            <span class="icon">❌</span>
+            <div>
+                <strong>Error loading configurations</strong>
+                <p>@error</p>
+            </div>
+            <button class="btn btn-secondary" @onclick="LoadConfigurations">Retry</button>
+        </div>
+    }
+    else
+    {
+        <section class="filters-panel">
+            <div>
+                <h2>Storage Providers</h2>
+                <p>Configure S3-compatible storage, Google Drive, or local filesystem for your backups.</p>
+            </div>
+            <div class="filter-actions">
+                <button class="btn btn-primary" @onclick="ShowCreateModal">
+                    <span class="icon">➕</span>
+                    Add Configuration
+                </button>
+            </div>
+        </section>
+
+        @if (configurations.Count == 0)
+        {
+            <div class="empty-state">
+                <div class="empty-icon">💾</div>
+                <h3>No backup configurations</h3>
+                <p>Create your first storage provider configuration to start backing up your system.</p>
+                <div class="mt-4">
+                    <button class="btn btn-primary btn-lg" @onclick="ShowCreateModal">
+                        <span class="icon">➕</span>
+                        Create Configuration
+                    </button>
+                </div>
+            </div>
+        }
+        else
+        {
+            <div class="configurations-grid">
+                @foreach (var config in configurations)
+                {
+                    <article class="config-card @(config.IsActive ? "" : "inactive")">
+                        <div class="card-accent"></div>
+                        <div class="config-top">
+                            <div class="config-icon">
+                                @GetStorageIcon(config.StorageType)
+                            </div>
+                            <div class="config-heading">
+                                <span class="config-type">@config.StorageType</span>
+                                <h3>@config.Name</h3>
+                            </div>
+                            <div class="config-status">
+                                @if (config.IsDefault)
+                                {
+                                    <span class="category-pill default">⭐ Default</span>
+                                }
+                                @if (config.IsActive)
+                                {
+                                    <span class="category-pill active">✓ Active</span>
+                                }
+                                else
+                                {
+                                    <span class="category-pill inactive">○ Inactive</span>
+                                }
+                            </div>
+                        </div>
+
+                        <div class="config-description">
+                             Retention: @config.RetentionDays days • @(config.AutoBackupEnabled ? $"Scheduled: {config.AutoBackupSchedule}" : "Manual only")
+                        </div>
+
+                        <div class="config-specs">
+                            <div class="spec-chip">
+                                <span class="label">Compression</span>
+                                <span class="value">@(config.EnableCompression ? "Enabled" : "Disabled")</span>
+                            </div>
+                            <div class="spec-chip">
+                                <span class="label">Encryption</span>
+                                <span class="value">@(config.EnableEncryption ? "Enabled" : "Disabled")</span>
+                            </div>
+                            <div class="spec-chip">
+                                <span class="label">Created</span>
+                                <span class="value">@config.CreatedAt.ToString("MMM d, yyyy")</span>
+                            </div>
+                        </div>
+
+                        <div class="config-footer">
+                            <div class="resource-hint">
+                                <span class="hint-label">Last Backup</span>
+                                <div class="hint-values">
+                                    <span>@(config.LastBackupAt?.ToString("g") ?? "Never")</span>
+                                </div>
+                            </div>
+                            <div class="config-actions">
+                                <button class="btn btn-icon" title="Test connection" @onclick="() => TestConfiguration(config.Id)" disabled="@testingId.HasValue">
+                                    @if (testingId == config.Id)
+                                    {
+                                        <span class="spinner-small"></span>
+                                    }
+                                    else
+                                    {
+                                        <span>🔌</span>
+                                    }
+                                </button>
+                                <button class="btn btn-icon" title="Edit" @onclick="() => ShowEditModal(config)">
+                                    <span>✏️</span>
+                                </button>
+                                <button class="btn btn-icon btn-danger" title="Delete" @onclick="() => ShowDeleteModal(config)">
+                                    <span>🗑️</span>
+                                </button>
+                            </div>
+                        </div>
+                    </article>
+                }
+            </div>
+        }
+    }
+    }
+</div>
+
+<!-- Create/Edit Modal -->
+@if (showModal && selectedConfig != null)
+{
+    <div class="modal-overlay" @onclick="CloseModal">
+        <div class="modal-content large" @onclick:stopPropagation="true">
+            <div class="modal-header">
+                <h2>@(isEditing ? "Edit" : "Create") Backup Configuration</h2>
+                <button class="modal-close" @onclick="CloseModal">×</button>
+            </div>
+
+            <div class="modal-body">
+                @if (modalError != null)
+                {
+                    <div class="error-message">
+                        <span class="icon">❌</span>
+                        <span>@modalError</span>
+                    </div>
+                }
+
+                <div class="form-group">
+                    <label>Configuration Name *</label>
+                    <input type="text" class="form-control" @bind="selectedConfig.Name" placeholder="e.g., AWS S3 Production" />
+                </div>
+
+                <div class="form-group">
+                    <label>Storage Type *</label>
+                    <select class="form-control" @bind="selectedConfig.StorageType" @bind:after="OnStorageTypeChanged">
+                        <option value="">-- Select Storage Type --</option>
+                        <option value="S3Compatible">S3-Compatible (AWS, MinIO, DigitalOcean Spaces)</option>
+                        <option value="GoogleDrive">Google Drive</option>
+                        <option value="LocalFileSystem">Local Filesystem</option>
+                    </select>
+                </div>
+
+                <!-- S3 Configuration -->
+                @if (selectedConfig.StorageType == "S3Compatible")
+                {
+                    <div class="provider-config-section">
+                        <h4>S3 Configuration</h4>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>Endpoint URL *</label>
+                                <input type="text" class="form-control" @bind="s3Endpoint" placeholder="https://s3.amazonaws.com" />
+                            </div>
+                            <div class="form-group">
+                                <label>Bucket Name *</label>
+                                <input type="text" class="form-control" @bind="s3BucketName" placeholder="my-backups" />
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>Region *</label>
+                                <input type="text" class="form-control" @bind="s3Region" placeholder="us-east-1" />
+                            </div>
+                            <div class="form-group">
+                                <label>Prefix (Optional)</label>
+                                <input type="text" class="form-control" @bind="s3Prefix" placeholder="hostcraft/" />
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>Access Key ID *</label>
+                                <input type="text" class="form-control" @bind="s3AccessKeyId" placeholder="AKIAIOSFODNN7EXAMPLE" />
+                            </div>
+                            <div class="form-group">
+                                <label>Secret Access Key *</label>
+                                <input type="password" class="form-control" @bind="s3SecretAccessKey" placeholder="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY" />
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>
+                                    <input type="checkbox" @bind="s3UsePathStyle" />
+                                    Use Path Style (MinIO)
+                                </label>
+                            </div>
+                            <div class="form-group">
+                                <label>
+                                    <input type="checkbox" @bind="s3UseSsl" />
+                                    Use SSL
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                }
+
+                <!-- Google Drive Configuration -->
+                @if (selectedConfig.StorageType == "GoogleDrive")
+                {
+                    <div class="provider-config-section">
+                        <h4>Google Drive Configuration</h4>
+
+                        <div class="oauth-flow-section">
+                            <p class="section-description">Connect your Google account to automatically obtain access credentials</p>
+
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label>Client ID *</label>
+                                    <input type="text" class="form-control" @bind="gdClientId" placeholder="123456789-abc.apps.googleusercontent.com" />
+                                    <small class="form-text">Get this from <a href="https://console.cloud.google.com/apis/credentials" target="_blank">Google Cloud Console</a></small>
+                                </div>
+                                <div class="form-group">
+                                    <label>Client Secret *</label>
+                                    <input type="password" class="form-control" @bind="gdClientSecret" />
+                                </div>
+                            </div>
+
+                            <div class="oauth-button-container">
+                                <button type="button" class="btn btn-google" @onclick="ConnectGoogleDrive" disabled="@(string.IsNullOrWhiteSpace(gdClientId) || string.IsNullOrWhiteSpace(gdClientSecret) || connectingGoogle)">
+                                    @if (connectingGoogle)
+                                    {
+                                        <span class="spinner-small"></span>
+                                        <text>Connecting...</text>
+                                    }
+                                    else if (!string.IsNullOrWhiteSpace(gdRefreshToken))
+                                    {
+                                        <span>✓</span>
+                                        <text>Connected - Reconnect</text>
+                                    }
+                                    else
+                                    {
+                                        <span>🔐</span>
+                                        <text>Connect with Google</text>
+                                    }
+                                </button>
+                                @if (!string.IsNullOrWhiteSpace(gdRefreshToken))
+                                {
+                                    <span class="success-badge">✓ Authenticated</span>
+                                }
+                            </div>
+
+                            @if (oauthError != null)
+                            {
+                                <div class="error-message">
+                                    <span class="icon">❌</span>
+                                    <span>@oauthError</span>
+                                </div>
+                            }
+                        </div>
+
+                        <div class="divider-or">
+                            <span>OR</span>
+                        </div>
+
+                        <div class="manual-config-section">
+                            <p class="section-description">Manually enter tokens (advanced)</p>
+
+                            <div class="form-group">
+                                <label>Refresh Token @(string.IsNullOrWhiteSpace(gdRefreshToken) ? "*" : "(Auto-populated)")</label>
+                                <input type="password" class="form-control" @bind="gdRefreshToken" placeholder="Enter manually or use 'Connect with Google'" readonly="@(!string.IsNullOrWhiteSpace(gdRefreshToken))" />
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Folder ID *</label>
+                            <input type="text" class="form-control" @bind="gdFolderId" placeholder="1A2B3C4D5E6F7G8H9I0J" />
+                            <small class="form-text">The Google Drive folder ID where backups will be stored. Leave empty for root folder.</small>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Service Account JSON (Optional)</label>
+                            <textarea class="form-control" rows="4" @bind="gdServiceAccountJson" placeholder='{"type": "service_account", ...}'></textarea>
+                            <small class="form-text">Alternative: Use service account authentication instead of OAuth2</small>
+                        </div>
+                    </div>
+                }
+
+                <!-- Local Filesystem Configuration -->
+                @if (selectedConfig.StorageType == "LocalFileSystem")
+                {
+                    <div class="provider-config-section">
+                        <h4>Local Filesystem Configuration</h4>
+                        <div class="form-group">
+                            <label>Storage Path *</label>
+                            <input type="text" class="form-control" @bind="localStoragePath" placeholder="/var/backups/hostcraft" />
+                            <small class="form-text">Absolute path on the server where backups will be stored</small>
+                        </div>
+                    </div>
+                }
+
+                <div class="form-section">
+                    <h4>Backup Settings</h4>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Retention Days *</label>
+                            <input type="number" class="form-control" @bind="selectedConfig.RetentionDays" min="1" placeholder="30" />
+                        </div>
+                        <div class="form-group">
+                            <label>Auto-Backup Scope</label>
+                            <select class="form-control" @bind="selectedConfig.AutoBackupScope">
+                                <option value="15">Complete (Everything)</option>
+                                <option value="1">System Configuration Only</option>
+                                <option value="2">Servers Only</option>
+                                <option value="4">Applications Only</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-section">
+                    <h4>Options</h4>
+                    <div class="form-checkboxes">
+                        <label>
+                            <input type="checkbox" @bind="selectedConfig.IsActive" />
+                            <span>Active (can be used for backups)</span>
+                        </label>
+                        <label>
+                            <input type="checkbox" @bind="selectedConfig.IsDefault" />
+                            <span>Set as default for this storage type</span>
+                        </label>
+                        <label>
+                            <input type="checkbox" @bind="selectedConfig.EnableCompression" />
+                            <span>Enable compression</span>
+                        </label>
+                        <label>
+                            <input type="checkbox" @bind="selectedConfig.EnableEncryption" />
+                            <span>Enable encryption</span>
+                        </label>
+                        <label>
+                            <input type="checkbox" @bind="selectedConfig.VerifyAfterUpload" />
+                            <span>Verify integrity after upload</span>
+                        </label>
+                        <label>
+                            <input type="checkbox" @bind="selectedConfig.AutoBackupEnabled" />
+                            <span>Enable automatic backups</span>
+                        </label>
+                    </div>
+                </div>
+
+                @if (selectedConfig.AutoBackupEnabled)
+                {
+                    <div class="form-group">
+                        <label>Backup Schedule (Cron Expression)</label>
+                        <input type="text" class="form-control" @bind="selectedConfig.AutoBackupSchedule" placeholder="0 2 * * *" />
+                        <small class="form-text">Example: "0 2 * * *" = Daily at 2:00 AM</small>
+                    </div>
+                }
+
+                @if (selectedConfig.EnableEncryption)
+                {
+                    <div class="form-group">
+                        <label>Encryption Key</label>
+                        <input type="password" class="form-control" @bind="selectedConfig.EncryptionKey" placeholder="Enter encryption key" />
+                        <small class="form-text">Leave empty to auto-generate</small>
+                    </div>
+                }
+            </div>
+
+            <div class="modal-footer">
+                <button class="btn btn-secondary" @onclick="CloseModal" disabled="@saving">
+                    Cancel
+                </button>
+                <button class="btn btn-primary" @onclick="SaveConfiguration" disabled="@(!CanSave)">
+                    @if (saving)
+                    {
+                        <span class="icon">⏳</span> <text>Saving...</text>
+                    }
+                    else
+                    {
+                        <span class="icon">💾</span> <text>@(isEditing ? "Update" : "Create") Configuration</text>
+                    }
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Delete Confirmation Modal -->
+@if (showDeleteModal && configToDelete != null)
+{
+    <div class="modal-overlay" @onclick="CloseDeleteModal">
+        <div class="modal-content" @onclick:stopPropagation="true">
+            <div class="modal-header">
+                <h2>Delete Configuration</h2>
+                <button class="modal-close" @onclick="CloseDeleteModal">×</button>
+            </div>
+
+            <div class="modal-body">
+                <p>Are you sure you want to delete the backup configuration <strong>@configToDelete.Name</strong>?</p>
+                <p class="warning-text">This action cannot be undone. Existing backups using this configuration will not be affected.</p>
+            </div>
+
+            <div class="modal-footer">
+                <button class="btn btn-secondary" @onclick="CloseDeleteModal" disabled="@deleting">
+                    Cancel
+                </button>
+                <button class="btn btn-danger" @onclick="DeleteConfiguration" disabled="@deleting">
+                    @if (deleting)
+                    {
+                        <span class="icon">⏳</span> <text>Deleting...</text>
+                    }
+                    else
+                    {
+                        <span class="icon">🗑️</span> <text>Delete Configuration</text>
+                    }
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Create Backup Modal -->
+@if (showBackupModal)
+{
+    <div class="modal-overlay" @onclick="CloseBackupModal">
+        <div class="modal-content" @onclick:stopPropagation="true">
+            <div class="modal-header">
+                <h2>Create System Backup</h2>
+                <button class="modal-close" @onclick="CloseBackupModal">×</button>
+            </div>
+
+            <div class="modal-body">
+                @if (backupError != null)
+                {
+                    <div class="error-message">
+                        <span class="icon">❌</span>
+                        <span>@backupError</span>
+                    </div>
+                }
+
+                <div class="form-group">
+                    <label>Backup Scope</label>
+                    <select class="form-control" @bind="selectedBackupScope">
+                        <option value="1023">Complete (Everything) - Recommended</option>
+                        <option value="1">System Configuration Only</option>
+                        <option value="2">Servers Only</option>
+                        <option value="4">Applications Only</option>
+                        <option value="6">Applications + Servers</option>
+                        <option value="64">Certificates Only</option>
+                        <option value="128">Git Integrations Only</option>
+                    </select>
+                    <small class="form-text">Choose what to include in the backup</small>
+                </div>
+
+                <div class="form-group">
+                    <label>Storage Configuration (Optional)</label>
+                    <select class="form-control" @bind="selectedBackupConfigId">
+                        <option value="">Local only</option>
+                        @foreach (var config in configurations.Where(c => c.IsActive))
+                        {
+                            <option value="@config.Id">@config.Name (@config.StorageType)</option>
+                        }
+                    </select>
+                    <small class="form-text">Select a storage provider to upload the backup after creation</small>
+                </div>
+            </div>
+
+            <div class="modal-footer">
+                <button class="btn btn-secondary" @onclick="CloseBackupModal" disabled="@creatingBackup">
+                    Cancel
+                </button>
+                <button class="btn btn-primary" @onclick="CreateBackupNow" disabled="@creatingBackup">
+                    @if (creatingBackup)
+                    {
+                        <span class="icon">⏳</span> <text>Creating...</text>
+                    }
+                    else
+                    {
+                        <span class="icon">💾</span> <text>Create Backup</text>
+                    }
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Upload Backup Modal -->
+@if (showUploadModal)
+{
+    <div class="modal-overlay" @onclick="CloseUploadModal">
+        <div class="modal-content" @onclick:stopPropagation="true">
+            <div class="modal-header">
+                <h2>Upload Backup</h2>
+                <button class="modal-close" @onclick="CloseUploadModal">×</button>
+            </div>
+
+            <div class="modal-body">
+                @if (uploadError != null)
+                {
+                    <div class="error-message">
+                        <span class="icon">❌</span>
+                        <span>@uploadError</span>
+                    </div>
+                }
+
+                @if (uploadSuccess)
+                {
+                    <div class="success-message">
+                        <span class="icon">✓</span>
+                        <span>Backup uploaded successfully! You can now restore from it.</span>
+                    </div>
+                }
+
+                <div class="upload-area">
+                    <InputFile id="backupFileInput" OnChange="HandleFileSelected" accept=".tar.gz" disabled="@uploading" />
+                    <label for="backupFileInput" class="upload-label @(uploading ? "disabled" : "")">
+                        <div class="upload-icon">📤</div>
+                        @if (string.IsNullOrEmpty(uploadedFileName))
+                        {
+                            <div class="upload-text">
+                                <strong>Click to select backup file</strong>
+                                <span>or drag and drop</span>
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="upload-text">
+                                <strong>@uploadedFileName</strong>
+                                <span>@FormatBytes(uploadedFileSize)</span>
+                            </div>
+                        }
+                        <div class="upload-hint">Only .tar.gz files are supported (max 10GB)</div>
+                    </label>
+                </div>
+
+                @if (uploading)
+                {
+                    <div class="upload-progress">
+                        <div class="progress-bar">
+                            <div class="progress-fill" style="width: @uploadProgress%"></div>
+                        </div>
+                        <div class="progress-text">Uploading... @uploadProgress%</div>
+                    </div>
+                }
+            </div>
+
+            <div class="modal-footer">
+                <button class="btn btn-secondary" @onclick="CloseUploadModal" disabled="@uploading">
+                    Cancel
+                </button>
+                <button class="btn btn-primary" @onclick="UploadBackupFile" disabled="@(uploading || string.IsNullOrEmpty(uploadedFileName) || uploadSuccess)">
+                    @if (uploading)
+                    {
+                        <span class="icon">⏳</span> <text>Uploading...</text>
+                    }
+                    else if (uploadSuccess)
+                    {
+                        <span class="icon">✓</span> <text>Uploaded</text>
+                    }
+                    else
+                    {
+                        <span class="icon">📤</span> <text>Upload & Import</text>
+                    }
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Test Result Toast -->
+@if (testResult != null)
+{
+    <div class="toast @(testResult.Success ? "success" : "error")">
+        <span class="icon">@(testResult.Success ? "✓" : "✗")</span>
+        <span>@testResult.Message</span>
+        <button class="toast-close" @onclick="() => testResult = null">×</button>
+    </div>
+}
+
+@code {
+    private string activeTab = "overview";
+    private List<BackupConfigurationDto> configurations = new();
+    private List<BackupDto> backups = new();
+    private bool loading = true;
+    private bool loadingBackups = false;
+    private string? error = null;
+
+    // Modal state
+    private bool showModal = false;
+    private bool showDeleteModal = false;
+    private bool showBackupModal = false;
+    private bool isEditing = false;
+    private BackupConfigurationDto? selectedConfig = null;
+    private BackupConfigurationDto? configToDelete = null;
+    private string? modalError = null;
+    private string? backupError = null;
+    private bool saving = false;
+    private bool deleting = false;
+    private bool creatingBackup = false;
+
+    // Backup creation
+    private string selectedBackupScope = "1023"; // Complete by default
+    private string selectedBackupConfigId = "";
+
+    // Upload state
+    private bool showUploadModal = false;
+    private bool uploading = false;
+    private string? uploadedFileName = null;
+    private long uploadedFileSize = 0;
+    private IBrowserFile? selectedFile = null;
+    private string? uploadError = null;
+    private bool uploadSuccess = false;
+    private int uploadProgress = 0;
+
+    // S3 fields
+    private string s3Endpoint = "https://s3.amazonaws.com";
+    private string s3BucketName = "";
+    private string s3Region = "us-east-1";
+    private string s3AccessKeyId = "";
+    private string s3SecretAccessKey = "";
+    private string s3Prefix = "";
+    private bool s3UsePathStyle = false;
+    private bool s3UseSsl = true;
+
+    // Google Drive fields
+    private string gdClientId = "";
+    private string gdClientSecret = "";
+    private string gdRefreshToken = "";
+    private string gdFolderId = "";
+    private string gdServiceAccountJson = "";
+    private bool connectingGoogle = false;
+    private string? oauthError = null;
+
+    // Local filesystem fields
+    private string localStoragePath = "/var/backups/hostcraft";
+
+    // Test state
+    private int? testingId = null;
+    private TestResult? testResult = null;
+
+    private bool CanSave => !saving && !string.IsNullOrWhiteSpace(selectedConfig?.Name) && !string.IsNullOrWhiteSpace(selectedConfig?.StorageType);
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Task.WhenAll(LoadConfigurations(), LoadBackups());
+    }
+
+    private async Task LoadConfigurations()
+    {
+        loading = true;
+        error = null;
+
+        try
+        {
+            var response = await Http.GetAsync("api/BackupConfigurations");
+            if (response.IsSuccessStatusCode)
+            {
+                configurations = await response.Content.ReadFromJsonAsync<List<BackupConfigurationDto>>() ?? new();
+            }
+            else
+            {
+                error = $"Failed to load configurations: {response.StatusCode}";
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading backup configurations");
+            error = "An error occurred while loading configurations";
+        }
+        finally
+        {
+            loading = false;
+        }
+    }
+
+    private async Task LoadBackups()
+    {
+        loadingBackups = true;
+
+        try
+        {
+            var response = await Http.GetAsync("api/Backups/system/list");
+            if (response.IsSuccessStatusCode)
+            {
+                backups = await response.Content.ReadFromJsonAsync<List<BackupDto>>() ?? new();
+            }
+            else
+            {
+                Logger.LogWarning("Failed to load backups: {StatusCode}", response.StatusCode);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading backups");
+        }
+        finally
+        {
+            loadingBackups = false;
+        }
+    }
+
+    private void ShowBackupModal()
+    {
+        showBackupModal = true;
+        backupError = null;
+        selectedBackupScope = "1023"; // Complete
+        selectedBackupConfigId = "";
+    }
+
+    private void CloseBackupModal()
+    {
+        showBackupModal = false;
+        backupError = null;
+    }
+
+    private async Task CreateBackupNow()
+    {
+        creatingBackup = true;
+        backupError = null;
+
+        try
+        {
+            var request = new
+            {
+                Scope = int.Parse(selectedBackupScope),
+                BackupConfigurationId = string.IsNullOrEmpty(selectedBackupConfigId) ? (int?)null : int.Parse(selectedBackupConfigId)
+            };
+
+            var response = await Http.PostAsJsonAsync("api/Backups/system", request);
+            if (response.IsSuccessStatusCode)
+            {
+                await LoadBackups(); // Refresh backup list
+                CloseBackupModal();
+                testResult = new TestResult { Success = true, Message = "Backup created successfully!" };
+                _ = Task.Delay(5000).ContinueWith(_ => testResult = null);
+            }
+            else
+            {
+                var errorContent = await response.Content.ReadAsStringAsync();
+                backupError = $"Failed to create backup: {errorContent}";
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error creating backup");
+            backupError = $"An error occurred: {ex.Message}";
+        }
+        finally
+        {
+            creatingBackup = false;
+        }
+    }
+
+    private async Task DownloadBackup(int backupId)
+    {
+        try
+        {
+            var response = await Http.GetAsync($"api/Backups/{backupId}/download-file");
+            if (response.IsSuccessStatusCode)
+            {
+                var contentDisposition = response.Content.Headers.ContentDisposition?.FileName ?? $"backup-{backupId}.tar.gz";
+                var fileName = contentDisposition.Trim('"');
+
+                var fileBytes = await response.Content.ReadAsByteArrayAsync();
+                await JSRuntime.InvokeVoidAsync("downloadFile", fileName, Convert.ToBase64String(fileBytes));
+            }
+            else
+            {
+                testResult = new TestResult { Success = false, Message = "Failed to download backup" };
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error downloading backup");
+            testResult = new TestResult { Success = false, Message = $"Download failed: {ex.Message}" };
+        }
+    }
+
+    private void NavigateToRestore(int backupId)
+    {
+        NavigationManager.NavigateTo($"/backups/restore/{backupId}");
+    }
+
+    private void ShowUploadModal()
+    {
+        showUploadModal = true;
+        uploadError = null;
+        uploadSuccess = false;
+        uploadedFileName = null;
+        uploadedFileSize = 0;
+        selectedFile = null;
+        uploadProgress = 0;
+    }
+
+    private void CloseUploadModal()
+    {
+        showUploadModal = false;
+        selectedFile = null;
+        uploadedFileName = null;
+        uploadError = null;
+        uploadSuccess = false;
+    }
+
+    private void HandleFileSelected(InputFileChangeEventArgs e)
+    {
+        selectedFile = e.File;
+        uploadedFileName = e.File.Name;
+        uploadedFileSize = e.File.Size;
+        uploadError = null;
+
+        // Validate file extension
+        if (!uploadedFileName.EndsWith(".tar.gz", StringComparison.OrdinalIgnoreCase))
+        {
+            uploadError = "Only .tar.gz backup files are supported";
+            selectedFile = null;
+            uploadedFileName = null;
+            return;
+        }
+
+        // Validate file size (10GB max)
+        if (uploadedFileSize > 10L * 1024 * 1024 * 1024)
+        {
+            uploadError = "File size exceeds 10GB limit";
+            selectedFile = null;
+            uploadedFileName = null;
+            return;
+        }
+    }
+
+    private async Task UploadBackupFile()
+    {
+        if (selectedFile == null)
+        {
+            uploadError = "Please select a file first";
+            return;
+        }
+
+        uploading = true;
+        uploadError = null;
+        uploadProgress = 0;
+
+        try
+        {
+            // Create multipart form content
+            using var content = new MultipartFormDataContent();
+            var fileContent = new StreamContent(selectedFile.OpenReadStream(10L * 1024 * 1024 * 1024)); // 10GB max
+            fileContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/gzip");
+            content.Add(fileContent, "file", selectedFile.Name);
+
+            // Upload with progress tracking
+            var response = await Http.PostAsync("api/Backups/upload", content);
+
+            if (response.IsSuccessStatusCode)
+            {
+                var result = await response.Content.ReadFromJsonAsync<UploadBackupResponse>();
+                uploadSuccess = true;
+                uploadProgress = 100;
+
+                // Refresh backup list
+                await LoadBackups();
+
+                testResult = new TestResult
+                {
+                    Success = true,
+                    Message = $"Backup uploaded successfully! Backup ID: {result?.BackupId}"
+                };
+                _ = Task.Delay(5000).ContinueWith(_ => testResult = null);
+
+                // Close modal after delay
+                _ = Task.Delay(2000).ContinueWith(_ =>
+                {
+                    CloseUploadModal();
+                    StateHasChanged();
+                });
+            }
+            else
+            {
+                var errorContent = await response.Content.ReadAsStringAsync();
+                uploadError = $"Upload failed: {errorContent}";
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error uploading backup file");
+            uploadError = $"Upload error: {ex.Message}";
+        }
+        finally
+        {
+            uploading = false;
+        }
+    }
+
+    private string FormatBytes(long bytes)
+    {
+        if (bytes < 1024) return $"{bytes} B";
+        if (bytes < 1024 * 1024) return $"{bytes / 1024.0:F1} KB";
+        if (bytes < 1024 * 1024 * 1024) return $"{bytes / (1024.0 * 1024.0):F1} MB";
+        return $"{bytes / (1024.0 * 1024.0 * 1024.0):F1} GB";
+    }
+
+    private void ShowCreateModal()
+    {
+        isEditing = false;
+        selectedConfig = new BackupConfigurationDto
+        {
+            Name = "",
+            StorageType = "",  // Empty by default - user must select
+            IsActive = true,
+            IsDefault = false,
+            ProviderConfiguration = "",
+            RetentionDays = 30,
+            AutoBackupEnabled = false,
+            AutoBackupSchedule = "0 2 * * *",
+            AutoBackupScope = "Complete",
+            EnableCompression = true,
+            EnableEncryption = false,
+            VerifyAfterUpload = true,
+            CreatedAt = DateTime.UtcNow
+        };
+        ResetProviderFields();
+        showModal = true;
+        modalError = null;
+    }
+
+    private void ShowEditModal(BackupConfigurationDto config)
+    {
+        isEditing = true;
+        selectedConfig = new BackupConfigurationDto
+        {
+            Id = config.Id,
+            Name = config.Name,
+            StorageType = config.StorageType,
+            IsActive = config.IsActive,
+            IsDefault = config.IsDefault,
+            ProviderConfiguration = config.ProviderConfiguration,
+            RetentionDays = config.RetentionDays,
+            AutoBackupEnabled = config.AutoBackupEnabled,
+            AutoBackupSchedule = config.AutoBackupSchedule,
+            AutoBackupScope = config.AutoBackupScope,
+            EnableCompression = config.EnableCompression,
+            EnableEncryption = config.EnableEncryption,
+            EncryptionKey = config.EncryptionKey,
+            VerifyAfterUpload = config.VerifyAfterUpload,
+            CreatedAt = config.CreatedAt,
+            LastBackupAt = config.LastBackupAt
+        };
+        LoadProviderFields(config);
+        showModal = true;
+        modalError = null;
+    }
+
+    private void ShowDeleteModal(BackupConfigurationDto config)
+    {
+        configToDelete = config;
+        showDeleteModal = true;
+    }
+
+    private void CloseModal()
+    {
+        showModal = false;
+        selectedConfig = null;
+        modalError = null;
+    }
+
+    private void CloseDeleteModal()
+    {
+        showDeleteModal = false;
+        configToDelete = null;
+    }
+
+    private void OnStorageTypeChanged()
+    {
+        ResetProviderFields();
+    }
+
+    private void ResetProviderFields()
+    {
+        // S3
+        s3Endpoint = "https://s3.amazonaws.com";
+        s3BucketName = "";
+        s3Region = "us-east-1";
+        s3AccessKeyId = "";
+        s3SecretAccessKey = "";
+        s3Prefix = "";
+        s3UsePathStyle = false;
+        s3UseSsl = true;
+
+        // Google Drive
+        gdClientId = "";
+        gdClientSecret = "";
+        gdRefreshToken = "";
+        gdFolderId = "";
+        gdServiceAccountJson = "";
+
+        // Local
+        localStoragePath = "/var/backups/hostcraft";
+    }
+
+    private void LoadProviderFields(BackupConfigurationDto config)
+    {
+        try
+        {
+            var providerConfig = JsonSerializer.Deserialize<JsonElement>(config.ProviderConfiguration);
+
+            if (config.StorageType == "S3Compatible")
+            {
+                s3Endpoint = providerConfig.GetProperty("Endpoint").GetString() ?? "";
+                s3BucketName = providerConfig.GetProperty("BucketName").GetString() ?? "";
+                s3Region = providerConfig.GetProperty("Region").GetString() ?? "";
+                s3AccessKeyId = providerConfig.GetProperty("AccessKeyId").GetString() ?? "";
+                s3SecretAccessKey = providerConfig.GetProperty("SecretAccessKey").GetString() ?? "";
+                s3Prefix = providerConfig.TryGetProperty("Prefix", out var prefix) ? prefix.GetString() ?? "" : "";
+                s3UsePathStyle = providerConfig.TryGetProperty("UsePathStyle", out var pathStyle) && pathStyle.GetBoolean();
+                s3UseSsl = providerConfig.TryGetProperty("UseSsl", out var useSsl) ? useSsl.GetBoolean() : true;
+            }
+            else if (config.StorageType == "GoogleDrive")
+            {
+                gdClientId = providerConfig.GetProperty("ClientId").GetString() ?? "";
+                gdClientSecret = providerConfig.GetProperty("ClientSecret").GetString() ?? "";
+                gdRefreshToken = providerConfig.GetProperty("RefreshToken").GetString() ?? "";
+                gdFolderId = providerConfig.GetProperty("FolderId").GetString() ?? "";
+                gdServiceAccountJson = providerConfig.TryGetProperty("ServiceAccountJson", out var sa) ? sa.GetString() ?? "" : "";
+            }
+            else if (config.StorageType == "LocalFileSystem")
+            {
+                localStoragePath = providerConfig.GetProperty("StoragePath").GetString() ?? "";
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading provider configuration");
+        }
+    }
+
+    private async Task SaveConfiguration()
+    {
+        if (selectedConfig == null) return;
+
+        saving = true;
+        modalError = null;
+
+        try
+        {
+            // Build provider configuration JSON
+            string providerConfigJson = selectedConfig.StorageType switch
+            {
+                "S3Compatible" => JsonSerializer.Serialize(new
+                {
+                    Endpoint = s3Endpoint,
+                    BucketName = s3BucketName,
+                    Region = s3Region,
+                    AccessKeyId = s3AccessKeyId,
+                    SecretAccessKey = s3SecretAccessKey,
+                    Prefix = s3Prefix,
+                    UsePathStyle = s3UsePathStyle,
+                    UseSsl = s3UseSsl
+                }),
+                "GoogleDrive" => JsonSerializer.Serialize(new
+                {
+                    ClientId = gdClientId,
+                    ClientSecret = gdClientSecret,
+                    RefreshToken = gdRefreshToken,
+                    FolderId = gdFolderId,
+                    ServiceAccountJson = string.IsNullOrWhiteSpace(gdServiceAccountJson) ? null : gdServiceAccountJson
+                }),
+                "LocalFileSystem" => JsonSerializer.Serialize(new
+                {
+                    StoragePath = localStoragePath
+                }),
+                _ => "{}"
+            };
+
+            var request = new
+            {
+                Name = selectedConfig.Name,
+                StorageType = selectedConfig.StorageType == "S3Compatible" ? 0 : selectedConfig.StorageType == "GoogleDrive" ? 1 : 2,
+                IsActive = selectedConfig.IsActive,
+                IsDefault = selectedConfig.IsDefault,
+                RetentionDays = selectedConfig.RetentionDays,
+                AutoBackupEnabled = selectedConfig.AutoBackupEnabled,
+                AutoBackupSchedule = selectedConfig.AutoBackupSchedule,
+                AutoBackupScope = selectedConfig.AutoBackupScope == "Complete" ? 15 : 1,
+                EnableCompression = selectedConfig.EnableCompression,
+                EnableEncryption = selectedConfig.EnableEncryption,
+                EncryptionKey = selectedConfig.EncryptionKey,
+                VerifyAfterUpload = selectedConfig.VerifyAfterUpload,
+                S3Config = selectedConfig.StorageType == "S3Compatible" ? JsonSerializer.Deserialize<object>(providerConfigJson) : null,
+                GoogleDriveConfig = selectedConfig.StorageType == "GoogleDrive" ? JsonSerializer.Deserialize<object>(providerConfigJson) : null,
+                LocalFileSystemConfig = selectedConfig.StorageType == "LocalFileSystem" ? JsonSerializer.Deserialize<object>(providerConfigJson) : null
+            };
+
+            HttpResponseMessage response;
+            if (isEditing)
+            {
+                response = await Http.PutAsJsonAsync($"api/BackupConfigurations/{selectedConfig.Id}", request);
+            }
+            else
+            {
+                response = await Http.PostAsJsonAsync("api/BackupConfigurations", request);
+            }
+
+            if (response.IsSuccessStatusCode)
+            {
+                await LoadConfigurations();
+                CloseModal();
+            }
+            else
+            {
+                var errorContent = await response.Content.ReadAsStringAsync();
+                modalError = $"Failed to save configuration: {errorContent}";
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error saving backup configuration");
+            modalError = $"An error occurred: {ex.Message}";
+        }
+        finally
+        {
+            saving = false;
+        }
+    }
+
+    private async Task DeleteConfiguration()
+    {
+        if (configToDelete == null) return;
+
+        deleting = true;
+
+        try
+        {
+            var response = await Http.DeleteAsync($"api/BackupConfigurations/{configToDelete.Id}");
+            if (response.IsSuccessStatusCode)
+            {
+                await LoadConfigurations();
+                CloseDeleteModal();
+            }
+            else
+            {
+                var errorContent = await response.Content.ReadAsStringAsync();
+                modalError = $"Failed to delete configuration: {errorContent}";
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error deleting backup configuration");
+            modalError = $"An error occurred: {ex.Message}";
+        }
+        finally
+        {
+            deleting = false;
+        }
+    }
+
+    private async Task TestConfiguration(int id)
+    {
+        testingId = id;
+        testResult = null;
+
+        try
+        {
+            var response = await Http.PostAsync($"api/BackupConfigurations/{id}/test", null);
+            var result = await response.Content.ReadFromJsonAsync<TestConnectionResponse>();
+            
+            testResult = new TestResult
+            {
+                Success = result?.Success ?? false,
+                Message = result?.Message ?? "Unknown error"
+            };
+
+            // Auto-hide after 5 seconds
+            _ = Task.Delay(5000).ContinueWith(_ => testResult = null);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error testing backup configuration");
+            testResult = new TestResult
+            {
+                Success = false,
+                Message = $"Test failed: {ex.Message}"
+            };
+        }
+        finally
+        {
+            testingId = null;
+        }
+    }
+
+    private string GetStorageIcon(string storageType)
+    {
+        return storageType switch
+        {
+            "S3Compatible" => "☁️",
+            "GoogleDrive" => "📁",
+            "LocalFileSystem" => "💾",
+            _ => "📦"
+        };
+    }
+
+    private async Task ConnectGoogleDrive()
+    {
+        connectingGoogle = true;
+        oauthError = null;
+
+        try
+        {
+            // Call backend to initiate OAuth flow
+            var response = await Http.PostAsJsonAsync("api/GoogleDriveOAuth/initiate", new
+            {
+                ClientId = gdClientId,
+                ClientSecret = gdClientSecret
+            });
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var errorContent = await response.Content.ReadAsStringAsync();
+                oauthError = $"Failed to initiate OAuth: {errorContent}";
+                return;
+            }
+
+            var result = await response.Content.ReadFromJsonAsync<OAuthInitiateResponse>();
+            if (result == null || string.IsNullOrEmpty(result.AuthorizationUrl))
+            {
+                oauthError = "Invalid OAuth response";
+                return;
+            }
+
+            // Open OAuth popup
+            await OpenOAuthPopup(result.AuthorizationUrl);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error connecting to Google Drive");
+            oauthError = $"Error: {ex.Message}";
+        }
+        finally
+        {
+            connectingGoogle = false;
+        }
+    }
+
+    private async Task OpenOAuthPopup(string url)
+    {
+        // Use JavaScript to open popup and listen for message
+        await JSRuntime.InvokeVoidAsync("openGoogleOAuthPopup", url, DotNetObjectReference.Create(this));
+    }
+
+    [JSInvokable]
+    public void OnGoogleOAuthSuccess(string refreshToken)
+    {
+        gdRefreshToken = refreshToken;
+        oauthError = null;
+        StateHasChanged();
+    }
+
+    [JSInvokable]
+    public void OnGoogleOAuthError(string error)
+    {
+        oauthError = error;
+        StateHasChanged();
+    }
+
+    private class BackupConfigurationDto
+    {
+        public int Id { get; set; }
+        public string Name { get; set; } = "";
+        public string StorageType { get; set; } = "";
+        public bool IsActive { get; set; }
+        public bool IsDefault { get; set; }
+        public string ProviderConfiguration { get; set; } = "";
+        public int RetentionDays { get; set; }
+        public bool AutoBackupEnabled { get; set; }
+        public string? AutoBackupSchedule { get; set; }
+        public string AutoBackupScope { get; set; } = "";
+        public bool EnableCompression { get; set; }
+        public bool EnableEncryption { get; set; }
+        public string? EncryptionKey { get; set; }
+        public bool VerifyAfterUpload { get; set; }
+        public DateTime CreatedAt { get; set; }
+        public DateTime? LastBackupAt { get; set; }
+    }
+
+    private class TestConnectionResponse
+    {
+        public bool Success { get; set; }
+        public string Message { get; set; } = "";
+    }
+
+    private class TestResult
+    {
+        public bool Success { get; set; }
+        public string Message { get; set; } = "";
+    }
+
+    private class OAuthInitiateResponse
+    {
+        public string AuthorizationUrl { get; set; } = "";
+        public string State { get; set; } = "";
+    }
+
+    private class BackupDto
+    {
+        public int Id { get; set; }
+        public string Status { get; set; } = "";
+        public DateTime StartedAt { get; set; }
+        public long SizeBytes { get; set; }
+        public string Scope { get; set; } = "";
+        public int ProjectCount { get; set; }
+        public int ApplicationCount { get; set; }
+        public int ServerCount { get; set; }
+    }
+
+    private class UploadBackupResponse
+    {
+        public int BackupId { get; set; }
+        public Guid Uuid { get; set; }
+        public string Message { get; set; } = "";
+    }
+}
+
+<style>
+    .backups-page {
+        padding: clamp(1.5rem, 3vw, 3rem);
+        min-height: 100vh;
+        background: radial-gradient(circle at top, rgba(99, 102, 241, 0.25), transparent 55%)
+            , radial-gradient(circle at 20% 20%, rgba(59, 130, 246, 0.2), transparent 45%)
+            , #0f172a;
+        color: #e2e8f0;
+    }
+
+    .hero-panel {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+        gap: 2rem;
+        padding: 2rem;
+        border-radius: 1.5rem;
+        border: 1px solid rgba(99, 102, 241, 0.4);
+        background: rgba(15, 23, 42, 0.75);
+        box-shadow: 0 25px 60px rgba(15, 23, 42, 0.45);
+    }
+
+    .hero-copy h1 {
+        font-size: clamp(2rem, 4vw, 2.8rem);
+        margin-bottom: 0.5rem;
+    }
+
+    .eyebrow {
+        text-transform: uppercase;
+        letter-spacing: 0.2em;
+        font-size: 0.75rem;
+        color: #a5b4fc;
+        margin-bottom: 0.5rem;
+    }
+
+    .hero-tags {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        margin-top: 1rem;
+    }
+
+    .hero-tags .tag {
+        padding: 0.35rem 0.8rem;
+        border-radius: 999px;
+        border: 1px solid rgba(148, 163, 184, 0.3);
+        font-size: 0.85rem;
+    }
+
+    .hero-metrics {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+        gap: 1rem;
+    }
+
+    /* Tabs */
+    .tabs-container {
+        margin-top: 2rem;
+        border-bottom: 2px solid rgba(148, 163, 184, 0.1);
+    }
+
+    .tabs {
+        display: flex;
+        gap: 0.5rem;
+        overflow-x: auto;
+    }
+
+    .tab {
+        padding: 0.75rem 1.5rem;
+        background: transparent;
+        border: none;
+        border-bottom: 3px solid transparent;
+        color: #94a3b8;
+        font-size: 0.95rem;
+        font-weight: 500;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        white-space: nowrap;
+    }
+
+    .tab:hover {
+        color: #cbd5e1;
+        background: rgba(99, 102, 241, 0.05);
+    }
+
+    .tab.active {
+        color: #e2e8f0;
+        border-bottom-color: #8b5cf6;
+        background: rgba(99, 102, 241, 0.1);
+    }
+
+    .tab-icon {
+        font-size: 1.1rem;
+    }
+
+    .metric-card {
+        padding: 1rem;
+        border-radius: 1rem;
+        background: linear-gradient(135deg, rgba(99, 102, 241, 0.2), rgba(79, 70, 229, 0.05));
+        border: 1px solid rgba(99, 102, 241, 0.3);
+    }
+
+    .metric-card strong {
+        display: block;
+        font-size: 2rem;
+        margin: 0.35rem 0;
+        color: #ffffff;
+    }
+
+    .backup-actions-panel {
+        margin-top: 2rem;
+        padding: 1.5rem;
+        border-radius: 1.25rem;
+        border: 1px solid rgba(99, 102, 241, 0.3);
+        background: linear-gradient(135deg, rgba(99, 102, 241, 0.1), rgba(79, 70, 229, 0.05));
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: space-between;
+        align-items: center;
+        gap: 1rem;
+    }
+
+    .action-buttons {
+        display: flex;
+        gap: 0.75rem;
+    }
+
+    .backups-list {
+        margin-top: 2rem;
+        padding: 1.5rem;
+        border-radius: 1.25rem;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        background: rgba(15, 23, 42, 0.8);
+    }
+
+    .backups-list h3 {
+        margin-top: 0;
+        margin-bottom: 1rem;
+        color: #e2e8f0;
+    }
+
+    .backups-table {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+    }
+
+    .table-header {
+        display: grid;
+        grid-template-columns: 100px 150px 100px 150px 1fr 120px;
+        gap: 1rem;
+        padding: 0.75rem 1rem;
+        background: rgba(15, 23, 42, 0.6);
+        border-radius: 0.5rem;
+        font-size: 0.85rem;
+        font-weight: 600;
+        color: #94a3b8;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+    }
+
+    .table-row {
+        display: grid;
+        grid-template-columns: 100px 150px 100px 150px 1fr 120px;
+        gap: 1rem;
+        padding: 1rem;
+        background: rgba(15, 23, 42, 0.4);
+        border-radius: 0.5rem;
+        border: 1px solid rgba(148, 163, 184, 0.1);
+        align-items: center;
+        transition: all 0.2s ease;
+    }
+
+    .table-row:hover {
+        background: rgba(15, 23, 42, 0.6);
+        border-color: rgba(99, 102, 241, 0.3);
+    }
+
+    .table-row.success {
+        border-left: 3px solid rgba(16, 185, 129, 0.5);
+    }
+
+    .table-row.failed {
+        border-left: 3px solid rgba(239, 68, 68, 0.5);
+    }
+
+    .status-badge {
+        padding: 0.25rem 0.6rem;
+        border-radius: 999px;
+        font-size: 0.75rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+    }
+
+    .status-success {
+        background: rgba(16, 185, 129, 0.15);
+        border: 1px solid rgba(16, 185, 129, 0.4);
+        color: #10b981;
+    }
+
+    .status-failed {
+        background: rgba(239, 68, 68, 0.15);
+        border: 1px solid rgba(239, 68, 68, 0.4);
+        color: #f87171;
+    }
+
+    .status-running {
+        background: rgba(59, 130, 246, 0.15);
+        border: 1px solid rgba(59, 130, 246, 0.4);
+        color: #3b82f6;
+    }
+
+    .date-info {
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+    }
+
+    .date-info .date {
+        font-weight: 500;
+    }
+
+    .date-info .time {
+        font-size: 0.8rem;
+        color: #94a3b8;
+    }
+
+    .count-badge {
+        display: inline-block;
+        padding: 0.25rem 0.5rem;
+        margin-right: 0.35rem;
+        border-radius: 0.35rem;
+        background: rgba(99, 102, 241, 0.15);
+        border: 1px solid rgba(99, 102, 241, 0.3);
+        font-size: 0.75rem;
+    }
+
+    .btn-sm {
+        padding: 0.25rem 0.5rem;
+        font-size: 0.85rem;
+    }
+
+    .filters-panel {
+        margin-top: 2rem;
+        padding: 1.5rem;
+        border-radius: 1.25rem;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        background: rgba(15, 23, 42, 0.8);
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: space-between;
+        gap: 1rem;
+    }
+
+    .configurations-grid {
+        margin-top: 2rem;
+        display: grid;
+        gap: 1.5rem;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    }
+
+    .config-card {
+        position: relative;
+        padding: 1.75rem;
+        border-radius: 1.25rem;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        background: rgba(15, 23, 42, 0.9);
+        overflow: hidden;
+        transition: transform 0.25s ease, border 0.25s ease;
+    }
+
+    .config-card:hover {
+        transform: translateY(-6px);
+        border-color: rgba(99, 102, 241, 0.6);
+    }
+
+    .config-card.inactive {
+        opacity: 0.7;
+    }
+
+    .card-accent {
+        position: absolute;
+        inset: 0;
+        background: radial-gradient(circle at top right, rgba(99, 102, 241, 0.35), transparent 55%);
+        opacity: 0.7;
+        pointer-events: none;
+    }
+
+    .config-top {
+        position: relative;
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+    }
+
+    .config-icon {
+        width: 3.5rem;
+        height: 3.5rem;
+        border-radius: 1rem;
+        background: rgba(99, 102, 241, 0.2);
+        display: grid;
+        place-items: center;
+        font-size: 1.75rem;
+    }
+
+    .config-heading h3 {
+        margin: 0;
+        font-size: 1.4rem;
+    }
+
+    .config-type {
+        font-size: 0.85rem;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        color: #94a3b8;
+    }
+
+    .category-pill {
+        margin-left: auto;
+        padding: 0.35rem 0.8rem;
+        border-radius: 999px;
+        background: rgba(15, 118, 255, 0.15);
+        border: 1px solid rgba(59, 130, 246, 0.4);
+        font-size: 0.85rem;
+        white-space: nowrap;
+    }
+
+    .category-pill.default {
+        background: rgba(251, 191, 36, 0.15);
+        border-color: rgba(251, 191, 36, 0.4);
+        color: #fbbf24;
+    }
+
+    .category-pill.active {
+        background: rgba(16, 185, 129, 0.15);
+        border-color: rgba(16, 185, 129, 0.4);
+        color: #10b981;
+    }
+    
+    .category-pill.inactive {
+        background: rgba(148, 163, 184, 0.15);
+        border-color: rgba(148, 163, 184, 0.4);
+        color: #94a3b8;
+    }
+
+    .config-description {
+        margin: 1.25rem 0;
+        color: #cbd5f5;
+        font-size: 0.9rem;
+    }
+
+    .config-specs {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+        gap: 0.75rem;
+    }
+
+    .spec-chip {
+        padding: 0.75rem;
+        border-radius: 0.85rem;
+        background: rgba(15, 23, 42, 0.8);
+        border: 1px solid rgba(148, 163, 184, 0.2);
+    }
+
+    .spec-chip .label {
+        display: block;
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        color: #94a3b8;
+        letter-spacing: 0.08em;
+        margin-bottom: 0.25rem;
+    }
+
+    .config-footer {
+        margin-top: 1.25rem;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 1rem;
+    }
+
+    .resource-hint {
+        display: flex;
+        flex-direction: column;
+        gap: 0.35rem;
+    }
+
+    .hint-label {
+        font-size: 0.8rem;
+        color: #94a3b8;
+    }
+
+    .hint-values {
+        display: flex;
+        gap: 0.65rem;
+        flex-wrap: wrap;
+        font-weight: 600;
+    }
+    
+    .config-actions {
+        display: flex;
+        gap: 0.5rem;
+    }
+
+    .btn.btn-primary {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        border-radius: 999px;
+        padding: 0.65rem 1.4rem;
+        background: linear-gradient(135deg, #ec4899, #8b5cf6);
+        border: none;
+        box-shadow: 0 12px 25px rgba(139, 92, 246, 0.35);
+        color: white;
+        cursor: pointer;
+    }
+    
+    .btn.btn-primary:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+    }
+
+    .btn.btn-secondary {
+        border-radius: 999px;
+        padding: 0.65rem 1.4rem;
+        background: rgba(255, 255, 255, 0.1);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        color: white;
+        cursor: pointer;
+    }
+
+    .btn.btn-danger {
+        border-radius: 999px;
+        padding: 0.65rem 1.4rem;
+        background: rgba(239, 68, 68, 0.2);
+        border: 1px solid rgba(239, 68, 68, 0.5);
+        color: #fca5a5;
+        cursor: pointer;
+    }
+
+    .btn.btn-icon {
+        border-radius: 0.65rem;
+        padding: 0.35rem 0.6rem;
+        background: rgba(59, 130, 246, 0.15);
+        border: 1px solid rgba(59, 130, 246, 0.3);
+        color: #e2e8f0;
+        font-size: 0.9rem;
+        cursor: pointer;
+    }
+    
+    .btn.btn-icon.btn-danger {
+        background: rgba(239, 68, 68, 0.15);
+        border-color: rgba(239, 68, 68, 0.3);
+        color: #fca5a5;
+    }
+
+    .provider-config-section {
+        margin-top: 1.5rem;
+        padding: 1.25rem;
+        border-radius: 1rem;
+        border: 1px solid rgba(148, 163, 184, 0.25);
+        background: rgba(15, 23, 42, 0.6);
+        box-shadow: inset 0 0 0 1px rgba(15, 118, 255, 0.1);
+    }
+
+    .provider-config-section h4 {
+        margin-top: 0;
+        margin-bottom: 1rem;
+        color: #e2e8f0;
+    }
+
+    .form-group {
+        margin-bottom: 1.25rem;
+    }
+
+    .form-group label {
+        display: block;
+        margin-bottom: 0.5rem;
+        font-size: 0.9rem;
+        color: #cbd5f5;
+    }
+
+    .form-control {
+        width: 100%;
+        padding: 0.75rem;
+        border-radius: 0.5rem;
+        background: rgba(15, 23, 42, 0.8);
+        border: 1px solid rgba(148, 163, 184, 0.2);
+        color: white;
+    }
+    
+    .form-control:focus {
+        outline: none;
+        border-color: #8b5cf6;
+        box-shadow: 0 0 0 2px rgba(139, 92, 246, 0.2);
+    }
+    
+    .form-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 1rem;
+    }
+    
+    .form-checkboxes {
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+    }
+    
+    .form-checkboxes label {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        background: rgba(15, 23, 42, 0.5);
+        padding: 0.75rem;
+        border-radius: 0.5rem;
+        border: 1px solid rgba(148, 163, 184, 0.1);
+        cursor: pointer;
+    }
+    
+    .form-section {
+        margin-top: 1.5rem;
+        padding-top: 1.5rem;
+        border-top: 1px solid rgba(148, 163, 184, 0.2);
+    }
+    
+    .form-section h4 {
+        margin-top: 0;
+        margin-bottom: 1rem;
+        color: #e2e8f0;
+    }
+    
+    .form-text {
+        display: block;
+        margin-top: 0.35rem;
+        font-size: 0.8rem;
+        color: #94a3b8;
+    }
+
+    /* Modal Styles from DatabaseTemplates referenced or recreated */
+    .modal-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.7);
+        backdrop-filter: blur(8px);
+        z-index: 1000;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+    
+    .modal-content {
+        background: #1e293b;
+        border: 1px solid rgba(148, 163, 184, 0.2);
+        border-radius: 1rem;
+        width: 90%;
+        max-width: 500px;
+        max-height: 90vh;
+        overflow-y: auto;
+        box-shadow: 0 25px 60px rgba(0,0,0,0.5);
+    }
+    
+    .modal-content.large {
+        max-width: 800px;
+    }
+    
+    .modal-header {
+        padding: 1.5rem;
+        border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+    
+    .modal-header h2 {
+        margin: 0;
+        font-size: 1.25rem;
+    }
+    
+    .modal-close {
+        background: transparent;
+        border: none;
+        color: #94a3b8;
+        font-size: 1.5rem;
+        cursor: pointer;
+    }
+    
+    .modal-body {
+        padding: 1.5rem;
+    }
+    
+    .modal-footer {
+        padding: 1.5rem;
+        border-top: 1px solid rgba(148, 163, 184, 0.1);
+        display: flex;
+        justify-content: flex-end;
+        gap: 1rem;
+    }
+
+    .error-banner {
+        padding: 1rem;
+        border-radius: 0.75rem;
+        background: rgba(239, 68, 68, 0.1);
+        border: 1px solid rgba(239, 68, 68, 0.3);
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+        color: #fca5a5;
+    }
+    
+    .toast {
+        position: fixed;
+        bottom: 2rem;
+        right: 2rem;
+        padding: 1rem 1.5rem;
+        border-radius: 0.75rem;
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+        box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+        z-index: 2000;
+    }
+
+    .toast.success {
+        background: rgba(6, 95, 70, 0.9);
+        border: 1px solid rgba(16, 185, 129, 0.5);
+        color: #ecfdf5;
+    }
+
+    .toast.error {
+        background: rgba(127, 29, 29, 0.9);
+        border: 1px solid rgba(239, 68, 68, 0.5);
+        color: #fecaca;
+    }
+    
+    .toast-close {
+        background: transparent;
+        border: none;
+        color: inherit;
+        font-size: 1.25rem;
+        cursor: pointer;
+        opacity: 0.7;
+    }
+    
+    .spinner {
+        width: 40px;
+        height: 40px;
+        border: 3px solid rgba(99, 102, 241, 0.3);
+        border-top-color: #8b5cf6;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+        margin: 0 auto 1rem;
+    }
+    
+    .spinner-small {
+        width: 16px;
+        height: 16px;
+        border: 2px solid rgba(99, 102, 241, 0.3);
+        border-top-color: #8b5cf6;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+        display: inline-block;
+    }
+    
+    @@keyframes spin {
+        to { transform: rotate(360deg); }
+    }
+    
+    .loading-state {
+        text-align: center;
+        padding: 3rem;
+        color: #94a3b8;
+    }
+
+    .empty-state {
+        margin-top: 2rem;
+        padding: 3rem 2rem;
+        border-radius: 1.25rem;
+        border: 1px dashed rgba(248, 250, 252, 0.2);
+        background: rgba(15, 23, 42, 0.7);
+        text-align: center;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+    }
+    
+    .empty-icon {
+        font-size: 4rem;
+        margin-bottom: 1rem;
+        opacity: 0.5;
+        filter: drop-shadow(0 0 20px rgba(99, 102, 241, 0.4));
+    }
+
+    /* Google OAuth Styles */
+    .oauth-flow-section {
+        margin-bottom: 1.5rem;
+    }
+
+    .section-description {
+        font-size: 0.9rem;
+        color: #94a3b8;
+        margin-bottom: 1rem;
+    }
+
+    .oauth-button-container {
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+        margin-top: 1rem;
+    }
+
+    .btn-google {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.6rem;
+        padding: 0.75rem 1.5rem;
+        border-radius: 0.5rem;
+        background: linear-gradient(135deg, #4285f4, #34a853);
+        border: none;
+        color: white;
+        font-weight: 500;
+        cursor: pointer;
+        transition: transform 0.2s, box-shadow 0.2s;
+        box-shadow: 0 4px 12px rgba(66, 133, 244, 0.3);
+    }
+
+    .btn-google:hover:not(:disabled) {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 20px rgba(66, 133, 244, 0.4);
+    }
+
+    .btn-google:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+    }
+
+    .success-badge {
+        padding: 0.35rem 0.8rem;
+        border-radius: 999px;
+        background: rgba(16, 185, 129, 0.15);
+        border: 1px solid rgba(16, 185, 129, 0.4);
+        color: #10b981;
+        font-size: 0.85rem;
+        white-space: nowrap;
+    }
+
+    .divider-or {
+        position: relative;
+        text-align: center;
+        margin: 1.5rem 0;
+    }
+
+    .divider-or::before {
+        content: '';
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: 50%;
+        height: 1px;
+        background: rgba(148, 163, 184, 0.2);
+    }
+
+    .divider-or span {
+        position: relative;
+        background: #1e293b;
+        padding: 0 1rem;
+        color: #94a3b8;
+        font-size: 0.85rem;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+    }
+
+    .manual-config-section {
+        padding: 1rem;
+        border-radius: 0.5rem;
+        background: rgba(15, 23, 42, 0.4);
+        border: 1px dashed rgba(148, 163, 184, 0.2);
+    }
+
+    .error-message {
+        margin-top: 1rem;
+        padding: 0.75rem 1rem;
+        border-radius: 0.5rem;
+        background: rgba(239, 68, 68, 0.1);
+        border: 1px solid rgba(239, 68, 68, 0.3);
+        color: #fca5a5;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        font-size: 0.9rem;
+    }
+
+    .success-message {
+        margin-top: 1rem;
+        padding: 0.75rem 1rem;
+        border-radius: 0.5rem;
+        background: rgba(16, 185, 129, 0.1);
+        border: 1px solid rgba(16, 185, 129, 0.3);
+        color: #6ee7b7;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        font-size: 0.9rem;
+    }
+
+    /* Upload Area */
+    .upload-area {
+        margin: 1.5rem 0;
+    }
+
+    .upload-area input[type="file"] {
+        display: none;
+    }
+
+    .upload-label {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 3rem 2rem;
+        border: 2px dashed rgba(148, 163, 184, 0.3);
+        border-radius: 1rem;
+        background: rgba(15, 23, 42, 0.6);
+        cursor: pointer;
+        transition: all 0.2s ease;
+    }
+
+    .upload-label:hover:not(.disabled) {
+        border-color: rgba(99, 102, 241, 0.5);
+        background: rgba(99, 102, 241, 0.05);
+    }
+
+    .upload-label.disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+    }
+
+    .upload-icon {
+        font-size: 3rem;
+        margin-bottom: 1rem;
+        opacity: 0.7;
+    }
+
+    .upload-text {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 0.5rem;
+        margin-bottom: 1rem;
+    }
+
+    .upload-text strong {
+        font-size: 1.1rem;
+        color: #e2e8f0;
+    }
+
+    .upload-text span {
+        font-size: 0.9rem;
+        color: #94a3b8;
+    }
+
+    .upload-hint {
+        font-size: 0.85rem;
+        color: #64748b;
+    }
+
+    .upload-progress {
+        margin-top: 1.5rem;
+    }
+
+    .progress-bar {
+        width: 100%;
+        height: 8px;
+        background: rgba(15, 23, 42, 0.8);
+        border-radius: 999px;
+        overflow: hidden;
+    }
+
+    .progress-fill {
+        height: 100%;
+        background: linear-gradient(90deg, #8b5cf6, #ec4899);
+        transition: width 0.3s ease;
+        border-radius: 999px;
+    }
+
+    .progress-text {
+        text-align: center;
+        margin-top: 0.5rem;
+        font-size: 0.9rem;
+        color: #94a3b8;
+    }
+</style>
+
+<script>
+    window.downloadFile = function (filename, base64Content) {
+        const link = document.createElement('a');
+        link.download = filename;
+        link.href = "data:application/gzip;base64," + base64Content;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    };
+
+    window.openGoogleOAuthPopup = function (url, dotNetHelper) {
+        const width = 600;
+        const height = 700;
+        const left = (screen.width / 2) - (width / 2);
+        const top = (screen.height / 2) - (height / 2);
+
+        const popup = window.open(
+            url,
+            'GoogleOAuth',
+            `width=${width},height=${height},left=${left},top=${top},toolbar=no,location=no,status=no,menubar=no,scrollbars=yes`
+        );
+
+        // Listen for messages from popup
+        const messageHandler = function (event) {
+            if (event.data && event.data.type === 'google_oauth_success') {
+                const tokens = event.data.tokens;
+
+                // Call back to Blazor with the refresh token
+                dotNetHelper.invokeMethodAsync('OnGoogleOAuthSuccess', tokens.refreshToken);
+
+                // Clean up
+                window.removeEventListener('message', messageHandler);
+            }
+        };
+
+        window.addEventListener('message', messageHandler);
+
+        // Check if popup was blocked
+        if (!popup || popup.closed || typeof popup.closed === 'undefined') {
+            dotNetHelper.invokeMethodAsync('OnGoogleOAuthError', 'Popup was blocked. Please allow popups for this site.');
+            window.removeEventListener('message', messageHandler);
+        }
+
+        // Monitor popup for closure
+        const checkClosed = setInterval(function () {
+            if (popup.closed) {
+                clearInterval(checkClosed);
+                window.removeEventListener('message', messageHandler);
+            }
+        }, 1000);
+    };
+</script>

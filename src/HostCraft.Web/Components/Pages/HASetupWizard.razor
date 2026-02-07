@@ -1,0 +1,1217 @@
+@page "/setup/ha"
+@rendermode InteractiveServer
+@using HostCraft.Core.Enums
+@inject HttpClient Http
+@inject NavigationManager Navigation
+@inject IJSRuntime JS
+@inject ILogger<HASetupWizard> Logger
+
+<PageTitle>High Availability Setup - HostCraft</PageTitle>
+
+<div class="page-container">
+    <div class="page-header">
+        <div>
+            <h1>🎯 High Availability Setup</h1>
+            <p class="page-subtitle">Set up a production-ready 3-manager Docker Swarm cluster</p>
+        </div>
+        <button class="btn btn-outline" @onclick="CancelWizard">
+            <span class="icon">✕</span> Exit Wizard
+        </button>
+    </div>
+
+    <!-- Step Progress Indicator -->
+    <div class="wizard-steps">
+        <div class="step @(currentStep >= 1 ? "active" : "") @(currentStep > 1 ? "completed" : "")">
+            <div class="step-number">@(currentStep > 1 ? "✓" : "1")</div>
+            <div class="step-label">Select Servers</div>
+        </div>
+        <div class="step-connector @(currentStep > 1 ? "completed" : "")"></div>
+        <div class="step @(currentStep >= 2 ? "active" : "") @(currentStep > 2 ? "completed" : "")">
+            <div class="step-number">@(currentStep > 2 ? "✓" : "2")</div>
+            <div class="step-label">Initialize Swarm</div>
+        </div>
+        <div class="step-connector @(currentStep > 2 ? "completed" : "")"></div>
+        <div class="step @(currentStep >= 3 ? "active" : "") @(currentStep > 3 ? "completed" : "")">
+            <div class="step-number">@(currentStep > 3 ? "✓" : "3")</div>
+            <div class="step-label">Join Managers</div>
+        </div>
+        <div class="step-connector @(currentStep > 3 ? "completed" : "")"></div>
+        <div class="step @(currentStep >= 4 ? "active" : "")">
+            <div class="step-number">4</div>
+            <div class="step-label">Deploy Services</div>
+        </div>
+    </div>
+
+    <!-- Cluster Status Summary -->
+    @if (swarmAlreadyInitialized || existingWorkerCount > 0)
+    {
+        <div class="card" style="background: rgba(99, 102, 241, 0.05); border: 1px solid rgba(99, 102, 241, 0.2); margin-bottom: var(--space-xl);">
+            <div class="card-header">
+                <h3 class="card-title" style="font-size: 1.125rem;">
+                    <span>📊</span> Current Cluster Status
+                </h3>
+            </div>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--space-lg);">
+                <div style="display: flex; align-items: center; gap: var(--space-md);">
+                    <div style="font-size: 2rem;">👑</div>
+                    <div>
+                        <div style="font-size: 1.5rem; font-weight: 700; color: var(--accent-warning);">@existingManagerCount</div>
+                        <div style="font-size: 0.875rem; color: var(--text-secondary); text-transform: uppercase;">Manager@(existingManagerCount != 1 ? "s" : "")</div>
+                    </div>
+                </div>
+                <div style="display: flex; align-items: center; gap: var(--space-md);">
+                    <div style="font-size: 2rem;">⚙️</div>
+                    <div>
+                        <div style="font-size: 1.5rem; font-weight: 700; color: var(--accent-info);">@existingWorkerCount</div>
+                        <div style="font-size: 0.875rem; color: var(--text-secondary); text-transform: uppercase;">Worker@(existingWorkerCount != 1 ? "s" : "")</div>
+                    </div>
+                </div>
+                <div style="display: flex; align-items: center; gap: var(--space-md);">
+                    <div style="font-size: 2rem;">💻</div>
+                    <div>
+                        <div style="font-size: 1.5rem; font-weight: 700; color: var(--text-muted);">@standaloneServerCount</div>
+                        <div style="font-size: 0.875rem; color: var(--text-secondary); text-transform: uppercase;">Standalone</div>
+                    </div>
+                </div>
+                <div style="display: flex; align-items: center; gap: var(--space-md);">
+                    <div style="font-size: 2rem;">@(managersNeeded == 0 ? "✅" : "⏳")</div>
+                    <div>
+                        <div style="font-size: 1.5rem; font-weight: 700; color: @(managersNeeded == 0 ? "var(--accent-success)" : "var(--accent-warning)");">@managersNeeded</div>
+                        <div style="font-size: 0.875rem; color: var(--text-secondary); text-transform: uppercase;">Needed for HA</div>
+                    </div>
+                </div>
+            </div>
+            @if (managersNeeded > 0)
+            {
+                <div style="margin-top: var(--space-lg); padding: var(--space-md); background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: var(--radius-md);">
+                    <strong>🎯 Goal:</strong> Add <strong>@managersNeeded more manager@(managersNeeded > 1 ? "s" : "")</strong> to reach 3-manager High Availability quorum
+                </div>
+            }
+        </div>
+    }
+
+    <!-- Error/Success Messages -->
+    @if (!string.IsNullOrEmpty(errorMessage))
+    {
+        <div class="alert alert-error">
+            <strong>@errorMessage</strong>
+        </div>
+    }
+
+    @if (!string.IsNullOrEmpty(successMessage))
+    {
+        <div class="alert alert-success">
+            <strong>@successMessage</strong>
+        </div>
+    }
+
+    @if (loading)
+    {
+        <div class="card">
+            <div class="loading-state">
+                <div class="spinner"></div>
+                <p>@loadingMessage</p>
+            </div>
+        </div>
+    }
+    else if (currentStep == 1)
+    {
+        <!-- Step 1: Select Servers -->
+        <div class="card">
+            <div class="card-header">
+                <h2 class="card-title">
+                    <span>1️⃣</span> Select Servers
+                </h2>
+                <span class="badge">Step 1 of 4</span>
+            </div>
+            @if (swarmAlreadyInitialized)
+            {
+                <p style="margin-bottom: var(--space-xl); color: var(--text-secondary);">
+                    ✅ Detected @existingManagerCount existing manager@(existingManagerCount > 1 ? "s" : "").
+                    Select <strong>@managersNeeded more server@(managersNeeded > 1 ? "s" : "")</strong> to add as managers for 3-manager HA quorum.
+                </p>
+            }
+            else
+            {
+                <p style="margin-bottom: var(--space-xl); color: var(--text-secondary);">Choose at least 3 servers to form your HA cluster. For best results, use servers in different locations.</p>
+            }
+
+            @if (allServers == null || !allServers.Any())
+            {
+                <div class="empty-state">
+                    <div class="empty-icon">🖥️</div>
+                    <h3>Configure Your Installation Server First</h3>
+                    <p>HostCraft is running on this server. Configure it as your first manager before adding more servers.</p>
+                    <div style="margin: 1.5rem 0;">
+                        <button class="btn btn-primary btn-lg" @onclick="ConfigureLocalhost" disabled="@isProcessing">
+                            @if (isProcessing)
+                            {
+                                <span class="spinner-sm"></span>
+                                <span>Configuring...</span>
+                            }
+                            else
+                            {
+                                <span class="icon">🖥️</span>
+                                <span>Configure This Server (Localhost)</span>
+                            }
+                        </button>
+                    </div>
+                    <p style="color: var(--text-secondary); font-size: 0.875rem;">After configuring localhost, come back here to add 2 more servers.</p>
+                </div>
+            }
+            else
+            {
+                <div class="servers-grid">
+                    @foreach (var server in allServers)
+                    {
+                        var isSelected = selectedServerIds.Contains(server.Id);
+                        var isWorker = server.Type == ServerType.SwarmWorker;
+                        var isExistingManager = existingManagers.Any(m => m.Id == server.Id);
+                        var canSelect = !isWorker; // Workers cannot be promoted to managers
+
+                        <div class="server-item @(isSelected ? "selected-server" : "") @(!canSelect ? "disabled-server" : "")"
+                             @onclick="@(() => ToggleServerSelection(server.Id, canSelect))"
+                             style="cursor: @(canSelect ? "pointer" : "not-allowed"); position: relative;">
+
+                            @if (isSelected)
+                            {
+                                <div style="position: absolute; top: 1rem; right: 1rem; width: 24px; height: 24px; background: var(--accent-success); border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 14px;">
+                                    ✓
+                                </div>
+                            }
+
+                            <div class="server-header">
+                                <h3>@server.Name</h3>
+                                <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                    <span class="server-type-badge @GetTypeBadgeClass(server.Type)">
+                                        @GetTypeIcon(server.Type) @server.Type
+                                    </span>
+                                    <span class="status-badge @GetStatusClass(server.Status)">
+                                        @GetStatusIcon(server.Status) @server.Status
+                                    </span>
+                                </div>
+                            </div>
+
+                            <div class="server-info">
+                                @if (!string.IsNullOrEmpty(server.ActualHostname))
+                                {
+                                    <div class="info-row">
+                                        <span class="label">Hostname:</span>
+                                        <span class="value">@server.ActualHostname</span>
+                                    </div>
+                                }
+                                <div class="info-row">
+                                    <span class="label">Host:</span>
+                                    <span class="value">@server.Host</span>
+                                </div>
+                                <div class="info-row">
+                                    <span class="label">Type:</span>
+                                    <span class="value">@GetTypeIcon(server.Type) @server.Type</span>
+                                </div>
+                                @if (isWorker)
+                                {
+                                    <div style="margin-top: var(--space-sm); padding: var(--space-sm); background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: var(--radius-sm);">
+                                        <div style="font-size: 0.875rem; color: var(--accent-warning); font-weight: 600;">⚠️ Worker Node</div>
+                                        <div style="font-size: 0.8125rem; color: var(--text-secondary); margin-top: 2px;">Cannot be promoted to manager in this wizard</div>
+                                    </div>
+                                }
+                                @if (isExistingManager)
+                                {
+                                    <div style="margin-top: var(--space-sm); padding: var(--space-sm); background: rgba(99, 102, 241, 0.1); border: 1px solid rgba(99, 102, 241, 0.3); border-radius: var(--radius-sm);">
+                                        <div style="font-size: 0.875rem; color: var(--accent-primary); font-weight: 600;">✅ Existing Manager</div>
+                                        <div style="font-size: 0.8125rem; color: var(--text-secondary); margin-top: 2px;">Already part of swarm quorum</div>
+                                    </div>
+                                }
+                            </div>
+                        </div>
+                    }
+                </div>
+
+                <div class="card" style="margin-top: var(--space-xl); background: rgba(99, 102, 241, 0.05); border: 1px solid rgba(99, 102, 241, 0.2);">
+                    <div style="display: flex; gap: var(--space-lg);">
+                        <div style="font-size: 1.5rem;">💡</div>
+                        <div style="flex: 1;">
+                            <strong style="display: block; margin-bottom: var(--space-sm); font-size: 1.125rem;">HA/DR Best Practices:</strong>
+                            <ul style="margin: 0; padding-left: 1.5rem; color: var(--text-secondary); line-height: 1.8;">
+                                <li><strong>Geographic Distribution:</strong> Place managers in different locations/datacenters/cloud regions for disaster recovery</li>
+                                <li><strong>Network Connectivity:</strong> Ensure low latency (&lt;10ms preferred) between manager nodes for Raft consensus</li>
+                                <li><strong>Odd Number of Managers:</strong> Always use 1, 3, 5, or 7 managers (odd numbers for quorum)</li>
+                                <li><strong>Resource Allocation:</strong> Managers need CPU for Raft - don't starve them of resources</li>
+                                @if (existingWorkerCount > 0)
+                                {
+                                    <li><strong>Worker Nodes:</strong> Your @existingWorkerCount worker@(existingWorkerCount > 1 ? "s" : "") will continue running workloads - managers handle orchestration</li>
+                                }
+                            </ul>
+                            @if (managersNeeded > 0)
+                            {
+                                <div style="margin-top: var(--space-md); padding: var(--space-md); background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: var(--radius-sm);">
+                                    <strong style="color: var(--accent-success);">💪 Why 3 Managers?</strong>
+                                    <div style="margin-top: 4px; font-size: 0.875rem; color: var(--text-secondary);">
+                                        With 3 managers, your cluster can survive 1 manager failure while maintaining quorum (2/3 majority). This is the minimum recommended for production HA.
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    </div>
+                </div>
+
+                <div style="margin-top: var(--space-xl); text-align: center;">
+                    <button class="btn btn-outline" @onclick="NavigateToAddServer">
+                        <span>➕</span> Add Another Server
+                    </button>
+                </div>
+            }
+
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-top: var(--space-2xl); padding-top: var(--space-2xl); border-top: 1px solid rgba(255, 255, 255, 0.1);">
+                <button class="btn btn-outline" @onclick="CancelWizard">Cancel</button>
+                <div style="display: flex; align-items: center; gap: var(--space-lg);">
+                    <span style="color: var(--text-secondary); font-weight: 600;">@selectedServerIds.Count / 3 servers selected</span>
+                    <button class="btn btn-primary" @onclick="NextStep" disabled="@(!CanProceedFromStep1())">
+                        @if (swarmAlreadyInitialized)
+                        {
+                            <span>Next: Join Managers →</span>
+                        }
+                        else
+                        {
+                            <span>Next: Initialize Swarm →</span>
+                        }
+                    </button>
+                </div>
+            </div>
+        </div>
+    }
+    else if (currentStep == 2)
+    {
+        <!-- Step 2: Initialize Swarm -->
+        <div class="card">
+            <div class="card-header">
+                <h2 class="card-title">
+                    <span>2️⃣</span> Initialize Swarm
+                </h2>
+                <span class="badge">Step 2 of 4</span>
+            </div>
+            <p style="margin-bottom: var(--space-xl); color: var(--text-secondary);">Choose which server will become the first manager and initialize the Docker Swarm cluster.</p>
+
+                @if (selectedServers == null || !selectedServers.Any())
+                {
+                    <div class="alert alert-error">
+                        Failed to load selected servers. Please go back and reselect.
+                    </div>
+                }
+                else
+                {
+                    <div class="manager-selection-grid">
+                        @foreach (var server in selectedServers)
+                        {
+                            var isSelected = firstManagerId == server.Id;
+                            var isRecommended = GetManagerRecommendation(server) != null;
+                            
+                            <div class="manager-selection-card @(isSelected ? "selected" : "") @(isRecommended ? "recommended" : "")" 
+                                 @onclick="@(() => SelectFirstManager(server.Id))">
+                                <input type="radio" name="firstManager" checked="@isSelected" />
+                                <div class="card-content">
+                                    <div class="card-header">
+                                        <h3>@server.Name</h3>
+                                        @if (isRecommended)
+                                        {
+                                            <span class="recommended-badge">⭐ Recommended</span>
+                                        }
+                                    </div>
+                                    <div class="card-info">
+                                        <div class="info-item">
+                                            <span class="label">Host:</span>
+                                            <span class="value">@server.Host</span>
+                                        </div>
+                                        <div class="info-item">
+                                            <span class="label">Status:</span>
+                                            <span class="value">@GetStatusIcon(server.Status) @server.Status</span>
+                                        </div>
+                                    </div>
+                                    @if (isRecommended)
+                                    {
+                                        <div class="recommendation-reason">
+                                            💡 @GetManagerRecommendation(server)
+                                        </div>
+                                    }
+                                </div>
+                            </div>
+                        }
+                    </div>
+
+                    @if (!string.IsNullOrEmpty(swarmInitResult))
+                    {
+                        <div class="alert alert-success">
+                            <strong>✅ Swarm Initialized Successfully!</strong>
+                            <p>@swarmInitResult</p>
+                        </div>
+                    }
+
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-top: var(--space-2xl); padding-top: var(--space-2xl); border-top: 1px solid rgba(255, 255, 255, 0.1);">
+                <button class="btn btn-outline" @onclick="PreviousStep" disabled="@isProcessing">← Back</button>
+                <div style="display: flex; align-items: center; gap: var(--space-lg);">
+                    @if (string.IsNullOrEmpty(swarmInitResult))
+                    {
+                        <button class="btn btn-primary" @onclick="InitializeSwarm" disabled="@(!CanProceedFromStep2() || isProcessing)">
+                            @if (isProcessing)
+                            {
+                                <span class="spinner-sm"></span>
+                                <span>Initializing...</span>
+                            }
+                            else
+                            {
+                                <span>Initialize Swarm</span>
+                            }
+                        </button>
+                    }
+                    else
+                    {
+                        <button class="btn btn-primary" @onclick="NextStep">
+                            Next: Join Managers →
+                        </button>
+                    }
+                </div>
+            </div>
+        }
+        </div>
+    }
+    else if (currentStep == 3)
+    {
+        <!-- Step 3: Join Managers -->
+        <div class="card">
+            <div class="card-header">
+                <h2 class="card-title">
+                    <span>3️⃣</span> Join Managers
+                </h2>
+                <span class="badge">Step 3 of 4</span>
+            </div>
+            <p style="margin-bottom: var(--space-xl); color: var(--text-secondary);">Join the remaining servers as manager nodes to establish 3-manager quorum.</p>
+
+                <div class="quorum-status">
+                    <div class="quorum-indicator @(managerJoinStatus.Count(s => s.Value == "success") >= 3 ? "healthy" : "")">
+                        <div class="quorum-icon">@(managerJoinStatus.Count(s => s.Value == "success") >= 3 ? "✅" : "⏳")</div>
+                        <div class="quorum-text">
+                            <strong>Quorum Status: @managerJoinStatus.Count(s => s.Value == "success") / 3 Managers</strong>
+                            @if (managerJoinStatus.Count(s => s.Value == "success") >= 3)
+                            {
+                                <p>Healthy - Can survive 1 failure</p>
+                            }
+                            else
+                            {
+                                <p>In progress...</p>
+                            }
+                        </div>
+                    </div>
+                </div>
+
+                <div class="manager-join-list">
+                    @foreach (var server in GetServersToJoin())
+                    {
+                        var status = managerJoinStatus.ContainsKey(server.Id) ? managerJoinStatus[server.Id] : "pending";
+                        var error = managerJoinErrors.ContainsKey(server.Id) ? managerJoinErrors[server.Id] : null;
+
+                        <div class="join-item @status">
+                            <div class="join-status-icon">
+                                @if (status == "success")
+                                {
+                                    <span class="success-icon">✅</span>
+                                }
+                                else if (status == "error")
+                                {
+                                    <span class="error-icon">❌</span>
+                                }
+                                else if (status == "joining")
+                                {
+                                    <span class="spinner-sm"></span>
+                                }
+                                else
+                                {
+                                    <span class="pending-icon">⏳</span>
+                                }
+                            </div>
+                            <div class="join-info">
+                                <div class="join-header">
+                                    <h3>@server.Name</h3>
+                                    <span class="join-status-badge @status">@GetJoinStatusText(status)</span>
+                                </div>
+                                <div class="join-details">
+                                    <span>@server.Host</span>
+                                    @if (status == "joining")
+                                    {
+                                        <span> • Joining as manager...</span>
+                                    }
+                                </div>
+                                @if (!string.IsNullOrEmpty(error))
+                                {
+                                    <div class="error-message">
+                                        ❌ @error
+                                    </div>
+                                }
+                            </div>
+                            @if (status == "error")
+                            {
+                                <button class="btn btn-outline btn-sm" @onclick="@(() => RetryJoinManager(server.Id))">
+                                    🔄 Retry
+                                </button>
+                            }
+                        </div>
+                    }
+                </div>
+
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-top: var(--space-2xl); padding-top: var(--space-2xl); border-top: 1px solid rgba(255, 255, 255, 0.1);">
+                <button class="btn btn-outline" @onclick="PreviousStep" disabled="@isProcessing">← Back</button>
+                <div style="display: flex; align-items: center; gap: var(--space-lg);">
+                    @if (!allManagersJoined)
+                    {
+                        <button class="btn btn-primary" @onclick="JoinAllManagers" disabled="@isProcessing">
+                            @if (isProcessing)
+                            {
+                                <span class="spinner-sm"></span>
+                                <span>Joining...</span>
+                            }
+                            else
+                            {
+                                <span>Join All Managers</span>
+                            }
+                        </button>
+                    }
+                    else
+                    {
+                        <button class="btn btn-primary" @onclick="NextStep">
+                            Next: Deploy Services →
+                        </button>
+                    }
+                </div>
+            </div>
+        </div>
+    }
+    else if (currentStep == 4)
+    {
+        <!-- Step 4: Deploy Services & Completion -->
+        <div class="card">
+            <div class="card-header">
+                <h2 class="card-title">
+                    <span>4️⃣</span> Deploy Services
+                </h2>
+                <span class="badge">Step 4 of 4</span>
+            </div>
+            <p style="margin-bottom: var(--space-xl); color: var(--text-secondary);">Deploy Traefik in High Availability mode and finalize the cluster setup.</p>
+
+                <div class="deployment-checklist">
+                    <div class="checklist-item @(quorumEstablished ? "completed" : "")">
+                        <span class="check-icon">@(quorumEstablished ? "✅" : "⏳")</span>
+                        <span class="check-label">3-Manager Quorum Established</span>
+                    </div>
+                    <div class="checklist-item @(traefikDeployed ? "completed" : traefikDeploying ? "in-progress" : "")">
+                        <span class="check-icon">
+                            @if (traefikDeployed)
+                            {
+                                <span>✅</span>
+                            }
+                            else if (traefikDeploying)
+                            {
+                                <span class="spinner-sm"></span>
+                            }
+                            else
+                            {
+                                <span>⏳</span>
+                            }
+                        </span>
+                        <span class="check-label">Traefik HA Deployed</span>
+                    </div>
+                    <div class="checklist-item @(servicesVerified ? "completed" : "")">
+                        <span class="check-icon">@(servicesVerified ? "✅" : "⏳")</span>
+                        <span class="check-label">Services Verified</span>
+                    </div>
+                </div>
+
+                @if (!setupComplete)
+                {
+                    <div style="margin-top: 2rem; text-align: center;">
+                        <button class="btn btn-primary btn-lg" @onclick="DeployServices" disabled="@isProcessing">
+                            @if (isProcessing)
+                            {
+                                <span class="spinner-sm"></span>
+                                <span>Deploying...</span>
+                            }
+                            else
+                            {
+                                <span>🚀 Deploy Services</span>
+                            }
+                        </button>
+                    </div>
+                }
+                else
+                {
+                    <div class="success-summary">
+                        <div class="success-icon">🎉</div>
+                        <h3>High Availability Setup Complete!</h3>
+                        <p>Your 3-manager Docker Swarm cluster is now operational and production-ready.</p>
+
+                        <div class="cluster-summary">
+                            <h4>Cluster Summary</h4>
+                            <div class="summary-grid">
+                                @foreach (var server in selectedServers ?? new List<ServerDto>())
+                                {
+                                    <div class="summary-card">
+                                        <div class="summary-header">
+                                            <span class="summary-icon">@(server.Id == firstManagerId ? "👑" : "🔷")</span>
+                                            <span class="summary-title">@server.Name</span>
+                                        </div>
+                                        <div class="summary-details">
+                                            <div>Role: @(server.Id == firstManagerId ? "Leader" : "Manager")</div>
+                                            <div>Host: @server.Host</div>
+                                            <div>Status: ✅ Ready</div>
+                                        </div>
+                                    </div>
+                                }
+                            </div>
+                        </div>
+
+                        <div style="display: flex; justify-content: center; gap: var(--space-lg); margin-top: var(--space-2xl); padding-top: var(--space-2xl); border-top: 1px solid rgba(255, 255, 255, 0.1);">
+                            <button class="btn btn-outline btn-lg" @onclick="@(() => Navigation.NavigateTo("/servers"))">
+                                View Servers
+                            </button>
+                            <button class="btn btn-primary btn-lg" @onclick="@(() => Navigation.NavigateTo("/ha/dashboard"))">
+                                View HA Dashboard
+                            </button>
+                        </div>
+                    </div>
+                }
+        </div>
+    }
+</div>
+
+@code {
+    // Navigation state
+    private int currentStep = 1;
+    private bool loading = false;
+    private bool isProcessing = false;
+    private string loadingMessage = "Loading...";
+    private string? errorMessage;
+    private string? successMessage;
+
+    // HA Detection
+    private int existingManagerCount = 0;
+    private int existingWorkerCount = 0;
+    private int standaloneServerCount = 0;
+    private bool swarmAlreadyInitialized = false;
+    private int managersNeeded = 0;
+    private List<ServerDto> existingManagers = new();
+    private List<ServerDto> existingWorkers = new();
+    private List<ServerDto> standaloneServers = new();
+
+    // Step 1: Server Selection
+    private List<ServerDto> allServers = new();
+    private List<int> selectedServerIds = new();
+    private List<ServerDto>? selectedServers;
+
+    // Step 2: Swarm Initialization
+    private int? firstManagerId;
+    private string? swarmInitResult;
+
+    // Step 3: Manager Joining
+    private Dictionary<int, string> managerJoinStatus = new(); // serverId -> "pending" | "joining" | "success" | "error"
+    private Dictionary<int, string> managerJoinErrors = new(); // serverId -> error message
+    private bool allManagersJoined = false;
+
+    // Step 4: Service Deployment
+    private bool quorumEstablished = false;
+    private bool traefikDeploying = false;
+    private bool traefikDeployed = false;
+    private bool servicesVerified = false;
+    private bool setupComplete = false;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadServers();
+        await DetectHAStatus();
+    }
+
+    private async Task LoadServers()
+    {
+        loading = true;
+        loadingMessage = "Loading servers...";
+        errorMessage = null;
+
+        try
+        {
+            allServers = await Http.GetFromJsonAsync<List<ServerDto>>("api/servers") ?? new();
+            
+            // Check if any servers are already in wizard mode
+            var wizardServers = allServers.Where(s => s.WizardStep.HasValue).ToList();
+            if (wizardServers.Any())
+            {
+                var maxStep = wizardServers.Max(s => s.WizardStep ?? 0);
+                var shouldResume = await JS.InvokeAsync<bool>("confirm", 
+                    $"You have an incomplete HA setup from step {maxStep}. Would you like to resume?");
+                
+                if (shouldResume)
+                {
+                    // Resume wizard state
+                    selectedServerIds = wizardServers.Select(s => s.Id).ToList();
+                    currentStep = maxStep;
+                    
+                    if (currentStep >= 2)
+                    {
+                        await LoadSelectedServers();
+                        firstManagerId = wizardServers.FirstOrDefault(s => s.IsSwarmManager)?.Id;
+                        if (firstManagerId.HasValue)
+                        {
+                            swarmInitResult = "Swarm already initialized (resumed)";
+                        }
+                    }
+                    
+                    if (currentStep >= 3)
+                    {
+                        // Initialize join status for resumed state
+                        foreach (var server in selectedServers ?? new List<ServerDto>())
+                        {
+                            if (server.Id != firstManagerId && server.IsSwarmManager)
+                            {
+                                managerJoinStatus[server.Id] = "success";
+                            }
+                        }
+                        allManagersJoined = managerJoinStatus.Count(s => s.Value == "success") >= 2;
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading servers");
+            errorMessage = $"❌ Failed to load servers: {ex.Message}";
+        }
+        finally
+        {
+            loading = false;
+        }
+    }
+
+    private async Task DetectHAStatus()
+    {
+        try
+        {
+            // Categorize all servers by type
+            existingManagers = allServers.Where(s => s.Type == ServerType.SwarmManager).ToList();
+            existingWorkers = allServers.Where(s => s.Type == ServerType.SwarmWorker).ToList();
+            standaloneServers = allServers.Where(s => s.Type == ServerType.Standalone).ToList();
+
+            existingManagerCount = existingManagers.Count;
+            existingWorkerCount = existingWorkers.Count;
+            standaloneServerCount = standaloneServers.Count;
+            swarmAlreadyInitialized = existingManagers.Any();
+
+            Logger.LogInformation(
+                "Cluster status: {Managers} managers, {Workers} workers, {Standalone} standalone servers",
+                existingManagerCount, existingWorkerCount, standaloneServerCount);
+
+            // Calculate how many more managers are needed for HA (target: 3)
+            managersNeeded = Math.Max(0, 3 - existingManagerCount);
+
+            // Adaptive wizard flow based on current state
+            if (existingManagerCount >= 3)
+            {
+                // Already HA! Redirect to dashboard
+                Logger.LogInformation("3+ managers detected - redirecting to HA Dashboard");
+                var workerInfo = existingWorkerCount > 0 ? $" and {existingWorkerCount} worker{(existingWorkerCount > 1 ? "s" : "")}" : "";
+                await JS.InvokeVoidAsync("alert",
+                    $"✅ You already have a {existingManagerCount}-manager HA cluster{workerInfo}!\n\nRedirecting to HA Dashboard...");
+                Navigation.NavigateTo("/ha/dashboard");
+                return;
+            }
+            else if (existingManagerCount == 2)
+            {
+                // Need 1 more manager - skip to step 3, auto-select existing managers
+                currentStep = 3;
+                selectedServerIds = existingManagers.Select(m => m.Id).ToList();
+                firstManagerId = existingManagers.FirstOrDefault()?.Id;
+                swarmInitResult = "Swarm already initialized";
+
+                var workerInfo = existingWorkerCount > 0
+                    ? $" You also have {existingWorkerCount} worker node{(existingWorkerCount > 1 ? "s" : "")} in the cluster."
+                    : "";
+                successMessage = $"✅ Detected 2 existing managers!{workerInfo} Just need to add 1 more manager for HA quorum.";
+            }
+            else if (existingManagerCount == 1)
+            {
+                // Need 2 more managers - skip swarm init (step 2), start at step 1 but mark step 2 complete
+                var manager = existingManagers.First();
+                firstManagerId = manager.Id;
+                selectedServerIds.Add(manager.Id);
+                swarmInitResult = "Swarm already initialized";
+
+                var workerInfo = existingWorkerCount > 0
+                    ? $" and {existingWorkerCount} worker{(existingWorkerCount > 1 ? "s" : "")}"
+                    : "";
+                successMessage = $"✅ Detected existing swarm with 1 manager{workerInfo} on '{manager.Name}'. Select 2 more servers to add as managers for HA.";
+                // Stay on step 1, but will skip step 2
+            }
+            else
+            {
+                // Fresh install - full wizard (no changes needed)
+                Logger.LogInformation("No existing managers - starting fresh HA setup");
+
+                if (existingWorkerCount > 0)
+                {
+                    errorMessage = $"⚠️ Found {existingWorkerCount} worker node{(existingWorkerCount > 1 ? "s" : "")} but no managers. Workers cannot be promoted to managers in this wizard.";
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error detecting HA status");
+        }
+    }
+
+    private async Task LoadSelectedServers()
+    {
+        selectedServers = allServers.Where(s => selectedServerIds.Contains(s.Id)).ToList();
+        // Refresh server details to get latest swarm status
+        foreach (var server in selectedServers)
+        {
+            try
+            {
+                var updated = await Http.GetFromJsonAsync<ServerDto>($"api/servers/{server.Id}");
+                if (updated != null)
+                {
+                    var index = selectedServers.IndexOf(server);
+                    selectedServers[index] = updated;
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(ex, "Failed to refresh server {ServerId}", server.Id);
+            }
+        }
+    }
+
+    // Step 1 Methods
+    private void ToggleServerSelection(int serverId, bool canSelect)
+    {
+        if (!canSelect) return;
+
+        if (selectedServerIds.Contains(serverId))
+        {
+            selectedServerIds.Remove(serverId);
+        }
+        else
+        {
+            selectedServerIds.Add(serverId);
+        }
+        
+        errorMessage = null;
+        StateHasChanged();
+    }
+
+    private bool CanProceedFromStep1()
+    {
+        if (swarmAlreadyInitialized)
+        {
+            // If swarm exists, we need enough servers to reach 3 total managers
+            // Selected servers includes existing managers
+            int totalManagers = selectedServerIds.Count;
+            return totalManagers >= 3;
+        }
+        else
+        {
+            // Fresh install - need exactly 3 servers
+            return selectedServerIds.Count >= 3;
+        }
+    }
+
+    private void NavigateToAddServer()
+    {
+        Navigation.NavigateTo("/servers/new?returnUrl=/setup/ha");
+    }
+
+    private async Task ConfigureLocalhost()
+    {
+        isProcessing = true;
+        errorMessage = null;
+        loadingMessage = "Configuring localhost...";
+
+        try
+        {
+            var response = await Http.PostAsync("api/servers/configure-localhost", null);
+            
+            if (response.IsSuccessStatusCode)
+            {
+                successMessage = "✅ Localhost configured successfully!";
+                await LoadServers(); // Reload server list
+            }
+            else
+            {
+                var error = await response.Content.ReadAsStringAsync();
+                errorMessage = $"❌ Failed to configure localhost: {error}";
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error configuring localhost");
+            errorMessage = $"❌ Error: {ex.Message}";
+        }
+        finally
+        {
+            isProcessing = false;
+        }
+    }
+
+    // Step 2 Methods
+    private void SelectFirstManager(int serverId)
+    {
+        firstManagerId = serverId;
+        errorMessage = null;
+    }
+
+    private bool CanProceedFromStep2()
+    {
+        return firstManagerId.HasValue;
+    }
+
+    private string? GetManagerRecommendation(ServerDto server)
+    {
+        // Recommend based on server characteristics
+        if (server.Host.Contains("localhost") || server.Host == "127.0.0.1")
+        {
+            return null; // Don't recommend localhost
+        }
+        
+        if (server.Status == ServerStatus.Online)
+        {
+            return "Online and accessible";
+        }
+        
+        return null;
+    }
+
+    private async Task InitializeSwarm()
+    {
+        if (!firstManagerId.HasValue) return;
+
+        isProcessing = true;
+        errorMessage = null;
+        successMessage = null;
+        loadingMessage = "Initializing Docker Swarm...";
+
+        try
+        {
+            var response = await Http.PostAsync($"api/servers/{firstManagerId}/swarm/init", null);
+            
+            if (response.IsSuccessStatusCode)
+            {
+                swarmInitResult = "Swarm initialized successfully on " + 
+                    allServers.First(s => s.Id == firstManagerId).Name;
+                
+                // Update server wizard step
+                await UpdateWizardStep(firstManagerId.Value, 2);
+                
+                // Refresh selected servers to get swarm info
+                await LoadSelectedServers();
+                
+                successMessage = "✅ Swarm initialized successfully!";
+            }
+            else
+            {
+                var error = await response.Content.ReadAsStringAsync();
+                errorMessage = $"❌ Failed to initialize swarm: {error}";
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error initializing swarm");
+            errorMessage = $"❌ Error: {ex.Message}";
+        }
+        finally
+        {
+            isProcessing = false;
+        }
+    }
+
+    // Step 3 Methods
+    private List<ServerDto> GetServersToJoin()
+    {
+        return (selectedServers ?? new List<ServerDto>())
+            .Where(s => s.Id != firstManagerId)
+            .ToList();
+    }
+
+    private string GetJoinStatusText(string status)
+    {
+        return status switch
+        {
+            "success" => "Joined",
+            "error" => "Failed",
+            "joining" => "Joining...",
+            _ => "Pending"
+        };
+    }
+
+    private async Task JoinAllManagers()
+    {
+        if (!firstManagerId.HasValue) return;
+
+        isProcessing = true;
+        errorMessage = null;
+
+        var serversToJoin = GetServersToJoin();
+        
+        foreach (var server in serversToJoin)
+        {
+            if (managerJoinStatus.ContainsKey(server.Id) && managerJoinStatus[server.Id] == "success")
+            {
+                continue; // Skip already joined servers
+            }
+
+            await JoinServerAsManager(server.Id);
+        }
+
+        allManagersJoined = managerJoinStatus.Count(s => s.Value == "success") >= 2;
+        isProcessing = false;
+
+        if (allManagersJoined)
+        {
+            successMessage = "✅ All managers joined successfully! 3-manager quorum established.";
+        }
+    }
+
+    private async Task RetryJoinManager(int serverId)
+    {
+        managerJoinErrors.Remove(serverId);
+        await JoinServerAsManager(serverId);
+        
+        allManagersJoined = managerJoinStatus.Count(s => s.Value == "success") >= 2;
+        StateHasChanged();
+    }
+
+    private async Task JoinServerAsManager(int serverId)
+    {
+        managerJoinStatus[serverId] = "joining";
+        StateHasChanged();
+
+        try
+        {
+            var response = await Http.PostAsJsonAsync(
+                $"api/servers/{firstManagerId}/swarm/join-manager",
+                new { ServerIdToJoin = serverId }
+            );
+
+            if (response.IsSuccessStatusCode)
+            {
+                managerJoinStatus[serverId] = "success";
+                await UpdateWizardStep(serverId, 3);
+                await LoadSelectedServers(); // Refresh to get updated swarm status
+            }
+            else
+            {
+                var error = await response.Content.ReadAsStringAsync();
+                managerJoinStatus[serverId] = "error";
+                managerJoinErrors[serverId] = error;
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error joining server {ServerId} as manager", serverId);
+            managerJoinStatus[serverId] = "error";
+            managerJoinErrors[serverId] = ex.Message;
+        }
+
+        StateHasChanged();
+    }
+
+    // Step 4 Methods
+    private async Task DeployServices()
+    {
+        if (!firstManagerId.HasValue) return;
+
+        isProcessing = true;
+        errorMessage = null;
+        loadingMessage = "Deploying services...";
+
+        try
+        {
+            // Verify quorum
+            quorumEstablished = true;
+            StateHasChanged();
+            await Task.Delay(500);
+
+            // Deploy Traefik in HA mode
+            traefikDeploying = true;
+            StateHasChanged();
+
+            // Note: This assumes ProxyService will detect swarm and deploy as service
+            // You may need to add a specific endpoint for this
+            var traefikResponse = await Http.PostAsync($"api/servers/{firstManagerId}/proxy/deploy", null);
+
+            if (traefikResponse.IsSuccessStatusCode)
+            {
+                traefikDeployed = true;
+                traefikDeploying = false;
+                StateHasChanged();
+                await Task.Delay(500);
+            }
+            else
+            {
+                traefikDeploying = false;
+                errorMessage = "❌ Failed to deploy Traefik. Please check logs.";
+                isProcessing = false;
+                return;
+            }
+
+            // Verify services
+            servicesVerified = true;
+            StateHasChanged();
+            await Task.Delay(500);
+
+            // Mark wizard as complete
+            foreach (var serverId in selectedServerIds)
+            {
+                await CompleteWizardForServer(serverId);
+            }
+
+            setupComplete = true;
+            successMessage = "🎉 High Availability setup complete!";
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error deploying services");
+            errorMessage = $"❌ Error: {ex.Message}";
+        }
+        finally
+        {
+            isProcessing = false;
+        }
+    }
+
+    // Wizard Navigation
+    private async Task NextStep()
+    {
+        errorMessage = null;
+        successMessage = null;
+
+        if (currentStep == 1 && selectedServerIds.Any())
+        {
+            await LoadSelectedServers();
+
+            // Save wizard progress
+            foreach (var serverId in selectedServerIds)
+            {
+                await UpdateWizardStep(serverId, 1);
+            }
+        }
+
+        currentStep++;
+
+        // Skip step 2 (Swarm Init) if swarm already initialized
+        if (currentStep == 2 && swarmAlreadyInitialized)
+        {
+            Logger.LogInformation("Skipping step 2 - swarm already initialized");
+            currentStep = 3; // Jump to step 3 (Join Managers)
+        }
+
+        StateHasChanged();
+    }
+
+    private void PreviousStep()
+    {
+        if (currentStep > 1)
+        {
+            currentStep--;
+            errorMessage = null;
+            successMessage = null;
+            StateHasChanged();
+        }
+    }
+
+    private async Task CancelWizard()
+    {
+        var confirmed = await JS.InvokeAsync<bool>("confirm", 
+            "Are you sure you want to exit the HA setup? Progress will be saved.");
+        
+        if (confirmed)
+        {
+            Navigation.NavigateTo("/servers");
+        }
+    }
+
+    // Helper Methods
+    private async Task UpdateWizardStep(int serverId, int step)
+    {
+        try
+        {
+            await Http.PatchAsJsonAsync($"api/servers/{serverId}/wizard-step", new { WizardStep = step });
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to update wizard step for server {ServerId}", serverId);
+        }
+    }
+
+    private async Task CompleteWizardForServer(int serverId)
+    {
+        try
+        {
+            await Http.PostAsync($"api/servers/{serverId}/wizard-complete", null);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to mark wizard complete for server {ServerId}", serverId);
+        }
+    }
+
+    private string GetStatusClass(ServerStatus status)
+    {
+        return status switch
+        {
+            ServerStatus.Online => "status-online",
+            ServerStatus.Offline => "status-offline",
+            ServerStatus.Error => "status-error",
+            _ => "status-unknown"
+        };
+    }
+
+    private string GetStatusIcon(ServerStatus status)
+    {
+        return status switch
+        {
+            ServerStatus.Online => "✅",
+            ServerStatus.Offline => "⚫",
+            ServerStatus.Error => "❌",
+            _ => "❓"
+        };
+    }
+
+    private string GetTypeIcon(ServerType type)
+    {
+        return type switch
+        {
+            ServerType.SwarmManager => "👑",
+            ServerType.SwarmWorker => "⚙️",
+            _ => "💻"
+        };
+    }
+
+    private string GetTypeBadgeClass(ServerType type)
+    {
+        return type switch
+        {
+            ServerType.SwarmManager => "badge-manager",
+            ServerType.SwarmWorker => "badge-worker",
+            _ => "badge-standalone"
+        };
+    }
+
+    // DTO Classes
+    public class ServerDto
+    {
+        public int Id { get; set; }
+        public string Name { get; set; } = "";
+        public string Host { get; set; } = "";
+        public ServerType Type { get; set; }
+        public ServerStatus Status { get; set; }
+        public string? ActualHostname { get; set; }
+        public bool IsSwarmManager { get; set; }
+        public bool IsSwarmWorker { get; set; }
+        public bool IsSwarm => IsSwarmManager || IsSwarmWorker;
+        public int? WizardStep { get; set; }
+    }
+}

@@ -1,0 +1,346 @@
+@page "/deployments/global"
+@rendermode InteractiveServer
+@using HostCraft.Core.Enums
+@inject HttpClient Http
+@inject NavigationManager Navigation
+@inject ILogger<GlobalDeployments> Logger
+
+<div class="page-container">
+    <div class="page-header">
+        <div class="header-left">
+            <h1>🌐 Global Deployments</h1>
+            <p class="subtitle">Standalone containers that live outside of project workspaces</p>
+        </div>
+        <div class="header-actions">
+            <button class="btn btn-secondary" @onclick="RefreshGlobalDeployments" disabled="@isLoading">
+                🔄 Refresh
+            </button>
+            <button class="btn btn-primary" @onclick="NavigateToNewApplication" disabled="@(!CanDeploy)">
+                ➕ Deploy Single Container
+            </button>
+        </div>
+    </div>
+
+    <div class="info-banner">
+        <div>
+            <strong>System Workspace:</strong> @SystemProjects.GlobalDeployments
+            <p>Perfect for tooling containers, platform services, or any workload that should not belong to a specific project.</p>
+        </div>
+        <div class="badge">HA-ready</div>
+    </div>
+
+    @if (isLoading || globalProject == null)
+    {
+        <div class="loading-spinner">
+            <div class="spinner"></div>
+            <p>Loading deployments...</p>
+        </div>
+    }
+    else if (applications == null || !applications.Any())
+    {
+        <div class="empty-state">
+            <div class="empty-icon">📦</div>
+            <h2>No Global Deployments</h2>
+            <p>Launch a single-container workload to bootstrap platform services or utilities.</p>
+            <button class="btn btn-primary" @onclick="NavigateToNewApplication">
+                🚀 Launch Container
+            </button>
+        </div>
+    }
+    else
+    {
+        <div class="apps-grid">
+            @foreach (var app in applications)
+            {
+                <div class="app-card @GetStatusClass(app.Status)">
+                    <div class="app-header">
+                        <div class="app-name">
+                            <h3>@app.Name</h3>
+                            <span class="project-pill">Global</span>
+                        </div>
+                        <span class="status-badge @GetStatusClass(app.Status)">@GetStatusIcon(app.Status)</span>
+                    </div>
+
+                    <div class="app-info">
+                        <div class="info-item">
+                            <span class="label">Image</span>
+                            <span class="value">@app.DockerImage</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="label">Server</span>
+                            <span class="value">@app.ServerName</span>
+                        </div>
+                        @if (!string.IsNullOrEmpty(app.ServiceId))
+                        {
+                            <div class="info-item">
+                                <span class="label">Mode</span>
+                                <span class="value">🐝 Swarm Service</span>
+                            </div>
+                            @if (app.SwarmReplicas.HasValue)
+                            {
+                                <div class="info-item">
+                                    <span class="label">Replicas</span>
+                                    <span class="value">@app.RunningReplicas/@app.SwarmReplicas</span>
+                                </div>
+                            }
+                        }
+                        else if (!string.IsNullOrEmpty(app.ContainerId))
+                        {
+                            <div class="info-item">
+                                <span class="label">Mode</span>
+                                <span class="value">📦 Container</span>
+                            </div>
+                        }
+                        @if (app.LastDeployedAt.HasValue)
+                        {
+                            <div class="info-item">
+                                <span class="label">Deployed</span>
+                                <span class="value">@app.LastDeployedAt.Value.ToString("MM/dd HH:mm")</span>
+                            </div>
+                        }
+                    </div>
+
+                    <div class="app-actions">
+                        <button class="btn-icon" @onclick="() => ViewDetails(app.Id)" title="View Details">
+                            👁️
+                        </button>
+                        @if (!string.IsNullOrEmpty(app.ContainerId) || !string.IsNullOrEmpty(app.ServiceId))
+                        {
+                            <button class="btn-icon" @onclick="() => ViewLogs(app.Id)" title="Logs">
+                                📄
+                            </button>
+                        }
+                        @if (!string.IsNullOrEmpty(app.ServiceId) && app.SwarmReplicas.HasValue)
+                        {
+                            <button class="btn-icon" @onclick="() => ScaleDown(app.Id)" title="Scale Down" disabled="@(app.SwarmReplicas <= 1)">
+                                ➖
+                            </button>
+                            <button class="btn-icon" @onclick="() => ScaleUp(app.Id)" title="Scale Up">
+                                ➕
+                            </button>
+                        }
+                        <button class="btn-icon btn-primary" @onclick="() => Redeploy(app.Id)" title="Redeploy">
+                            🔄
+                        </button>
+                        <button class="btn-icon btn-danger" @onclick="() => DeleteApplication(app.Id)" title="Delete">
+                            🗑️
+                        </button>
+                    </div>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    private ProjectDto? globalProject;
+    private List<ApplicationDto>? applications;
+    private bool isLoading = true;
+
+    private bool CanDeploy => globalProject != null;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadData();
+    }
+
+    private async Task LoadData()
+    {
+        isLoading = true;
+        StateHasChanged();
+
+        try
+        {
+            globalProject = await Http.GetFromJsonAsync<ProjectDto>("api/projects/system/global");
+            if (globalProject != null)
+            {
+                applications = await Http.GetFromJsonAsync<List<ApplicationDto>>($"api/applications?projectId={globalProject.Id}");
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading global deployments");
+        }
+        finally
+        {
+            isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task RefreshGlobalDeployments()
+    {
+        await LoadData();
+    }
+
+    private void NavigateToNewApplication()
+    {
+        if (globalProject == null)
+        {
+            return;
+        }
+
+        Navigation.NavigateTo($"/projects/{globalProject.Id}/applications/new");
+    }
+
+    private void ViewDetails(int appId)
+    {
+        Navigation.NavigateTo($"/applications/{appId}");
+    }
+
+    private void ViewLogs(int appId)
+    {
+        Navigation.NavigateTo($"/applications/{appId}/logs");
+    }
+
+    private async Task Redeploy(int appId)
+    {
+        try
+        {
+            var response = await Http.PostAsync($"api/applications/{appId}/deploy", null);
+            if (response.IsSuccessStatusCode)
+            {
+                await LoadData();
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error redeploying application");
+        }
+    }
+
+    private async Task DeleteApplication(int appId)
+    {
+        try
+        {
+            var response = await Http.DeleteAsync($"api/applications/{appId}");
+            if (response.IsSuccessStatusCode)
+            {
+                await LoadData();
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error deleting application");
+        }
+    }
+
+    private async Task ScaleUp(int appId)
+    {
+        try
+        {
+            var app = applications?.FirstOrDefault(a => a.Id == appId);
+            if (app != null)
+            {
+                var newReplicas = (app.SwarmReplicas ?? 1) + 1;
+                var response = await Http.PostAsync($"api/applications/{appId}/scale?replicas={newReplicas}", null);
+                if (response.IsSuccessStatusCode)
+                {
+                    await LoadData();
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error scaling up application");
+        }
+    }
+
+    private async Task ScaleDown(int appId)
+    {
+        try
+        {
+            var app = applications?.FirstOrDefault(a => a.Id == appId);
+            if (app != null && app.SwarmReplicas > 1)
+            {
+                var newReplicas = app.SwarmReplicas.Value - 1;
+                var response = await Http.PostAsync($"api/applications/{appId}/scale?replicas={newReplicas}", null);
+                if (response.IsSuccessStatusCode)
+                {
+                    await LoadData();
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error scaling down application");
+        }
+    }
+
+    private string GetStatusClass(DeploymentStatus status) => status switch
+    {
+        DeploymentStatus.Running => "status-running",
+        DeploymentStatus.Success => "status-success",
+        DeploymentStatus.Failed => "status-failed",
+        DeploymentStatus.Queued => "status-queued",
+        DeploymentStatus.Cancelled => "status-cancelled",
+        _ => "status-unknown"
+    };
+
+    private string GetStatusIcon(DeploymentStatus status) => status switch
+    {
+        DeploymentStatus.Running => "🔄",
+        DeploymentStatus.Success => "✅",
+        DeploymentStatus.Failed => "❌",
+        DeploymentStatus.Queued => "⏳",
+        DeploymentStatus.Cancelled => "🚫",
+        _ => "⚪"
+    };
+
+    private record ProjectDto(int Id, string Name, string? Description, int ApplicationCount, DateTime CreatedAt);
+
+    private record ApplicationDto(
+        int Id,
+        string Name,
+        string? Description,
+        int ServerId,
+        string ServerName,
+        int ProjectId,
+        string ProjectName,
+        string? DockerImage,
+        bool UsePrivateRegistry,
+        string? RegistryServer,
+        string? RegistryUsername,
+        bool HasRegistryPassword,
+        DeploymentStatus Status,
+        string? ContainerId,
+        string? ServiceId,
+        DateTime? LastDeployedAt,
+        DateTime CreatedAt,
+        int? SwarmReplicas,
+        int? RunningReplicas
+    );
+}
+
+<style>
+    .info-banner {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 1rem 1.5rem;
+        margin-bottom: 1.5rem;
+        border-radius: 0.75rem;
+        border: 1px solid rgba(148, 163, 184, 0.3);
+        background: rgba(15, 23, 42, 0.6);
+        gap: 1rem;
+    }
+
+    .info-banner .badge {
+        padding: 0.35rem 0.85rem;
+        border-radius: 999px;
+        background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+        color: #fff;
+        font-size: 0.8rem;
+        font-weight: 600;
+    }
+
+    .project-pill {
+        background: rgba(14, 165, 233, 0.2);
+        border: 1px solid rgba(14, 165, 233, 0.5);
+        color: #7dd3fc;
+        font-size: 0.75rem;
+        padding: 0.2rem 0.5rem;
+        border-radius: 999px;
+        margin-left: 0.5rem;
+    }
+</style>

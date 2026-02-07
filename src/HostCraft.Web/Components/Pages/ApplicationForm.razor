@@ -1,0 +1,1519 @@
+@page "/applications/new"
+@page "/applications/{Id:int}/edit"
+@page "/projects/{ProjectId:int}/applications/new"
+@rendermode InteractiveServer
+@using System.Net.Http.Json
+@using System.Text
+@using HostCraft.Core.Enums
+@inject HttpClient Http
+@inject NavigationManager Navigation
+@inject ILogger<ApplicationForm> Logger
+@inject IJSRuntime Js
+
+<div class="page-container">
+    <div class="page-header">
+        <div class="header-left">
+            @if (ProjectId.HasValue && !IsEditMode)
+            {
+                <div class="breadcrumb">
+                    <a href="/projects">Projects</a>
+                    <span>/</span>
+                    <a href="/projects/@ProjectId">@GetProjectName()</a>
+                    <span>/</span>
+                    <span>New Application</span>
+                </div>
+            }
+            <h1>@(IsEditMode ? "✏️ Edit Application" : "➕ Deploy New Application")</h1>
+            <p class="subtitle">@(IsEditMode ? "Update application configuration" : "Configure and deploy your application")</p>
+        </div>
+    </div>
+
+    @if (IsEditMode)
+    {
+        @* Tab Navigation - Only show in edit mode *@
+        <div class="tabs-container">
+            <button class="tab" @onclick="NavigateToDetails">General</button>
+            <button class="tab active">Edit</button>
+            <button class="tab" @onclick="NavigateToDomains">Domains</button>
+            <button class="tab" @onclick="NavigateToAdvanced">Advanced</button>
+            <button class="tab" @onclick="NavigateToLogs">Logs</button>
+        </div>
+    }
+
+    <div class="form-container">
+        @if (isLoading)
+        {
+            <div class="loading-spinner">
+                <div class="spinner"></div>
+                <p>Loading...</p>
+            </div>
+        }
+        else
+        {
+            <div class="form-card">
+                <div class="form-section">
+                    <h2>Basic Information</h2>
+                    
+                    <div class="form-group">
+                        <label for="name">Application Name *</label>
+                        <input type="text" id="name" @bind="model.Name" class="form-control" placeholder="my-awesome-app" />
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="description">Description</label>
+                        <textarea id="description" @bind="model.Description" class="form-control" rows="3" placeholder="What does this application do?"></textarea>
+                    </div>
+                    
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="server">Server *</label>
+                            <select id="server" @bind="model.ServerId" @bind:after="OnServerChanged" class="form-control">
+                                <option value="0">-- Select Server --</option>
+                                @if (servers != null)
+                                {
+                                    foreach (var server in servers)
+                                    {
+                                        <option value="@server.Id">@server.Name @(server.IsSwarm ? "🐝 Swarm" : "🐳 Standalone")</option>
+                                    }
+                                }
+                            </select>
+                        </div>
+
+                        @if (ProjectId.HasValue)
+                        {
+                            <div class="form-group">
+                                <label>Project</label>
+                                <div class="form-control-static">
+                                    @GetProjectName()
+                                </div>
+                            </div>
+                        }
+                    </div>
+                </div>
+                
+                <div class="form-section">
+                    <h2>Source Configuration</h2>
+
+                    <div class="form-group">
+                        <label>Deployment Source</label>
+                        <div class="source-type-selector">
+                            <button type="button" class="source-option @(model.SourceType == "DockerImage" ? "active" : "")"
+                                    @onclick="@(() => SetSourceType("DockerImage"))">
+                                <span class="source-icon">🐳</span>
+                                <span class="source-label">Docker Image</span>
+                                <span class="source-desc">Deploy from Docker Hub or registry</span>
+                            </button>
+                            <button type="button" class="source-option @(model.SourceType == "Git" ? "active" : "")"
+                                    @onclick="@(() => SetSourceType("Git"))">
+                                <span class="source-icon">🐙</span>
+                                <span class="source-label">Git Repository</span>
+                                <span class="source-desc">Build and deploy from source code</span>
+                            </button>
+                            <button type="button" class="source-option @(model.SourceType == "DockerCompose" ? "active" : "")"
+                                    @onclick="@(() => SetSourceType("DockerCompose"))">
+                                <span class="source-icon">📚</span>
+                                <span class="source-label">Docker Compose</span>
+                                <span class="source-desc">Deploy multi-container stack</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    @if (model.SourceType == "DockerImage")
+                    {
+                        <div class="form-group">
+                            <label for="image">Docker Image *</label>
+                            <input type="text" id="image" @bind="model.Image" class="form-control" placeholder="nginx:latest" />
+                            <small class="form-hint">Format: image:tag or registry/image:tag</small>
+                        </div>
+
+                        <div class="form-group inline-row">
+                            <div>
+                                <label class="checkbox">
+                                    <input type="checkbox" @bind="model.UsePrivateRegistry" />
+                                    <span>Pull from private registry</span>
+                                </label>
+                                <small class="form-hint">Send registry credentials to Swarm so every node can pull the image.</small>
+                            </div>
+                        </div>
+
+                        @if (model.UsePrivateRegistry)
+                        {
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="registryServer">Registry Server *</label>
+                                    <input id="registryServer" type="text" class="form-control" @bind="model.RegistryServer" placeholder="registry.example.com" />
+                                    <small class="form-hint">Host only (no protocol). Example: ghcr.io, registry.example.com</small>
+                                </div>
+                                <div class="form-group">
+                                    <label for="registryUsername">Username</label>
+                                    <input id="registryUsername" type="text" class="form-control" @bind="model.RegistryUsername" placeholder="username or token id" />
+                                </div>
+                                <div class="form-group">
+                                    <label for="registryPassword">Password / Token</label>
+                                    <input id="registryPassword" type="password" class="form-control" @bind="model.RegistryPassword" placeholder="••••••" />
+                                    @if (hasExistingRegistryPassword && string.IsNullOrWhiteSpace(model.RegistryPassword))
+                                    {
+                                        <small class="form-hint">A credential is stored. Leave blank to keep it, or enter a new secret to replace.</small>
+                                    }
+                                    else
+                                    {
+                                        <small class="form-hint">Will be stored encrypted and sent only to the Swarm manager.</small>
+                                    }
+                                </div>
+                            </div>
+                        }
+                    }
+                    else if (model.SourceType == "Git")
+                    {
+                        <div class="form-group">
+                            <label for="gitProvider">Git Provider *</label>
+                            <select id="gitProvider" @bind="selectedGitProviderId" @bind:after="OnGitProviderChanged" class="form-control">
+                                <option value="0">-- Select Git Provider --</option>
+                                @if (gitProviders != null)
+                                {
+                                    foreach (var provider in gitProviders)
+                                    {
+                                        <option value="@provider.Id">@GetProviderIcon(provider.Type) @provider.Name (@@provider.Username)</option>
+                                    }
+                                }
+                            </select>
+                            @if (gitProviders == null || !gitProviders.Any())
+                            {
+                                <small class="form-hint">
+                                    <a href="/settings/git-providers">Connect a Git provider</a> to deploy from repositories
+                                </small>
+                            }
+                        </div>
+
+                        @if (selectedGitProviderId > 0)
+                        {
+                            <div class="form-group">
+                                <label for="repository">Repository *</label>
+                                @if (loadingRepos)
+                                {
+                                    <div class="loading-inline"><span class="spinner-sm"></span> Loading repositories...</div>
+                                }
+                                else
+                                {
+                                    <select id="repository" @bind="model.GitRepository" @bind:after="OnRepositoryChanged" class="form-control">
+                                        <option value="">-- Select Repository --</option>
+                                        @if (gitRepositories != null)
+                                        {
+                                            foreach (var repo in gitRepositories)
+                                            {
+                                                <option value="@repo.FullName">@repo.FullName @(repo.IsPrivate ? "🔒" : "")</option>
+                                            }
+                                        }
+                                    </select>
+                                }
+                            </div>
+
+                            @if (!string.IsNullOrEmpty(model.GitRepository))
+                            {
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label for="branch">Branch *</label>
+                                        @if (loadingBranches)
+                                        {
+                                            <div class="loading-inline"><span class="spinner-sm"></span> Loading branches...</div>
+                                        }
+                                        else
+                                        {
+                                            <select id="branch" @bind="model.GitBranch" class="form-control">
+                                                @if (gitBranches != null)
+                                                {
+                                                    foreach (var branch in gitBranches)
+                                                    {
+                                                        <option value="@branch">@branch</option>
+                                                    }
+                                                }
+                                            </select>
+                                        }
+                                    </div>
+
+                                    <div class="form-group">
+                                        <label for="buildPath">Dockerfile Path</label>
+                                        <input type="text" id="buildPath" @bind="model.DockerfilePath" class="form-control" placeholder="Dockerfile" />
+                                        <small class="form-hint">Path to Dockerfile (default: Dockerfile)</small>
+                                    </div>
+                                </div>
+
+                                <div class="form-group">
+                                    <label for="buildContext">Build Context</label>
+                                    <input type="text" id="buildContext" @bind="model.BuildContext" class="form-control" placeholder="." />
+                                    <small class="form-hint">Docker build context directory relative to repo root (default: .)</small>
+                                </div>
+
+                                <div class="form-group">
+                                    <label for="buildTarget">Build Target (Multi-Stage)</label>
+                                    <input type="text" id="buildTarget" @bind="model.DockerBuildTarget" class="form-control" placeholder="production" />
+                                    <small class="form-hint">Target stage for multi-stage Dockerfiles (leave empty to build all stages)</small>
+                                </div>
+
+                                <div class="form-group">
+                                    <label for="buildArgs">Build Arguments</label>
+                                    <input type="text" id="buildArgs" @bind="model.BuildArgs" class="form-control" placeholder="NODE_ENV=production,VERSION=1.0" />
+                                    <small class="form-hint">Build-time variables (format: KEY1=VALUE1,KEY2=VALUE2)</small>
+                                </div>
+
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label class="checkbox-label">
+                                            <input type="checkbox" @bind="model.CloneSubmodules" class="form-checkbox" />
+                                            <span>📦 Clone Submodules</span>
+                                        </label>
+                                        <small class="form-hint">Recursively clone Git submodules</small>
+                                    </div>
+
+                                    <div class="form-group">
+                                        <label class="checkbox-label">
+                                            <input type="checkbox" @bind="model.EnableGitLfs" class="form-checkbox" />
+                                            <span>📁 Enable Git LFS</span>
+                                        </label>
+                                        <small class="form-hint">Pull large files via Git LFS</small>
+                                    </div>
+                                </div>
+
+                                <div class="form-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" @bind="model.AutoDeployOnPush" class="form-checkbox" />
+                                        <span>🔄 Auto-deploy on push</span>
+                                    </label>
+                                    <small class="form-hint">Automatically deploy when new commits are pushed to the selected branch</small>
+                                </div>
+
+                                <div class="form-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" @bind="model.EnablePreviewDeployments" class="form-checkbox" />
+                                        <span>🔍 Enable Preview Deployments</span>
+                                    </label>
+                                    <small class="form-hint">Automatically deploy pull requests for testing</small>
+                                </div>
+
+                                @if (model.EnablePreviewDeployments)
+                                {
+                                    <div class="form-group" style="margin-left: 1.5rem; border-left: 2px solid #6366f1; padding-left: 1rem;">
+                                        <label for="previewUrlTemplate">Preview URL Template</label>
+                                        <input type="text" id="previewUrlTemplate" @bind="model.PreviewUrlTemplate" class="form-control" placeholder="{{pr_id}}.preview.example.com" />
+                                        <small class="form-hint">Supports: @("{{pr_id}}, {{branch}}, {{commit}}, {{app_name}}")</small>
+                                    </div>
+                                }
+                            }
+                        }
+                    }
+                    else if (model.SourceType == "DockerCompose")
+                    {
+                        @if (!selectedServerIsSwarm)
+                        {
+                            <div class="alert alert-warning">
+                                ⚠️ Docker Compose deployments require a Swarm manager server. Please select a Swarm-enabled server above.
+                            </div>
+                        }
+
+                        <div class="form-group">
+                            <label for="composeFile">Docker Compose YAML *</label>
+                            <textarea id="composeFile" @bind="model.ComposeFile" class="form-control code-editor" rows="15" placeholder="version: '3.8'&#10;services:&#10;  web:&#10;    image: nginx:latest&#10;    ports:&#10;      - 80:80"></textarea>
+                            <small class="form-hint">Paste your docker-compose.yml content here</small>
+                        </div>
+
+                        @if (!string.IsNullOrEmpty(model.ComposeFile))
+                        {
+                            <div class="form-actions" style="margin-bottom: 1rem;">
+                                <button type="button" class="btn btn-secondary" @onclick="ValidateCompose" disabled="@isValidatingCompose">
+                                    @(isValidatingCompose ? "⏳ Validating..." : "✅ Validate YAML")
+                                </button>
+                            </div>
+
+                            @if (composeValidationResult != null)
+                            {
+                                @if (composeValidationResult.IsValid)
+                                {
+                                    <div class="alert alert-success">
+                                        <strong>✅ Valid Docker Compose file</strong>
+                                        <ul style="margin: 0.5rem 0 0 1.5rem;">
+                                            <li>@composeValidationResult.ServiceCount service(s) detected</li>
+                                            @if (composeValidationResult.RequiredVariables.Any())
+                                            {
+                                                <li>@composeValidationResult.RequiredVariables.Count environment variable(s) required</li>
+                                            }
+                                        </ul>
+                                    </div>
+                                }
+                                else
+                                {
+                                    <div class="alert alert-danger">
+                                        <strong>❌ Validation failed</strong>
+                                        <ul style="margin: 0.5rem 0 0 1.5rem;">
+                                            @foreach (var error in composeValidationResult.Errors)
+                                            {
+                                                <li>@error</li>
+                                            }
+                                        </ul>
+                                    </div>
+                                }
+                            }
+
+                            @if (composeValidationResult?.RequiredVariables.Any() == true)
+                            {
+                                <div class="form-group">
+                                    <label>Environment Variables (@composeValidationResult.RequiredVariables.Count detected)</label>
+                                    <small class="form-hint">These variables will be substituted when deploying the stack</small>
+
+                                    @foreach (var varName in composeValidationResult.RequiredVariables)
+                                    {
+                                        var existingVar = model.ComposeEnvironmentVariables.FirstOrDefault(v => v.Key == varName);
+                                        if (existingVar == null)
+                                        {
+                                            existingVar = new ComposeEnvVarModel { Key = varName };
+                                            model.ComposeEnvironmentVariables.Add(existingVar);
+                                        }
+
+                                        <div class="env-var-row" style="display: flex; gap: 0.5rem; margin-bottom: 0.5rem; align-items: start;">
+                                            <input type="text" value="@varName" class="form-control" readonly style="flex: 0 0 200px; background: #2a2a2a;" />
+                                            <input type="text" @bind="existingVar.Value" class="form-control" placeholder="value" style="flex: 1;" />
+                                            <label class="checkbox-label" style="margin: 0.5rem 0;">
+                                                <input type="checkbox" @bind="existingVar.IsSecret" class="form-checkbox" />
+                                                <span>🔒 Secret</span>
+                                            </label>
+                                        </div>
+                                    }
+                                </div>
+                            }
+                        }
+                    }
+                </div>
+
+                <div class="form-section">
+                    <h2>Container Configuration</h2>
+
+                    <div class="form-group">
+                        <label>Port Mapping</label>
+                        
+                        @if (selectedServerIsSwarm && !string.IsNullOrEmpty(model.Domain))
+                        {
+                            <div class="alert alert-info" style="background: rgba(99, 102, 241, 0.1); border: 1px solid rgba(99, 102, 241, 0.3); padding: 1rem; border-radius: 6px; margin-bottom: 1rem;">
+                                <strong>🐝 Swarm + Traefik Routing Active</strong>
+                                <p style="margin: 0.5rem 0 0 0; font-size: 0.9rem;">
+                                    ✅ Traefik routes domain traffic to your container<br/>
+                                    ✅ Just specify what port your app listens on internally
+                                </p>
+                            </div>
+                            
+                            @* Simple container port input for Traefik routing *@
+                            @if (portMappings.Count > 0)
+                            {
+                                <div style="display: flex; align-items: center; gap: 0.75rem; margin-bottom: 1rem;">
+                                    <div style="flex: 0 0 200px;">
+                                        <label style="display: block; font-size: 0.875rem; color: #a3a3a3; margin-bottom: 0.25rem;">Container Port</label>
+                                        <input type="number" 
+                                               @bind="portMappings[0].ContainerPort" 
+                                               placeholder="e.g., 8080, 3000, 80" 
+                                               class="form-control" 
+                                               style="text-align: center; font-size: 1.1rem; font-weight: 600;"
+                                               min="1" 
+                                               max="65535"
+                                               required />
+                                    </div>
+                                    <div style="flex: 0 0 100px;">
+                                        <label style="display: block; font-size: 0.875rem; color: #a3a3a3; margin-bottom: 0.25rem;">Protocol</label>
+                                        <select @bind="portMappings[0].Protocol" class="form-control">
+                                            <option value="tcp">TCP</option>
+                                            <option value="udp">UDP</option>
+                                        </select>
+                                    </div>
+                                </div>
+                            }
+                            else
+                            {
+                                <button type="button" class="btn btn-secondary" @onclick="AddPortMapping">
+                                    + Set Container Port
+                                </button>
+                            }
+                        }
+                        else if (selectedServerIsSwarm)
+                        {
+                            <small class="form-hint" style="margin-bottom: 0.75rem; display: block;">
+                                🐝 <strong>Swarm Mode:</strong> Leave empty if using domain routing. Add ports only for direct host access.
+                            </small>
+                        }
+                        else
+                        {
+                            <small class="form-hint" style="margin-bottom: 0.75rem; display: block;">
+                                🐳 <strong>Standalone Mode:</strong> Map container ports to host ports (like docker -p host:container)
+                            </small>
+                        }
+
+                        @if (!(selectedServerIsSwarm && !string.IsNullOrEmpty(model.Domain)))
+                        {
+                            @foreach (var (portMapping, index) in portMappings.Select((p, i) => (p, i)))
+                            {
+                                <div class="port-mapping-row">
+                                    <div class="port-input-group">
+                                        <input type="number" @bind="portMapping.HostPort" placeholder="8080" class="form-control port-input" />
+                                        <span class="port-label">Host</span>
+                                    </div>
+                                    <span class="port-separator">:</span>
+                                    <div class="port-input-group">
+                                        <input type="number" @bind="portMapping.ContainerPort" placeholder="80" class="form-control port-input" />
+                                        <span class="port-label">Container</span>
+                                    </div>
+                                    <select @bind="portMapping.Protocol" class="form-control protocol-select">
+                                        <option value="tcp">TCP</option>
+                                        <option value="udp">UDP</option>
+                                    </select>
+                                    <button type="button" class="btn-icon btn-danger" @onclick="() => RemovePortMapping(index)" title="Remove">X</button>
+                                </div>
+                            }
+
+                            <button type="button" class="btn btn-secondary" @onclick="AddPortMapping">
+                                + Add Port
+                            </button>
+                        }
+                    </div>
+
+                    @if (selectedServerIsSwarm)
+                    {
+                        <div class="form-group">
+                            <label for="replicas">Replicas</label>
+                            <input type="number" id="replicas" @bind="model.Replicas" class="form-control" min="1" max="10" style="max-width: 150px;" />
+                            <small class="form-hint">Number of container instances</small>
+                        </div>
+                    }
+                </div>
+                
+                <div class="form-section">
+                    <h2>Environment Variables</h2>
+                    <p class="form-hint">Add environment variables for your application</p>
+
+                    <div class="info-box" style="background: linear-gradient(135deg, rgba(79, 70, 229, 0.14), rgba(14, 165, 233, 0.08)); border: 1px solid rgba(99, 102, 241, 0.45); padding: 0.95rem 1.1rem; border-radius: 10px; margin-bottom: 0.85rem; color: #e2e8f0; box-shadow: 0 14px 30px rgba(0, 0, 0, 0.22);">
+                        @{
+                            var projectNetwork = $"{GetProjectName()}-network";
+                            var normalizedName = NormalizeResourceName(model.Name);
+                            var portText = model.Port.HasValue && model.Port > 0 ? model.Port.Value.ToString() : "&lt;container-port&gt;";
+                            var internalUrl = $"http://{normalizedName}:{portText}";
+                        }
+                        <strong>Project network:</strong> Apps in this project share <code>@projectNetwork</code> for HA traffic. Your app will be reachable by peers at <code>@internalUrl</code> once you set the container port. Copy after you set the port: <button type="button" class="btn btn-icon copy-pill" style="vertical-align: text-bottom;" @onclick="async () => await CopyPreviewAsync(internalUrl)">📋</button>
+                    </div>
+                    
+                    @foreach (var (key, index) in envVars.Select((kv, i) => (kv, i)))
+                    {
+                        <div class="env-var-row">
+                            <input type="text" @bind="key.Key" placeholder="KEY" class="form-control env-key" />
+                            <span class="env-separator">=</span>
+                            <input type="text" @bind="key.Value" placeholder="value" class="form-control env-value" />
+                            <button type="button" class="btn-icon btn-danger" @onclick="() => RemoveEnvVar(index)">🗑️</button>
+                        </div>
+                    }
+                    
+                    <button type="button" class="btn btn-secondary" @onclick="AddEnvVar">
+                        ➕ Add Variable
+                    </button>
+                </div>
+                
+                <div class="form-section">
+                    <h2>Network Configuration</h2>
+                    <p class="form-hint">Docker networks to connect (optional)</p>
+                    
+                    @foreach (var (network, index) in networks.Select((n, i) => (n, i)))
+                    {
+                        <div class="network-row">
+                            <input type="text" @bind="networks[index]" placeholder="network-name" class="form-control" />
+                            <button type="button" class="btn-icon btn-danger" @onclick="() => RemoveNetwork(index)">🗑️</button>
+                        </div>
+                    }
+                    
+                    <button type="button" class="btn btn-secondary" @onclick="AddNetwork">
+                        ➕ Add Network
+                    </button>
+                </div>
+                
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" @onclick="Cancel">Cancel</button>
+                    <button type="button" class="btn btn-primary" @onclick="Deploy" disabled="@isSubmitting">
+                        @if (isSubmitting)
+                        {
+                            <span>@(IsEditMode ? "🔄 Saving..." : "🔄 Deploying...")</span>
+                        }
+                        else
+                        {
+                            <span>@(IsEditMode ? "💾 Save Changes" : "🚀 Deploy Application")</span>
+                        }
+                    </button>
+                </div>
+                
+                @if (!string.IsNullOrEmpty(errorMessage))
+                {
+                    <div class="alert alert-danger">
+                        ⚠️ @errorMessage
+                    </div>
+                }
+            </div>
+        }
+    </div>
+</div>
+
+@if (showCreateProjectModal)
+{
+    <div class="modal-backdrop" @onclick="HideCreateProject">
+        <div class="modal-dialog" @onclick:stopPropagation="true">
+            <div class="modal-header">
+                <h3>Create New Project</h3>
+                <button type="button" class="btn-close" @onclick="HideCreateProject">✕</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="newProjectName">Project Name *</label>
+                    <input type="text" id="newProjectName" @bind="newProjectName" class="form-control" placeholder="my-project" autofocus />
+                </div>
+                <div class="form-group">
+                    <label for="newProjectDescription">Description</label>
+                    <textarea id="newProjectDescription" @bind="newProjectDescription" class="form-control" rows="3" placeholder="What is this project for?"></textarea>
+                </div>
+                @if (!string.IsNullOrEmpty(projectErrorMessage))
+                {
+                    <div class="alert alert-danger">
+                        ⚠️ @projectErrorMessage
+                    </div>
+                }
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" @onclick="HideCreateProject">Cancel</button>
+                <button type="button" class="btn btn-primary" @onclick="CreateProject" disabled="@isCreatingProject">
+                    @if (isCreatingProject)
+                    {
+                        <span>Creating...</span>
+                    }
+                    else
+                    {
+                        <span>Create Project</span>
+                    }
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter]
+    public int? Id { get; set; }
+
+    [Parameter]
+    public int? ProjectId { get; set; }
+
+    private bool IsEditMode => Id.HasValue;
+    private bool isLoading = true;
+    private bool isSubmitting = false;
+    private string? errorMessage;
+    private bool selectedServerIsSwarm = false;
+    
+    private List<ServerDto>? servers;
+    private List<ProjectDto>? projects;
+    private List<GitProviderDto>? gitProviders;
+    private List<GitRepositoryDto>? gitRepositories;
+    private List<string>? gitBranches;
+    private int selectedGitProviderId;
+    private bool loadingRepos;
+    private bool loadingBranches;
+    private bool isValidatingCompose;
+    private ComposeValidationResultDto? composeValidationResult;
+
+    private void NavigateToDetails()
+    {
+        if (Id.HasValue)
+            Navigation.NavigateTo($"/applications/{Id.Value}");
+    }
+
+    private void NavigateToDomains()
+    {
+        if (Id.HasValue)
+            Navigation.NavigateTo($"/applications/{Id.Value}/domains");
+    }
+
+    private void NavigateToAdvanced()
+    {
+        if (Id.HasValue)
+            Navigation.NavigateTo($"/applications/{Id.Value}#traefik-advanced");
+    }
+
+    private void NavigateToLogs()
+    {
+        if (Id.HasValue)
+            Navigation.NavigateTo($"/applications/{Id.Value}/logs");
+    }
+
+    private bool showCreateProjectModal = false;
+    private bool isCreatingProject = false;
+    private string newProjectName = "";
+    private string newProjectDescription = "";
+    private string? projectErrorMessage;
+    
+    private ApplicationFormModel model = new();
+    private List<EnvVar> envVars = new();
+    private List<string> networks = new();
+    private List<PortMapping> portMappings = new();
+    private bool hasExistingRegistryPassword;
+    
+    protected override async Task OnInitializedAsync()
+    {
+        // Redirect to projects page if accessing /applications/new without project context
+        if (!IsEditMode && !ProjectId.HasValue)
+        {
+            Navigation.NavigateTo("/projects");
+            return;
+        }
+
+        await LoadData();
+        isLoading = false;
+    }
+    
+    private async Task LoadData()
+    {
+        try
+        {
+            // Load servers, projects, and git providers in parallel
+            var serversTask = Http.GetFromJsonAsync<List<ServerDto>>("api/applications/servers/0");
+            var projectsTask = Http.GetFromJsonAsync<List<ProjectDto>>("api/applications/projects");
+            var gitProvidersTask = Http.GetFromJsonAsync<List<GitProviderDto>>("api/gitproviders");
+
+            await Task.WhenAll(serversTask, projectsTask, gitProvidersTask);
+
+            servers = serversTask.Result;
+            projects = projectsTask.Result;
+            gitProviders = gitProvidersTask.Result?.Where(p => p.IsActive).ToList();
+
+            // Pre-select project if coming from project context
+            if (ProjectId.HasValue && !IsEditMode)
+            {
+                model.ProjectId = ProjectId.Value;
+            }
+
+            if (IsEditMode && Id.HasValue)
+            {
+                // Load existing application
+                var app = await Http.GetFromJsonAsync<ApplicationWithDeploymentsDto>($"api/applications/{Id.Value}");
+                if (app != null)
+                {
+                    model = new ApplicationFormModel
+                    {
+                        Name = app.Name,
+                        Description = app.Description,
+                        ServerId = app.ServerId,
+                        ProjectId = app.ProjectId,
+                        SourceType = app.SourceType.ToString(),
+                        Image = app.DockerImage ?? "",
+                        GitProviderId = app.GitProviderId,
+                        GitRepository = app.GitRepository,
+                        GitBranch = app.GitBranch ?? "main",
+                        DockerfilePath = app.Dockerfile,
+                        BuildContext = app.BuildContext ?? ".",
+                        DockerBuildTarget = app.DockerBuildTarget,
+                        BuildArgs = app.BuildArgs,
+                        CloneSubmodules = app.CloneSubmodules,
+                        EnableGitLfs = app.EnableGitLfs,
+                        AutoDeployOnPush = app.AutoDeployOnPush,
+                        EnablePreviewDeployments = app.EnablePreviewDeployments,
+                        PreviewUrlTemplate = app.PreviewUrlTemplate,
+                        Port = app.Port,
+                        Replicas = app.Replicas,
+                        Domain = app.Domain,
+                        AdditionalDomains = app.AdditionalDomains,
+                        EnableHttps = app.EnableHttps,
+                        ForceHttps = app.ForceHttps,
+                        LetsEncryptEmail = app.LetsEncryptEmail,
+                        UsePrivateRegistry = app.UsePrivateRegistry,
+                        RegistryServer = app.RegistryServer,
+                        RegistryUsername = app.RegistryUsername,
+                        RegistryPassword = string.Empty
+                    };
+
+                    hasExistingRegistryPassword = app.HasRegistryPassword;
+
+                    if (app.EnvironmentVariables != null)
+                    {
+                        envVars = app.EnvironmentVariables.Select(kv => new EnvVar { Key = kv.Key, Value = kv.Value }).ToList();
+                    }
+
+                    // Load Git provider and repos if Git source
+                    if (app.SourceType == ApplicationSourceType.Git && app.GitProviderId.HasValue)
+                    {
+                        selectedGitProviderId = app.GitProviderId.Value;
+
+                        // Load repositories
+                        try
+                        {
+                            gitRepositories = await Http.GetFromJsonAsync<List<GitRepositoryDto>>($"api/gitproviders/{selectedGitProviderId}/repositories");
+
+                            // Load branches if repository is set
+                            if (!string.IsNullOrEmpty(app.GitRepository))
+                            {
+                                var repoParts = app.GitRepository.Split('/');
+                                var owner = repoParts.Length > 1 ? repoParts[0] : app.GitOwner ?? "";
+                                var repo = repoParts.Length > 1 ? repoParts[1] : app.GitRepoName ?? "";
+                                gitBranches = await Http.GetFromJsonAsync<List<string>>($"api/gitproviders/{selectedGitProviderId}/repositories/{owner}/{repo}/branches");
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            Logger.LogError(ex, "Error loading Git data");
+                        }
+                    }
+
+                    UpdateServerSwarmStatus();
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading data");
+            errorMessage = "Failed to load data";
+        }
+    }
+    
+    private void OnServerChanged()
+    {
+        UpdateServerSwarmStatus();
+    }
+    
+    private void UpdateServerSwarmStatus()
+    {
+        selectedServerIsSwarm = servers?.FirstOrDefault(s => s.Id == model.ServerId)?.IsSwarm ?? false;
+        if (!selectedServerIsSwarm)
+        {
+            model.Replicas = 1;
+        }
+    }
+    
+    private void AddEnvVar()
+    {
+        envVars.Add(new EnvVar());
+    }
+    
+    private void RemoveEnvVar(int index)
+    {
+        envVars.RemoveAt(index);
+    }
+    
+    private void AddNetwork()
+    {
+        networks.Add("");
+    }
+
+    private void RemoveNetwork(int index)
+    {
+        networks.RemoveAt(index);
+    }
+
+    private void AddPortMapping()
+    {
+        portMappings.Add(new PortMapping());
+    }
+
+    private void RemovePortMapping(int index)
+    {
+        portMappings.RemoveAt(index);
+    }
+
+    private void ClearPortMappings()
+    {
+        portMappings.Clear();
+    }
+
+    private void OnDomainChanged()
+    {
+        // Trigger UI refresh to show/hide port mapping guidance
+        StateHasChanged();
+    }
+
+    private void SetSourceType(string type)
+    {
+        model.SourceType = type;
+        if (type == "DockerImage")
+        {
+            // Clear Git-related fields
+            selectedGitProviderId = 0;
+            model.GitProviderId = null;
+            model.GitRepository = null;
+            model.GitBranch = null;
+            model.DockerfilePath = null;
+            gitRepositories = null;
+            gitBranches = null;
+        }
+        else
+        {
+            // Clear Docker image field
+            model.Image = "";
+            model.UsePrivateRegistry = false;
+            model.RegistryServer = null;
+            model.RegistryUsername = null;
+            model.RegistryPassword = null;
+            hasExistingRegistryPassword = false;
+        }
+    }
+
+    private async Task OnGitProviderChanged()
+    {
+        model.GitProviderId = selectedGitProviderId > 0 ? selectedGitProviderId : null;
+        model.GitRepository = null;
+        model.GitBranch = null;
+        gitRepositories = null;
+        gitBranches = null;
+
+        if (selectedGitProviderId > 0)
+        {
+            loadingRepos = true;
+            StateHasChanged();
+
+            try
+            {
+                gitRepositories = await Http.GetFromJsonAsync<List<GitRepositoryDto>>($"api/gitproviders/{selectedGitProviderId}/repositories");
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Error loading repositories");
+            }
+            finally
+            {
+                loadingRepos = false;
+                StateHasChanged();
+            }
+        }
+    }
+
+    private async Task OnRepositoryChanged()
+    {
+        gitBranches = null;
+        model.GitBranch = null;
+
+        if (!string.IsNullOrEmpty(model.GitRepository) && selectedGitProviderId > 0)
+        {
+            loadingBranches = true;
+            StateHasChanged();
+
+            try
+            {
+                // Repository is in "owner/repo" format, split it for the API
+                var repoParts = model.GitRepository.Split('/');
+                var owner = repoParts.Length > 1 ? repoParts[0] : model.GitRepository;
+                var repo = repoParts.Length > 1 ? repoParts[1] : model.GitRepository;
+                gitBranches = await Http.GetFromJsonAsync<List<string>>($"api/gitproviders/{selectedGitProviderId}/repositories/{owner}/{repo}/branches");
+
+                // Auto-select first branch (usually main/master)
+                if (gitBranches?.Any() == true)
+                {
+                    model.GitBranch = gitBranches.First();
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Error loading branches");
+            }
+            finally
+            {
+                loadingBranches = false;
+                StateHasChanged();
+            }
+        }
+    }
+
+    private string GetProviderIcon(string type)
+    {
+        return type.ToLowerInvariant() switch
+        {
+            "github" => "🐙",
+            "gitlab" => "🦊",
+            "bitbucket" => "🪣",
+            "gitea" => "🍵",
+            _ => "📦"
+        };
+    }
+
+    private async Task Deploy()
+    {
+        errorMessage = null;
+        
+        // Validation
+        if (string.IsNullOrWhiteSpace(model.Name))
+        {
+            errorMessage = "Application name is required";
+            return;
+        }
+        
+        if (model.ServerId == 0)
+        {
+            errorMessage = "Please select a server";
+            return;
+        }
+        
+        if (model.ProjectId == 0)
+        {
+            errorMessage = "Please select a project";
+            return;
+        }
+
+        // Source-specific validation
+        if (model.SourceType == "DockerImage")
+        {
+            if (string.IsNullOrWhiteSpace(model.Image))
+            {
+                errorMessage = "Docker image is required";
+                return;
+            }
+        }
+        else if (model.SourceType == "Git")
+        {
+            if (selectedGitProviderId == 0)
+            {
+                errorMessage = "Please select a Git provider";
+                return;
+            }
+            if (string.IsNullOrWhiteSpace(model.GitRepository))
+            {
+                errorMessage = "Please select a repository";
+                return;
+            }
+            if (string.IsNullOrWhiteSpace(model.GitBranch))
+            {
+                errorMessage = "Please select a branch";
+                return;
+            }
+        }
+        else if (model.SourceType == "DockerCompose")
+        {
+            if (string.IsNullOrWhiteSpace(model.ComposeFile))
+            {
+                errorMessage = "Docker Compose file is required";
+                return;
+            }
+            
+            if (!selectedServerIsSwarm)
+            {
+                errorMessage = "Docker Compose deployments require a Swarm manager server";
+                return;
+            }
+        }
+
+        isSubmitting = true;
+        StateHasChanged();
+        
+        try
+        {
+            // Validate HTTPS email if HTTPS is enabled
+            if (model.EnableHttps && !string.IsNullOrWhiteSpace(model.Domain) && string.IsNullOrWhiteSpace(model.LetsEncryptEmail))
+            {
+                errorMessage = "Let's Encrypt email is required when HTTPS is enabled";
+                isSubmitting = false;
+                return;
+            }
+            
+            HttpResponseMessage response;
+
+            if (IsEditMode && Id.HasValue)
+            {
+                // Update existing application
+                var registryPassword = string.IsNullOrWhiteSpace(model.RegistryPassword)
+                    ? null
+                    : model.RegistryPassword;
+
+                var updateRequest = new UpdateApplicationRequest
+                {
+                    Name = model.Name,
+                    Description = model.Description,
+                    Port = model.Port,
+                    Replicas = model.Replicas,
+                    Domain = model.Domain,
+                    AdditionalDomains = model.AdditionalDomains,
+                    EnableHttps = model.EnableHttps,
+                    ForceHttps = model.ForceHttps,
+                    LetsEncryptEmail = model.LetsEncryptEmail,
+                    DockerImage = model.SourceType == "DockerImage" ? model.Image : null,
+                    Dockerfile = model.DockerfilePath,
+                    BuildContext = model.BuildContext,
+                    DockerBuildTarget = model.DockerBuildTarget,
+                    BuildArgs = model.BuildArgs,
+                    UsePrivateRegistry = model.UsePrivateRegistry,
+                    RegistryServer = string.IsNullOrWhiteSpace(model.RegistryServer) ? null : model.RegistryServer,
+                    RegistryUsername = string.IsNullOrWhiteSpace(model.RegistryUsername) ? null : model.RegistryUsername,
+                    RegistryPassword = registryPassword,
+                    GitRepository = model.GitRepository,
+                    GitBranch = model.GitBranch,
+                    GitProviderId = model.GitProviderId,
+                    AutoDeployOnPush = model.AutoDeployOnPush,
+                    EnvironmentVariables = envVars.Where(e => !string.IsNullOrWhiteSpace(e.Key)).ToDictionary(e => e.Key, e => e.Value)
+                };
+
+                response = await Http.PutAsJsonAsync($"api/applications/{Id.Value}", updateRequest);
+            }
+            else
+            {
+                // Create new application
+                if (model.SourceType == "DockerCompose")
+                {
+                    // Deploy via compose endpoint
+                    var composeRequest = new
+                    {
+                        name = model.Name,
+                        description = model.Description,
+                        projectId = model.ProjectId,
+                        serverId = model.ServerId,
+                        composeFile = model.ComposeFile,
+                        environmentVariables = model.ComposeEnvironmentVariables
+                            .Where(v => !string.IsNullOrWhiteSpace(v.Key))
+                            .Select(v => new
+                            {
+                                key = v.Key,
+                                value = v.Value,
+                                isSecret = v.IsSecret,
+                                description = v.Description
+                            })
+                            .ToList()
+                    };
+
+                    response = await Http.PostAsJsonAsync("api/applications/compose", composeRequest);
+                }
+                else
+                {
+                    // Build port mappings from UI
+                    var validPortMappings = portMappings
+                        .Where(p => p.HostPort.HasValue && p.ContainerPort.HasValue)
+                        .Select(p => new PortMappingDto(p.HostPort!.Value, p.ContainerPort!.Value, p.Protocol))
+                        .ToList();
+
+                    var request = new CreateApplicationRequest(
+                        model.Name,
+                        model.ServerId,
+                        model.ProjectId,
+                        model.SourceType == "DockerImage" ? model.Image : null,
+                        model.Replicas,
+                        envVars.Where(e => !string.IsNullOrWhiteSpace(e.Key)).ToDictionary(e => e.Key, e => e.Value),
+                        networks.Where(n => !string.IsNullOrWhiteSpace(n)).ToList(),
+                        validPortMappings.FirstOrDefault()?.ContainerPort, // Legacy port for backwards compatibility
+                        validPortMappings.Count > 0 ? validPortMappings : null,
+                        model.Domain,
+                        model.AdditionalDomains,
+                        model.EnableHttps,
+                        model.ForceHttps,
+                        model.LetsEncryptEmail,
+                        model.SourceType,
+                        model.GitProviderId,
+                        model.GitRepository,
+                        model.GitBranch,
+                        model.DockerfilePath ?? "Dockerfile",
+                        model.BuildContext ?? ".",
+                        model.DockerBuildTarget,
+                        model.BuildArgs,
+                        model.UsePrivateRegistry,
+                        string.IsNullOrWhiteSpace(model.RegistryServer) ? null : model.RegistryServer,
+                        string.IsNullOrWhiteSpace(model.RegistryUsername) ? null : model.RegistryUsername,
+                        string.IsNullOrWhiteSpace(model.RegistryPassword) ? null : model.RegistryPassword,
+                        model.CloneSubmodules,
+                        model.EnableGitLfs,
+                        model.AutoDeployOnPush,
+                        model.EnablePreviewDeployments,
+                        model.PreviewUrlTemplate
+                    );
+
+                    response = await Http.PostAsJsonAsync("api/applications", request);
+                }
+            }
+
+            if (response.IsSuccessStatusCode)
+            {
+                Navigation.NavigateTo(GetPostActionDestination());
+            }
+            else
+            {
+                // Try to get error details from response
+                try
+                {
+                    var errorContent = await response.Content.ReadAsStringAsync();
+                    var errorObj = System.Text.Json.JsonSerializer.Deserialize<ErrorResponse>(errorContent,
+                        new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                    errorMessage = errorObj?.Error ?? $"Failed to deploy application (Status: {response.StatusCode})";
+                }
+                catch
+                {
+                    errorMessage = $"Failed to deploy application (Status: {response.StatusCode})";
+                }
+                Logger.LogWarning("Deployment failed with status {StatusCode}", response.StatusCode);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error deploying application");
+            errorMessage = $"Error: {ex.Message}";
+        }
+        finally
+        {
+            isSubmitting = false;
+            StateHasChanged();
+        }
+    }
+    
+    private void Cancel()
+    {
+        Navigation.NavigateTo(GetPostActionDestination());
+    }
+
+    private string GetPostActionDestination()
+    {
+        var projectIdToUse = ProjectId ?? model.ProjectId;
+
+        if (projectIdToUse > 0 && IsGlobalProject(projectIdToUse))
+        {
+            return "/deployments/global";
+        }
+
+        return projectIdToUse > 0 ? $"/projects/{projectIdToUse}" : "/projects";
+    }
+
+    private string GetProjectName()
+    {
+        if (ProjectId.HasValue && projects != null)
+        {
+            var project = projects.FirstOrDefault(p => p.Id == ProjectId.Value);
+            return project?.Name ?? "Unknown Project";
+        }
+        return "Unknown Project";
+    }
+
+    private async Task CopyPreviewAsync(string value)
+    {
+        try
+        {
+            await Js.InvokeVoidAsync("navigator.clipboard.writeText", value);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to copy preview URL");
+        }
+    }
+
+    private static string NormalizeResourceName(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return "app";
+        }
+
+        var builder = new StringBuilder();
+        char previous = '\0';
+
+        foreach (var ch in name.ToLowerInvariant())
+        {
+            if (char.IsLetterOrDigit(ch))
+            {
+                builder.Append(ch);
+                previous = ch;
+            }
+            else if (previous != '-')
+            {
+                builder.Append('-');
+                previous = '-';
+            }
+        }
+
+        var result = builder.ToString().Trim('-');
+        return string.IsNullOrEmpty(result) ? "app" : result;
+    }
+
+    private void ShowCreateProject()
+    {
+        newProjectName = "";
+        newProjectDescription = "";
+        projectErrorMessage = null;
+        showCreateProjectModal = true;
+    }
+    
+    private void HideCreateProject()
+    {
+        showCreateProjectModal = false;
+        newProjectName = "";
+        newProjectDescription = "";
+        projectErrorMessage = null;
+    }
+
+    private bool IsGlobalProject(int projectId)
+    {
+        if (projects == null)
+        {
+            return false;
+        }
+
+        var project = projects.FirstOrDefault(p => p.Id == projectId);
+        return project != null && string.Equals(project.Name, SystemProjects.GlobalDeployments, StringComparison.OrdinalIgnoreCase);
+    }
+    
+    private async Task CreateProject()
+    {
+        projectErrorMessage = null;
+        
+        if (string.IsNullOrWhiteSpace(newProjectName))
+        {
+            projectErrorMessage = "Project name is required";
+            return;
+        }
+        
+        isCreatingProject = true;
+        StateHasChanged();
+        
+        try
+        {
+            var request = new { Name = newProjectName, Description = newProjectDescription };
+            var response = await Http.PostAsJsonAsync("api/projects", request);
+            
+            if (response.IsSuccessStatusCode)
+            {
+                var createdProject = await response.Content.ReadFromJsonAsync<ProjectDto>();
+                if (createdProject != null)
+                {
+                    // Reload projects list
+                    projects = await Http.GetFromJsonAsync<List<ProjectDto>>("api/applications/projects");
+                    
+                    // Auto-select the newly created project
+                    model.ProjectId = createdProject.Id;
+                    
+                    HideCreateProject();
+                }
+            }
+            else
+            {
+                var errorContent = await response.Content.ReadAsStringAsync();
+                projectErrorMessage = $"Failed to create project: {errorContent}";
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error creating project");
+            projectErrorMessage = $"Error: {ex.Message}";
+        }
+        finally
+        {
+            isCreatingProject = false;
+            StateHasChanged();
+        }
+    }
+    
+    private class ApplicationFormModel
+    {
+        public string Name { get; set; } = "";
+        public string? Description { get; set; }
+        public int ServerId { get; set; }
+        public int ProjectId { get; set; }
+        public string SourceType { get; set; } = "DockerImage";
+        public string Image { get; set; } = "";
+        public int? GitProviderId { get; set; }
+        public string? GitRepository { get; set; }
+        public string? GitBranch { get; set; }
+        public string? DockerfilePath { get; set; }
+        public string? BuildContext { get; set; } = ".";
+        public string? DockerBuildTarget { get; set; }
+        public string? BuildArgs { get; set; }
+        public bool CloneSubmodules { get; set; } = false;
+        public bool EnableGitLfs { get; set; } = true;
+        public bool AutoDeployOnPush { get; set; } = true;
+        public bool EnablePreviewDeployments { get; set; } = false;
+        public string? PreviewUrlTemplate { get; set; }
+        public string? ComposeFile { get; set; }
+        public List<ComposeEnvVarModel> ComposeEnvironmentVariables { get; set; } = new();
+        public int? Port { get; set; }
+        public int Replicas { get; set; } = 1;
+        public string? Domain { get; set; }
+        public string? AdditionalDomains { get; set; }
+        public bool EnableHttps { get; set; } = true;
+        public bool ForceHttps { get; set; } = true;
+        public string? LetsEncryptEmail { get; set; }
+        public bool UsePrivateRegistry { get; set; }
+        public string? RegistryServer { get; set; }
+        public string? RegistryUsername { get; set; }
+        public string? RegistryPassword { get; set; }
+    }
+    
+    private class EnvVar
+    {
+        public string Key { get; set; } = "";
+        public string Value { get; set; } = "";
+    }
+
+    private class ComposeEnvVarModel
+    {
+        public string Key { get; set; } = "";
+        public string Value { get; set; } = "";
+        public bool IsSecret { get; set; } = false;
+        public string? Description { get; set; }
+    }
+
+    private class PortMapping
+    {
+        public int? HostPort { get; set; }
+        public int? ContainerPort { get; set; }
+        public string Protocol { get; set; } = "tcp";
+    }
+    
+    private record ServerDto(int Id, string Name, string Host, int Port, string User, bool IsSwarm, string Status);
+    private record ProjectDto(int Id, string Name, string? Description);
+    private record CreateApplicationRequest(
+        string Name,
+        int ServerId,
+        int ProjectId,
+        string? Image,
+        int? Replicas,
+        Dictionary<string, string>? EnvironmentVariables,
+        List<string>? Networks,
+        int? Port,
+        List<PortMappingDto>? PortMappings = null,
+        string? Domain = null,
+        string? AdditionalDomains = null,
+        bool EnableHttps = true,
+        bool ForceHttps = true,
+        string? LetsEncryptEmail = null,
+        string? SourceType = "DockerImage",
+        int? GitProviderId = null,
+        string? GitRepository = null,
+        string? GitBranch = null,
+        string? DockerfilePath = null,
+        string? BuildContext = ".",
+        string? DockerBuildTarget = null,
+        string? BuildArgs = null,
+        bool UsePrivateRegistry = false,
+        string? RegistryServer = null,
+        string? RegistryUsername = null,
+        string? RegistryPassword = null,
+        bool CloneSubmodules = false,
+        bool EnableGitLfs = true,
+        bool AutoDeployOnPush = true,
+        bool EnablePreviewDeployments = false,
+        string? PreviewUrlTemplate = null);
+
+    private record PortMappingDto(int HostPort, int ContainerPort, string Protocol = "tcp");
+
+    private class UpdateApplicationRequest
+    {
+        public string? Name { get; set; }
+        public string? Description { get; set; }
+        public int? Port { get; set; }
+        public int? Replicas { get; set; }
+        public string? Domain { get; set; }
+        public string? AdditionalDomains { get; set; }
+        public bool? EnableHttps { get; set; }
+        public bool? ForceHttps { get; set; }
+        public string? LetsEncryptEmail { get; set; }
+        public string? DockerImage { get; set; }
+        public string? Dockerfile { get; set; }
+        public string? BuildContext { get; set; }
+        public string? DockerBuildTarget { get; set; }
+        public string? BuildArgs { get; set; }
+        public bool? UsePrivateRegistry { get; set; }
+        public string? RegistryServer { get; set; }
+        public string? RegistryUsername { get; set; }
+        public string? RegistryPassword { get; set; }
+        public string? GitRepository { get; set; }
+        public string? GitBranch { get; set; }
+        public int? GitProviderId { get; set; }
+        public bool? AutoDeployOnPush { get; set; }
+        public Dictionary<string, string>? EnvironmentVariables { get; set; }
+        public string? TraefikLabelOverrides { get; set; }
+    }
+
+    private record ApplicationWithDeploymentsDto(
+        int Id,
+        string Name,
+        string? Description,
+        int ServerId,
+        string ServerName,
+        int ProjectId,
+        string ProjectName,
+        ApplicationSourceType SourceType,
+        string? DockerImage,
+        bool UsePrivateRegistry,
+        string? RegistryServer,
+        string? RegistryUsername,
+        bool HasRegistryPassword,
+        int? GitProviderId,
+        string? GitRepository,
+        string? GitBranch,
+        string? GitOwner,
+        string? GitRepoName,
+        string? Dockerfile,
+        string? BuildContext,
+        string? DockerBuildTarget,
+        string? BuildArgs,
+        bool CloneSubmodules,
+        bool EnableGitLfs,
+        bool AutoDeployOnPush,
+        bool EnablePreviewDeployments,
+        string? PreviewUrlTemplate,
+        int? Port,
+        int Replicas,
+        Dictionary<string, string>? EnvironmentVariables,
+        string? Domain,
+        string? AdditionalDomains,
+        string? TraefikLabelOverrides,
+        bool EnableHttps,
+        bool ForceHttps,
+        string? LetsEncryptEmail,
+        DeploymentStatus Status,
+        string? ContainerId,
+        string? ServiceId,
+        DateTime? LastDeployedAt,
+        DateTime CreatedAt,
+        List<DeploymentInfo> Deployments);
+    private record DeploymentInfo(int Id, DeploymentStatus Status, string? ContainerId, string? ServiceId, DateTime StartedAt, DateTime? FinishedAt, string? ErrorMessage);
+    private record GitProviderDto(int Id, string Name, string Type, string? Username, bool IsActive);
+    private record GitRepositoryDto(string Owner, string Name, string FullName, string? Description, string DefaultBranch, string CloneUrl, bool IsPrivate, DateTime? UpdatedAt);
+    private record ErrorResponse(string? Error, string? Message);
+
+    private record ComposeValidationResultDto(
+        bool IsValid,
+        List<string> Errors,
+        List<string> Warnings,
+        List<string> ServiceNames,
+        List<string> RequiredVariables,
+        string? ComposeVersion)
+    {
+        public int ServiceCount => ServiceNames.Count;
+    }
+
+    private async Task ValidateCompose()
+    {
+        if (string.IsNullOrEmpty(model.ComposeFile))
+            return;
+
+        try
+        {
+            isValidatingCompose = true;
+            var request = new { composeFile = model.ComposeFile };
+            var response = await Http.PostAsJsonAsync("/api/applications/compose/validate", request);
+            
+            if (response.IsSuccessStatusCode)
+            {
+                composeValidationResult = await response.Content.ReadFromJsonAsync<ComposeValidationResultDto>();
+            }
+            else
+            {
+                composeValidationResult = new ComposeValidationResultDto(
+                    false,
+                    new List<string> { "Validation request failed" },
+                    new List<string>(),
+                    new List<string>(),
+                    new List<string>(),
+                    null
+                );
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to validate compose file");
+            composeValidationResult = new ComposeValidationResultDto(
+                false,
+                new List<string> { $"Error: {ex.Message}" },
+                new List<string>(),
+                new List<string>(),
+                new List<string>(),
+                null
+            );
+        }
+        finally
+        {
+            isValidatingCompose = false;
+        }
+    }}

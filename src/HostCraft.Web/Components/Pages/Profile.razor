@@ -1,0 +1,233 @@
+@page "/profile"
+@attribute [Authorize]
+@inject AuthenticationStateProvider AuthStateProvider
+@inject HttpClient Http
+@inject ILogger<Profile> Logger
+
+<PageTitle>Profile - HostCraft</PageTitle>
+
+<div class="page-container">
+    <div class="page-header">
+        <h1>Profile Settings</h1>
+        <p class="page-description">Manage your account information</p>
+    </div>
+
+    @if (currentUser != null)
+    {
+        <div class="card">
+            <div class="card-header">
+                <h3>Account Information</h3>
+            </div>
+            <div class="card-body">
+                <div class="profile-content">
+                    <div class="profile-avatar-large">
+                        <span>@GetUserInitials()</span>
+                    </div>
+
+                    <div class="profile-details">
+                        <div class="form-group">
+                            <label>Name</label>
+                            <div class="profile-value">@currentUser.Name</div>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Email</label>
+                            <div class="profile-value">@currentUser.Email</div>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Account Type</label>
+                            <div class="profile-value">
+                                @if (currentUser.IsAdmin)
+                                {
+                                    <span class="badge badge-primary">Administrator</span>
+                                }
+                                else
+                                {
+                                    <span class="badge badge-secondary">User</span>
+                                }
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label>User ID</label>
+                            <div class="profile-value text-muted">#@currentUser.Id</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <h3>Security</h3>
+            </div>
+            <div class="card-body">
+                <div class="security-options">
+                    <div class="security-item">
+                        <div class="security-info">
+                            <div class="security-title">Password</div>
+                            <div class="security-description">Change your password to keep your account secure</div>
+                        </div>
+                        <a href="/profile/change-password" class="btn btn-secondary">Change Password</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
+    else
+    {
+        <div class="loading">
+            <div class="spinner"></div>
+            <p>Loading profile...</p>
+        </div>
+    }
+</div>
+
+<style>
+.profile-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-xl);
+}
+
+.profile-avatar-large {
+    width: 100px;
+    height: 100px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--accent-primary) 0%, var(--accent-secondary) 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    color: white;
+    font-size: 2.5rem;
+    box-shadow: 0 10px 30px rgba(99, 102, 241, 0.3);
+}
+
+.profile-details {
+    width: 100%;
+    max-width: 500px;
+}
+
+.profile-value {
+    padding: var(--space-md);
+    background: rgba(99, 102, 241, 0.05);
+    border: 1px solid rgba(99, 102, 241, 0.2);
+    border-radius: var(--radius-sm);
+    color: var(--text-primary);
+}
+
+.profile-value.text-muted {
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+    font-size: 0.9rem;
+}
+
+.security-options {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-md);
+}
+
+.security-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: var(--space-lg);
+    background: rgba(99, 102, 241, 0.05);
+    border: 1px solid rgba(99, 102, 241, 0.2);
+    border-radius: var(--radius-md);
+}
+
+.security-info {
+    flex: 1;
+}
+
+.security-title {
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: var(--space-xs);
+}
+
+.security-description {
+    font-size: 0.9rem;
+    color: var(--text-muted);
+}
+
+.badge {
+    display: inline-flex;
+    padding: var(--space-xs) var(--space-md);
+    border-radius: var(--radius-sm);
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+
+.badge-primary {
+    background: linear-gradient(135deg, var(--accent-primary) 0%, var(--accent-secondary) 100%);
+    color: white;
+}
+
+.badge-secondary {
+    background: rgba(99, 102, 241, 0.2);
+    color: var(--accent-primary);
+}
+
+.loading {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: var(--space-xxxl);
+    gap: var(--space-lg);
+}
+
+.spinner {
+    width: 40px;
+    height: 40px;
+    border: 3px solid rgba(99, 102, 241, 0.2);
+    border-top-color: var(--accent-primary);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+</style>
+
+@code {
+    private HostCraft.Web.Models.UserDto? currentUser;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadCurrentUser();
+    }
+
+    private async Task LoadCurrentUser()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        if (authState.User?.Identity?.IsAuthenticated == true)
+        {
+            if (AuthStateProvider is HostCraft.Web.Services.HostCraftAuthenticationStateProvider hostCraftAuthProvider)
+            {
+                currentUser = hostCraftAuthProvider.GetCurrentUser();
+            }
+        }
+    }
+
+    private string GetUserInitials()
+    {
+        if (currentUser?.Name != null)
+        {
+            var parts = currentUser.Name.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length >= 2)
+            {
+                return $"{parts[0][0]}{parts[1][0]}".ToUpper();
+            }
+            return currentUser.Name.Length > 0 ? currentUser.Name[0].ToString().ToUpper() : "?";
+        }
+        return currentUser?.Email?.Length > 0 ? currentUser.Email[0].ToString().ToUpper() : "?";
+    }
+}

@@ -1,0 +1,49 @@
+@* Custom styled reconnect modal for HostCraft dark theme *@
+<script type="module" src="@Assets["Components/Layout/ReconnectModal.razor.js"]"></script>
+
+<dialog id="components-reconnect-modal" data-nosnippet>
+    <div class="components-reconnect-container">
+        <div class="components-rejoining-animation" aria-hidden="true">
+            <div></div>
+            <div></div>
+        </div>
+
+        <p class="components-reconnect-first-attempt-visible">
+            <span class="reconnect-icon">🔄</span><br />
+            <span class="reconnect-title">Reconnecting to Server</span><br />
+            Please wait while we restore your session...
+        </p>
+
+        <p class="components-reconnect-repeated-attempt-visible">
+            <span class="reconnect-icon">⏳</span><br />
+            <span class="reconnect-title">Connection Interrupted</span><br />
+            Retrying in <span id="components-seconds-to-next-attempt"></span> seconds...
+        </p>
+
+        <p class="components-reconnect-failed-visible">
+            <span class="reconnect-icon">⚠️</span><br />
+            <span class="reconnect-title">Connection Lost</span><br />
+            Unable to reconnect to the server.<br />
+            Please check your connection and try again.
+        </p>
+        <button id="components-reconnect-button" class="components-reconnect-failed-visible">
+            🔄 Retry Connection
+        </button>
+
+        <p class="components-pause-visible">
+            <span class="reconnect-icon">⏸️</span><br />
+            <span class="reconnect-title">Session Paused</span><br />
+            Your session has been paused by the server.
+        </p>
+        <button id="components-resume-button" class="components-pause-visible">
+            ▶️ Resume Session
+        </button>
+
+        <p class="components-resume-failed-visible">
+            <span class="reconnect-icon">❌</span><br />
+            <span class="reconnect-title">Session Expired</span><br />
+            Unable to resume your session.<br />
+            Please reload the page to continue.
+        </p>
+    </div>
+</dialog>

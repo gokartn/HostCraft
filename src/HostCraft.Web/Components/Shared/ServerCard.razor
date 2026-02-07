@@ -1,0 +1,87 @@
+@using HostCraft.Core.Enums
+
+<div class="server-card @GetStatusClass()">
+    <div class="server-header">
+        <div class="server-role">
+            <span class="role-badge role-@Role.ToLower()">@GetRoleIcon() @Role.ToUpper()</span>
+        </div>
+        <div class="server-status">
+            @GetStatusIcon()
+        </div>
+    </div>
+    
+    <h4 class="server-name">@Server.Name</h4>
+    <div class="server-details">
+        <div class="detail">
+            <span class="label">Host:</span>
+            <span class="value">@Server.Host</span>
+        </div>
+        @if (!string.IsNullOrEmpty(Server.Region))
+        {
+            <div class="detail">
+                <span class="label">Region:</span>
+                <span class="value">🌍 @Server.Region</span>
+            </div>
+        }
+        @if (Server.Type == ServerType.SwarmManager && Server.SwarmManagerCount.HasValue)
+        {
+            <div class="detail">
+                <span class="label">Cluster:</span>
+                <span class="value">@Server.SwarmManagerCount managers, @Server.SwarmWorkerCount workers</span>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter] public required ServerDto Server { get; set; }
+    [Parameter] public string Role { get; set; } = "";
+
+    private string GetStatusClass()
+    {
+        return Server.Status switch
+        {
+            ServerStatus.Online => "status-online",
+            ServerStatus.Offline => "status-offline",
+            ServerStatus.Error => "status-error",
+            ServerStatus.Validating => "status-validating",
+            _ => ""
+        };
+    }
+
+    private string GetStatusIcon()
+    {
+        return Server.Status switch
+        {
+            ServerStatus.Online => "🟢",
+            ServerStatus.Offline => "🔴",
+            ServerStatus.Error => "⚠️",
+            ServerStatus.Validating => "🔄",
+            _ => "❓"
+        };
+    }
+
+    private string GetRoleIcon()
+    {
+        return Role.ToLower() switch
+        {
+            "manager" => "👑",
+            "worker" => "⚙️",
+            "standalone" => "💻",
+            _ => "📦"
+        };
+    }
+
+    public class ServerDto
+    {
+        public int Id { get; set; }
+        public string Name { get; set; } = "";
+        public string Host { get; set; } = "";
+        public ServerType Type { get; set; }
+        public ServerStatus Status { get; set; }
+        public bool IsSwarm { get; set; }
+        public string? Region { get; set; }
+        public int? SwarmManagerCount { get; set; }
+        public int? SwarmWorkerCount { get; set; }
+    }
+}

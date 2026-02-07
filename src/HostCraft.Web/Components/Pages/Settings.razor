@@ -1,0 +1,1195 @@
+@page "/settings"
+@rendermode InteractiveServer
+@inject HttpClient Http
+@inject IJSRuntime JS
+@inject NavigationManager NavigationManager
+@inject IWebAuthService AuthService
+@using System.Net
+@using HostCraft.Web.Services
+
+<PageTitle>Settings - HostCraft</PageTitle>
+
+<div class="page-container">
+    <div class="page-header">
+        <h1>⚙️ Settings</h1>
+        <p class="page-subtitle">Application configuration and system information</p>
+    </div>
+
+    <!-- Development Status Warning -->
+    <div class="alert" style="margin-bottom: 1.5rem; padding: 1rem; background: #451a03; border-left: 4px solid #f59e0b; border-radius: 6px;">
+        <strong style="color: #fbbf24;">⚠️ Alpha Development Version</strong>
+        <p style="margin: 0.5rem 0 0 0; color: #fde68a;">This is an <strong>alpha/development</strong> build (0.0.1-alpha) and is <strong>NOT production-ready</strong>. Expect bugs, breaking changes, and potential data loss. Use at your own risk in non-production environments only.</p>
+    </div>
+
+    <!-- HostCraft Domain Configuration -->
+    <div class="card">
+        <div class="card-header">
+            <h2 class="card-title">
+                <span>🌐</span> HostCraft Domain & SSL
+            </h2>
+        </div>
+        <div class="settings-section">
+            @if (string.IsNullOrWhiteSpace(hostcraftDomain))
+            {
+                <div style="padding: 1rem; background: rgba(245, 158, 11, 0.1); border-left: 4px solid #f59e0b; border-radius: var(--radius-md); margin-bottom: 1.5rem;">
+                    <strong style="color: #f59e0b;">⚠️ Important: Real-time Features Require Configuration</strong>
+                    <p style="margin: 0.5rem 0 0 0; color: var(--text-secondary);">
+                        The <strong>HostCraft Web Domain</strong> must be configured for real-time features like the HA Dashboard, 
+                        terminal access, and log streaming to work correctly. Enter your domain below and save.
+                    </p>
+                </div>
+            }
+            <div class="alert" style="background: #1e3a5f; border-left: 4px solid #3b82f6; padding: 1rem; border-radius: 6px; margin-bottom: 1.5rem;">
+                <strong style="color: #60a5fa;">ℹ️ SSL/HTTPS Requirements</strong>
+                <p style="margin: 0.5rem 0 0 0; color: #93c5fd;">
+                    To enable SSL certificates for HostCraft, you must:<br/>
+                    • Configure both domain fields below<br/>
+                    • Enable HTTPS and provide a Let's Encrypt email<br/>
+                    • Ensure your domain's DNS A record points to this server<br/>
+                    • Have ports 80 and 443 open (for Let's Encrypt validation)
+                </p>
+            </div>
+
+            <div class="form-group" style="margin-bottom: 1.5rem;">
+                <label for="hostcraftDomain" style="display: block; margin-bottom: 0.5rem; font-weight: 500;">HostCraft Web Domain</label>
+                <input type="text" id="hostcraftDomain" @bind="hostcraftDomain" class="form-control" placeholder="hostcraft.yourdomain.com" style="max-width: 500px;" />
+                <small style="display: block; margin-top: 0.5rem; color: #a3a3a3;">
+                    Domain for accessing the HostCraft Web UI (e.g., hostcraft.yourdomain.com)<br/>
+                    <strong>Required for SSL certificates</strong>
+                </small>
+            </div>
+
+            <div class="form-group" style="margin-bottom: 1.5rem;">
+                <label for="hostcraftApiDomain" style="display: block; margin-bottom: 0.5rem; font-weight: 500;">HostCraft API Domain <span style="color: #f59e0b;">(Required for OAuth)</span></label>
+                <input type="text" id="hostcraftApiDomain" @bind="hostcraftApiDomain" class="form-control" placeholder="hostcraft.yourdomain.com" style="max-width: 500px;" />
+                <small style="display: block; margin-top: 0.5rem; color: #a3a3a3;">
+                    Public URL for the HostCraft API - used for GitHub/GitLab OAuth callbacks and webhooks<br/>
+                    Example: <code>hostcraft.yourdomain.com</code> or <code>api.yourdomain.com</code><br/>
+                    <strong>Can be the same as Web Domain</strong>
+                </small>
+            </div>
+
+            <div class="form-group" style="margin-bottom: 1.5rem;">
+                <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                    <input type="checkbox" @bind="hostcraftEnableHttps" style="width: 18px; height: 18px;" />
+                    <span style="font-weight: 500;">🔒 Enable HTTPS (Let's Encrypt)</span>
+                </label>
+                <small style="display: block; margin-top: 0.5rem; margin-left: 1.75rem; color: #a3a3a3;">Automatically provision SSL certificate for HostCraft UI</small>
+            </div>
+
+            @if (hostcraftEnableHttps)
+            {
+                <div class="form-group" style="margin-bottom: 1.5rem; margin-left: 1.75rem;">
+                    <label for="hostcraftEmail" style="display: block; margin-bottom: 0.5rem; font-weight: 500;">Let's Encrypt Email</label>
+                    <input type="email" id="hostcraftEmail" @bind="hostcraftLetsEncryptEmail" class="form-control" placeholder="your-email@example.com" style="max-width: 500px;" />
+                    <small style="display: block; margin-top: 0.5rem; color: #a3a3a3;">
+                        Required for SSL certificate notifications<br/>
+                        <strong>Pre-filled from Traefik installation</strong> (if configured during install)
+                    </small>
+                </div>
+            }
+
+            <div class="action-buttons" style="margin-top: 1.5rem;">
+                <button class="btn btn-primary" @onclick="SaveHostCraftDomain" disabled="@savingDomain">
+                    @if (savingDomain)
+                    {
+                        <span class="spinner-sm"></span>
+                        <span>Saving...</span>
+                    }
+                    else
+                    {
+                        <span>💾 Save Configuration</span>
+                    }
+                </button>
+            </div>
+
+            @if (!string.IsNullOrEmpty(domainError))
+            {
+                <div class="alert alert-danger" style="margin-top: 1rem;">
+                    <strong>Error:</strong> @domainError
+                </div>
+            }
+
+            @if (!string.IsNullOrEmpty(domainSuccess))
+            {
+                <div class="alert alert-success" style="margin-top: 1rem;">
+                    <strong>Success:</strong> @domainSuccess
+                </div>
+            }
+        </div>
+    </div>
+
+    <!-- Developer Mode -->
+    <div class="card">
+        <div class="card-header">
+            <h2 class="card-title">
+                <span>🔧</span> Developer Mode
+            </h2>
+        </div>
+        <div class="settings-section">
+            <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; margin-bottom: 1rem;">
+                <input type="checkbox" @bind="developerMode" @bind:after="ToggleDeveloperMode" style="width: 18px; height: 18px;" />
+                <span style="font-weight: 500;">Enable Developer Mode</span>
+            </label>
+            <small style="display: block; color: #a3a3a3;">
+                Shows real-time logs from all HostCraft containers for debugging
+            </small>
+        </div>
+    </div>
+
+    @if (developerMode)
+    {
+        <!-- HostCraft Logs -->
+        <div class="card">
+            <div class="card-header">
+                <h2 class="card-title">
+                    <span>📋</span> HostCraft Container Logs
+                </h2>
+                <div class="action-buttons" style="margin-left: auto;">
+                    <button class="btn btn-outline" @onclick="RefreshLogs">
+                        <span>🔄 Refresh</span>
+                    </button>
+                    <button class="btn btn-outline" @onclick="ClearLogs">
+                        <span>🗑️ Clear</span>
+                    </button>
+                    <button class="btn btn-outline" @onclick="@(() => autoRefresh = !autoRefresh)">
+                        @if (autoRefresh)
+                        {
+                            <span>⏸️ Pause</span>
+                        }
+                        else
+                        {
+                            <span>▶️ Auto-Refresh</span>
+                        }
+                    </button>
+                </div>
+            </div>
+            <div class="settings-section">
+                <div class="tabs">
+                    <button class="tab-button @(activeTab == "web" ? "active" : "")" @onclick="@(() => activeTab = "web")">
+                        Web Container
+                    </button>
+                    <button class="tab-button @(activeTab == "api" ? "active" : "")" @onclick="@(() => activeTab = "api")">
+                        API Container
+                    </button>
+                    <button class="tab-button @(activeTab == "postgres" ? "active" : "")" @onclick="@(() => activeTab = "postgres")">
+                        Postgres Container
+                    </button>
+                    <button class="tab-button @(activeTab == "all" ? "active" : "")" @onclick="@(() => activeTab = "all")">
+                        All Containers
+                    </button>
+                </div>
+
+                <div class="log-controls" style="margin: 1rem 0; display: flex; gap: 1rem; align-items: center;">
+                    <label style="display: flex; align-items: center; gap: 0.5rem;">
+                        <span>Lines:</span>
+                        <select @bind="logLines" class="form-control" style="width: auto;">
+                            <option value="50">50</option>
+                            <option value="100">100</option>
+                            <option value="200">200</option>
+                            <option value="500">500</option>
+                            <option value="1000">1000</option>
+                        </select>
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 0.5rem;">
+                        <input type="checkbox" @bind="showTimestamps" style="width: 18px; height: 18px;" />
+                        <span>Show Timestamps</span>
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 0.5rem;">
+                        <input type="checkbox" @bind="onlyErrors" style="width: 18px; height: 18px;" />
+                        <span>Only Errors/Warnings</span>
+                    </label>
+                </div>
+
+                @if (loadingLogs)
+                {
+                    <div class="loading-state">
+                        <div class="spinner"></div>
+                        <p>Loading logs...</p>
+                    </div>
+                }
+                else if (!string.IsNullOrEmpty(logError))
+                {
+                    <div class="alert alert-danger">
+                        <strong>Error:</strong> @logError
+                    </div>
+                }
+                else
+                {
+                    <div class="log-container">
+                        <pre class="log-output">@GetFilteredLogs()</pre>
+                    </div>
+                }
+
+                <div class="log-info" style="margin-top: 1rem; color: #a3a3a3; font-size: 0.875rem;">
+                    <p>Last updated: @lastLogUpdate.ToString("HH:mm:ss")</p>
+                    <p>Total lines: @GetTotalLogLines()</p>
+                </div>
+            </div>
+        </div>
+    }
+
+    <!-- Traefik Dashboard Link -->
+    <div class="card">
+        <div class="card-header">
+            <h2 class="card-title">
+                <span>🌐</span> Reverse Proxy Management
+            </h2>
+        </div>
+        <div class="settings-section">
+            <p style="margin-bottom: 1rem; color: #a3a3a3;">Access the Traefik reverse proxy dashboard to monitor routing, SSL certificates, and service health.</p>
+            @if (!string.IsNullOrEmpty(traefikDashboardUrl))
+            {
+                <div class="action-buttons">
+                    <a href="@traefikDashboardUrl" target="_blank" class="btn btn-primary">
+                        📊 Open Traefik Dashboard
+                    </a>
+                </div>
+            }
+            else
+            {
+                <div class="alert" style="background: #1e3a5f; border-left: 4px solid #3b82f6; padding: 1rem; border-radius: 6px; margin-bottom: 1rem;">
+                    <strong style="color: #60a5fa;">ℹ️ Traefik Dashboard Access</strong>
+                    <p style="margin: 0.5rem 0 0 0; color: #93c5fd;">
+                        Access the Traefik dashboard at <code>http://&lt;server-ip&gt;:8080</code><br/>
+                        Use your server's direct IP address, not the domain name.
+                    </p>
+                </div>
+            }
+            <small style="display: block; margin-top: 1rem; color: #a3a3a3;">
+                <strong>Note:</strong> The Traefik dashboard must be accessed via the server's direct IP address on port 8080, not through a domain name.
+            </small>
+        </div>
+    </div>
+
+    <!-- Traefik Dashboard Configuration -->
+    <div class="card">
+        <div class="card-header">
+            <h2 class="card-title">
+                <span>📊</span> Traefik Dashboard Configuration
+            </h2>
+        </div>
+        <div class="settings-section">
+            <p style="margin-bottom: 1.5rem; color: #a3a3a3;">Configure a custom domain and authentication for accessing the Traefik dashboard.</p>
+            
+            <div class="form-group" style="margin-bottom: 1.5rem;">
+                <label for="traefikDashboardDomain" style="display: block; margin-bottom: 0.5rem; font-weight: 500;">Dashboard Domain (Optional)</label>
+                <input type="text" id="traefikDashboardDomain" @bind="traefikDashboardDomain" class="form-control" placeholder="traefik.example.com" style="max-width: 500px;" />
+                <small style="display: block; margin-top: 0.5rem; color: #a3a3a3;">
+                    Leave empty to keep dashboard accessible only via IP:8080. Set a domain to access via HTTPS with Let's Encrypt.
+                </small>
+            </div>
+
+            <div class="form-group" style="margin-bottom: 1.5rem;">
+                <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                    <input type="checkbox" @bind="traefikDashboardAuthEnabled" style="width: 18px; height: 18px;" />
+                    <span style="font-weight: 500;">🔒 Enable Authentication</span>
+                </label>
+                <small style="display: block; margin-top: 0.5rem; margin-left: 1.75rem; color: #a3a3a3;">
+                    Protect the dashboard with username and password (highly recommended for production)
+                </small>
+            </div>
+
+            @if (traefikDashboardAuthEnabled)
+            {
+                <div style="margin-left: 1.75rem;">
+                    <div class="form-group" style="margin-bottom: 1.5rem;">
+                        <label for="traefikUsername" style="display: block; margin-bottom: 0.5rem; font-weight: 500;">Username</label>
+                        <input type="text" id="traefikUsername" @bind="traefikDashboardUsername" class="form-control" placeholder="admin" style="max-width: 500px;" />
+                    </div>
+
+                    <div class="form-group" style="margin-bottom: 1.5rem;">
+                        <label for="traefikPassword" style="display: block; margin-bottom: 0.5rem; font-weight: 500;">Password</label>
+                        <input type="password" id="traefikPassword" @bind="traefikDashboardPassword" class="form-control" placeholder="Enter strong password" style="max-width: 500px;" />
+                        <small style="display: block; margin-top: 0.5rem; color: #a3a3a3;">
+                            Password will be securely hashed using BCrypt
+                        </small>
+                    </div>
+                </div>
+            }
+
+            <div class="action-buttons" style="margin-top: 1.5rem;">
+                <button class="btn btn-primary" @onclick="SaveTraefikDashboard" disabled="@savingTraefikDashboard">
+                    @if (savingTraefikDashboard)
+                    {
+                        <span class="spinner-sm"></span>
+                        <span>Saving...</span>
+                    }
+                    else
+                    {
+                        <span>💾 Save Dashboard Configuration</span>
+                    }
+                </button>
+            </div>
+
+            @if (!string.IsNullOrEmpty(traefikDashboardError))
+            {
+                <div class="alert alert-danger" style="margin-top: 1rem;">
+                    <strong>Error:</strong> @traefikDashboardError
+                </div>
+            }
+
+            @if (!string.IsNullOrEmpty(traefikDashboardSuccess))
+            {
+                <div class="alert alert-success" style="margin-top: 1rem;">
+                    <strong>Success:</strong> @traefikDashboardSuccess
+                </div>
+            }
+
+            <div class="alert" style="background: #451a03; border-left: 4px solid #f59e0b; padding: 1rem; border-radius: 6px; margin-top: 1.5rem;">
+                <strong style="color: #fbbf24;">⚠️ Important</strong>
+                <p style="margin: 0.5rem 0 0 0; color: #fde68a;">
+                    Configuring a domain for the Traefik dashboard will recreate the Traefik container with new settings. This may cause a brief interruption to routing.
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Version & Updates Section -->
+    <div class="card">
+        <div class="card-header">
+            <h2 class="card-title">
+                <span>🔄</span> Version & Updates
+            </h2>
+            @if (updateInfo?.UpdateAvailable == true)
+            {
+                <span class="badge badge-success">Update Available</span>
+            }
+            else if (checkingForUpdates)
+            {
+                <span class="badge">Checking...</span>
+            }
+            else
+            {
+                <span class="badge badge-info">Up to Date</span>
+            }
+        </div>
+
+        <div class="settings-section">
+            <div class="version-info">
+                <div class="info-row">
+                    <span class="label">Current Version:</span>
+                    <span class="value">
+                        <code>v@(versionInfo?.Version ?? "Loading...")</code>
+                    </span>
+                </div>
+                @if (versionInfo != null)
+                {
+                    <div class="info-row">
+                        <span class="label">Build Date:</span>
+                        <span class="value">@versionInfo.BuildDate.ToString("MMMM dd, yyyy HH:mm")</span>
+                    </div>
+                }
+                @if (updateInfo != null)
+                {
+                    @if (updateInfo.UpdateAvailable && !string.IsNullOrEmpty(updateInfo.LatestVersion))
+                    {
+                        <div class="info-row highlight">
+                            <span class="label">Latest Version:</span>
+                            <span class="value">
+                                <code>v@updateInfo.LatestVersion</code>
+                                <span class="badge badge-success">New!</span>
+                            </span>
+                        </div>
+                        @if (updateInfo.PublishedAt.HasValue)
+                        {
+                            <div class="info-row">
+                                <span class="label">Released:</span>
+                                <span class="value">@updateInfo.PublishedAt.Value.ToString("MMMM dd, yyyy")</span>
+                            </div>
+                        }
+                        @if (!string.IsNullOrEmpty(updateInfo.ReleaseNotes))
+                        {
+                            <div class="release-notes">
+                                <h3>Release Notes:</h3>
+                                <div class="notes-content">@updateInfo.ReleaseNotes</div>
+                            </div>
+                        }
+                    }
+                }
+
+                <div class="action-buttons">
+                    <button class="btn btn-outline" @onclick="CheckForUpdates" disabled="@checkingForUpdates">
+                        @if (checkingForUpdates)
+                        {
+                            <span class="spinner-sm"></span>
+                            <span>Checking...</span>
+                        }
+                        else
+                        {
+                            <span>🔍 Check for Updates</span>
+                        }
+                    </button>
+
+                    @if (updateInfo?.UpdateAvailable == true && !string.IsNullOrEmpty(updateInfo.HtmlUrl))
+                    {
+                        <a href="@updateInfo.HtmlUrl" target="_blank" class="btn btn-primary">
+                            📥 View Release
+                        </a>
+                    }
+
+                    @if (updateInfo?.UpdateAvailable == true)
+                    {
+                        <button class="btn btn-success" @onclick="TriggerUpdate" disabled="@updatingInProgress">
+                            @if (updatingInProgress)
+                            {
+                                <span class="spinner-sm"></span>
+                                <span>Updating...</span>
+                            }
+                            else
+                            {
+                                <span>⬆️ Update Now</span>
+                            }
+                        </button>
+                    }
+                </div>
+
+                @if (!string.IsNullOrEmpty(updateError))
+                {
+                    <div class="alert alert-danger">
+                        <strong>Error:</strong> @updateError
+                    </div>
+                }
+
+                @if (!string.IsNullOrEmpty(updateSuccess))
+                {
+                    <div class="alert alert-success">
+                        <strong>Success:</strong> @updateSuccess
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+
+    <!-- System Information -->
+    <div class="card">
+        <div class="card-header">
+            <h2 class="card-title">
+                <span>💻</span> System Information
+            </h2>
+        </div>
+
+        <div class="settings-section">
+            <div class="info-grid">
+                <div class="info-item">
+                    <span class="label">Platform:</span>
+                    <span class="value">@GetPlatform()</span>
+                </div>
+                <div class="info-item">
+                    <span class="label">Runtime:</span>
+                    <span class="value">.NET @Environment.Version.ToString()</span>
+                </div>
+                <div class="info-item">
+                    <span class="label">Architecture:</span>
+                    <span class="value">@GetArchitecture()</span>
+                </div>
+                <div class="info-item">
+                    <span class="label">Working Directory:</span>
+                    <span class="value"><code>@Environment.CurrentDirectory</code></span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- About Section -->
+    <div class="card">
+        <div class="card-header">
+            <h2 class="card-title">
+                <span>ℹ️</span> About HostCraft
+            </h2>
+        </div>
+
+        <div class="settings-section">
+            <div class="about-content">
+                <p>
+                    <strong>HostCraft</strong> is a self-hosted Docker Platform-as-a-Service (PaaS) 
+                    that simplifies container orchestration and deployment management.
+                </p>
+                <div class="about-links">
+                    <a href="https://github.com/gokartn/hostcraft" target="_blank" class="about-link">
+                        📚 Documentation
+                    </a>
+                    <a href="https://github.com/gokartn/hostcraft" target="_blank" class="about-link">
+                        🐙 GitHub Repository
+                    </a>
+                    <a href="https://github.com/gokartn/hostcraft/issues" target="_blank" class="about-link">
+                        🐛 Report Issue
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    private VersionInfo? versionInfo;
+    private UpdateInfo? updateInfo;
+    private bool checkingForUpdates = false;
+    private bool updatingInProgress = false;
+    private string? updateError;
+    private string? updateSuccess;
+    
+    private string? hostcraftDomain;
+    private string? hostcraftApiDomain;
+    private bool hostcraftEnableHttps = true;
+    private string? hostcraftLetsEncryptEmail;
+    private bool savingDomain = false;
+    private string? domainError;
+    private string? domainSuccess;
+    private string? traefikDashboardUrl;
+    
+    // Traefik Dashboard Configuration
+    private string? traefikDashboardDomain;
+    private bool traefikDashboardAuthEnabled = false;
+    private string? traefikDashboardUsername;
+    private string? traefikDashboardPassword;
+    private bool savingTraefikDashboard = false;
+    private string? traefikDashboardError;
+    private string? traefikDashboardSuccess;
+
+    // Developer Mode
+    private bool developerMode = false;
+    private string activeTab = "web";
+    private int logLines = 200;
+    private bool showTimestamps = true;
+    private bool onlyErrors = false;
+    private bool autoRefresh = false;
+    private bool loadingLogs = false;
+    private string? logError;
+    private DateTime lastLogUpdate = DateTime.Now;
+    private System.Threading.Timer? autoRefreshTimer;
+    
+    private Dictionary<string, string> containerLogs = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadVersion();
+        await CheckForUpdates();
+        await LoadHostCraftDomain();
+        await LoadTraefikDashboardUrl();
+        await LoadTraefikDashboardSettings();
+    }
+
+    private async Task LoadTraefikDashboardUrl()
+    {
+        try
+        {
+            // First, check if a custom domain is configured for the dashboard
+            var settings = await Http.GetFromJsonAsync<SystemSettingsDto>("api/systemsettings");
+            if (settings != null && !string.IsNullOrEmpty(settings.TraefikDashboardDomain))
+            {
+                // Use HTTPS domain when configured
+                traefikDashboardUrl = $"https://{settings.TraefikDashboardDomain}";
+                return;
+            }
+            
+            // Fall back to server IP:8080 if no domain is configured
+            var servers = await Http.GetFromJsonAsync<List<ServerDto>>("api/servers");
+            var primaryServer = servers?.FirstOrDefault(s => s.Host != "localhost" && !s.Host.StartsWith("127."));
+
+            if (primaryServer != null && !string.IsNullOrEmpty(primaryServer.Host))
+            {
+                traefikDashboardUrl = $"http://{primaryServer.Host}:8080";
+            }
+        }
+        catch
+        {
+            // Ignore - we'll show instructions instead
+        }
+    }
+
+    private class ServerDto
+    {
+        public int Id { get; set; }
+        public string Host { get; set; } = "";
+        public string Name { get; set; } = "";
+    }
+
+    private async Task ToggleDeveloperMode()
+    {
+        if (developerMode)
+        {
+            await RefreshLogs();
+            if (autoRefresh)
+            {
+                StartAutoRefresh();
+            }
+        }
+        else
+        {
+            StopAutoRefresh();
+        }
+    }
+
+    private void StartAutoRefresh()
+    {
+        autoRefreshTimer = new System.Threading.Timer(async _ =>
+        {
+            await InvokeAsync(async () =>
+            {
+                await RefreshLogs();
+                StateHasChanged();
+            });
+        }, null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
+    }
+
+    private void StopAutoRefresh()
+    {
+        autoRefreshTimer?.Dispose();
+        autoRefreshTimer = null;
+    }
+
+    private async Task RefreshLogs()
+    {
+        if (!developerMode) return;
+
+        loadingLogs = true;
+        logError = null;
+        StateHasChanged();
+
+        try
+        {
+            var response = await Http.GetAsync($"api/systemsettings/logs?lines={logLines}");
+
+            if (response.StatusCode == HttpStatusCode.Unauthorized)
+            {
+                var refresh = await AuthService.RefreshTokenAsync();
+                if (refresh.Success && !string.IsNullOrEmpty(refresh.Token))
+                {
+                    response.Dispose();
+                    response = await Http.GetAsync($"api/systemsettings/logs?lines={logLines}");
+                }
+                else
+                {
+                    logError = "Session expired. Please log in again.";
+                    return;
+                }
+            }
+
+            if (response.IsSuccessStatusCode)
+            {
+                var payload = await response.Content.ReadFromJsonAsync<ContainerLogsResponse>();
+                if (payload != null)
+                {
+                    containerLogs["web"] = payload.WebLogs ?? "No logs available";
+                    containerLogs["api"] = payload.ApiLogs ?? "No logs available";
+                    containerLogs["postgres"] = payload.PostgresLogs ?? "No logs available";
+                    lastLogUpdate = DateTime.Now;
+                }
+            }
+            else
+            {
+                var body = await response.Content.ReadAsStringAsync();
+                logError = $"Failed to load logs: {(int)response.StatusCode} {response.ReasonPhrase}";
+                if (!string.IsNullOrWhiteSpace(body))
+                {
+                    logError += $" - {body.Trim()}";
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            logError = $"Failed to load logs: {ex.Message}";
+        }
+        finally
+        {
+            loadingLogs = false;
+            StateHasChanged();
+        }
+    }
+
+    private void ClearLogs()
+    {
+        containerLogs.Clear();
+        StateHasChanged();
+    }
+
+    private string GetFilteredLogs()
+    {
+        string logs = activeTab == "all" 
+            ? string.Join("\n\n=== API ===\n", containerLogs.Values)
+            : containerLogs.GetValueOrDefault(activeTab, "No logs available");
+
+        if (onlyErrors && !string.IsNullOrEmpty(logs))
+        {
+            var lines = logs.Split('\n');
+            var filtered = lines.Where(line => 
+                line.Contains("error", StringComparison.OrdinalIgnoreCase) ||
+                line.Contains("exception", StringComparison.OrdinalIgnoreCase) ||
+                line.Contains("fail", StringComparison.OrdinalIgnoreCase) ||
+                line.Contains("warning", StringComparison.OrdinalIgnoreCase)
+            );
+            logs = string.Join('\n', filtered);
+        }
+
+        if (!showTimestamps && !string.IsNullOrEmpty(logs))
+        {
+            // Remove timestamp patterns (basic implementation)
+            var lines = logs.Split('\n');
+            logs = string.Join('\n', lines.Select(line => 
+            {
+                // Remove common timestamp formats
+                if (line.Length > 25 && (line[0] == '[' || char.IsDigit(line[0])))
+                {
+                    var idx = line.IndexOf(']');
+                    if (idx > 0 && idx < 30) return line.Substring(idx + 1).TrimStart();
+                }
+                return line;
+            }));
+        }
+
+        return string.IsNullOrEmpty(logs) ? "No logs available" : logs;
+    }
+
+    private int GetTotalLogLines()
+    {
+        if (activeTab == "all")
+        {
+            return containerLogs.Values.Sum(log => log?.Split('\n').Length ?? 0);
+        }
+        
+        var log = containerLogs.GetValueOrDefault(activeTab, "");
+        return log.Split('\n').Length;
+    }
+
+    public void Dispose()
+    {
+        StopAutoRefresh();
+    }
+
+    private record ContainerLogsResponse(
+        string? WebLogs,
+        string? ApiLogs,
+        string? PostgresLogs
+    );
+
+    private async Task LoadHostCraftDomain()
+    {
+        try
+        {
+            var settings = await Http.GetFromJsonAsync<SystemSettingsDto>("api/systemsettings");
+            if (settings != null)
+            {
+                hostcraftDomain = settings.HostCraftDomain;
+                hostcraftApiDomain = settings.HostCraftApiDomain;
+                hostcraftEnableHttps = settings.HostCraftEnableHttps;
+                hostcraftLetsEncryptEmail = settings.HostCraftLetsEncryptEmail;
+            }
+        }
+        catch (Exception ex)
+        {
+            domainError = $"Failed to load domain configuration: {ex.Message}";
+            // Leave fields empty
+            hostcraftDomain = null;
+            hostcraftApiDomain = null;
+            hostcraftEnableHttps = false;
+            hostcraftLetsEncryptEmail = null;
+        }
+    }
+
+    private async Task LoadTraefikDashboardSettings()
+    {
+        try
+        {
+            var settings = await Http.GetFromJsonAsync<SystemSettingsDto>("api/systemsettings");
+            if (settings != null)
+            {
+                traefikDashboardDomain = settings.TraefikDashboardDomain;
+                traefikDashboardAuthEnabled = settings.TraefikDashboardAuthEnabled;
+                traefikDashboardUsername = settings.TraefikDashboardUsername;
+                // Don't load password - it's a hash and shouldn't be displayed
+            }
+        }
+        catch (Exception ex)
+        {
+            traefikDashboardError = $"Failed to load Traefik dashboard configuration: {ex.Message}";
+        }
+    }
+
+    private async Task SaveTraefikDashboard()
+    {
+        savingTraefikDashboard = true;
+        traefikDashboardError = null;
+        traefikDashboardSuccess = null;
+
+        try
+        {
+            // Validate
+            if (traefikDashboardAuthEnabled)
+            {
+                if (string.IsNullOrWhiteSpace(traefikDashboardUsername))
+                {
+                    traefikDashboardError = "Username is required when authentication is enabled";
+                    savingTraefikDashboard = false;
+                    return;
+                }
+
+                if (string.IsNullOrWhiteSpace(traefikDashboardPassword))
+                {
+                    traefikDashboardError = "Password is required when authentication is enabled";
+                    savingTraefikDashboard = false;
+                    return;
+                }
+            }
+
+            // Call API to save Traefik dashboard configuration
+            var request = new ConfigureTraefikDashboardRequest(
+                traefikDashboardDomain,
+                traefikDashboardAuthEnabled,
+                traefikDashboardUsername,
+                traefikDashboardPassword
+            );
+
+            var response = await Http.PostAsJsonAsync("api/systemsettings/traefik-dashboard", request);
+            
+            if (response.IsSuccessStatusCode)
+            {
+                var result = await response.Content.ReadFromJsonAsync<ConfigureTraefikDashboardResponse>();
+                if (result?.Success == true)
+                {
+                    traefikDashboardSuccess = result.Message;
+                    // Clear password field after successful save
+                    traefikDashboardPassword = null;
+                    // Update dashboard URL if domain is set
+                    if (!string.IsNullOrEmpty(traefikDashboardDomain))
+                    {
+                        traefikDashboardUrl = $"https://{traefikDashboardDomain}";
+                    }
+                }
+                else
+                {
+                    traefikDashboardError = result?.Message ?? "Configuration failed";
+                }
+            }
+            else
+            {
+                var errorText = await response.Content.ReadAsStringAsync();
+                traefikDashboardError = $"Failed to save configuration: {errorText}";
+            }
+        }
+        catch (Exception ex)
+        {
+            traefikDashboardError = $"Failed to save Traefik dashboard configuration: {ex.Message}";
+        }
+        finally
+        {
+            savingTraefikDashboard = false;
+        }
+    }
+
+    private async Task SaveHostCraftDomain()
+    {
+        savingDomain = true;
+        domainError = null;
+        domainSuccess = null;
+
+        try
+        {
+            // Validate
+            if (string.IsNullOrWhiteSpace(hostcraftDomain))
+            {
+                domainError = "Domain is required";
+                savingDomain = false;
+                return;
+            }
+
+            if (hostcraftEnableHttps && string.IsNullOrWhiteSpace(hostcraftLetsEncryptEmail))
+            {
+                domainError = "Email is required when HTTPS is enabled";
+                savingDomain = false;
+                return;
+            }
+
+            // Call API to save HostCraft domain configuration
+            var request = new ConfigureHostCraftRequest(
+                hostcraftDomain,
+                hostcraftApiDomain,
+                hostcraftEnableHttps,
+                hostcraftLetsEncryptEmail
+            );
+
+            var response = await Http.PostAsJsonAsync("api/systemsettings", request);
+            
+            if (response.IsSuccessStatusCode)
+            {
+                var result = await response.Content.ReadFromJsonAsync<ConfigureHostCraftResponse>();
+                if (result?.Success == true)
+                {
+                    domainSuccess = result.Message;
+                }
+                else
+                {
+                    domainError = result?.Message ?? "Configuration failed";
+                }
+            }
+            else
+            {
+                var errorText = await response.Content.ReadAsStringAsync();
+                domainError = $"Failed to save configuration: {errorText}";
+            }
+        }
+        catch (Exception ex)
+        {
+            domainError = $"Failed to save domain configuration: {ex.Message}";
+        }
+        finally
+        {
+            savingDomain = false;
+        }
+    }
+
+    private record SystemSettingsDto(
+        string? HostCraftDomain,
+        string? HostCraftApiDomain,
+        bool HostCraftEnableHttps,
+        string? HostCraftLetsEncryptEmail,
+        string? CertificateStatus,
+        DateTime? ConfiguredAt,
+        DateTime? ProxyUpdatedAt,
+        string? TraefikDashboardDomain,
+        bool TraefikDashboardAuthEnabled,
+        string? TraefikDashboardUsername);
+
+    private record ConfigureHostCraftRequest(
+        string Domain,
+        string? ApiDomain,
+        bool EnableHttps,
+        string? LetsEncryptEmail);
+
+    private record ConfigureHostCraftResponse(
+        bool Success,
+        string Message,
+        string? Domain,
+        bool HttpsEnabled);
+    
+    private record ConfigureTraefikDashboardRequest(
+        string? DashboardDomain,
+        bool EnableAuth,
+        string? Username,
+        string? Password);
+
+    private record ConfigureTraefikDashboardResponse(
+        bool Success,
+        string Message,
+        string? DashboardDomain,
+        bool AuthEnabled);
+
+    private async Task LoadVersion()
+    {
+        try
+        {
+            versionInfo = await Http.GetFromJsonAsync<VersionInfo>("api/update/version");
+        }
+        catch (Exception ex)
+        {
+            updateError = $"Failed to load version: {ex.Message}";
+        }
+    }
+
+    private async Task CheckForUpdates()
+    {
+        checkingForUpdates = true;
+        updateError = null;
+        updateSuccess = null;
+
+        try
+        {
+            updateInfo = await Http.GetFromJsonAsync<UpdateInfo>("api/update/check");
+            
+            if (updateInfo?.UpdateAvailable == true)
+            {
+                updateSuccess = $"New version {updateInfo.LatestVersion} is available!";
+            }
+        }
+        catch (Exception ex)
+        {
+            updateError = $"Failed to check for updates: {ex.Message}";
+        }
+        finally
+        {
+            checkingForUpdates = false;
+        }
+    }
+
+    private async Task TriggerUpdate()
+    {
+        if (updateInfo == null || string.IsNullOrEmpty(updateInfo.LatestVersion)) return;
+
+        var confirmed = await JS.InvokeAsync<bool>(
+            "confirm", 
+            $"Are you sure you want to update to version {updateInfo.LatestVersion}? The application will restart."
+        );
+
+        if (!confirmed) return;
+
+        updatingInProgress = true;
+        updateError = null;
+        updateSuccess = null;
+
+        try
+        {
+            var response = await Http.PostAsJsonAsync("api/update/trigger", new { Version = updateInfo.LatestVersion });
+            
+            if (response.IsSuccessStatusCode)
+            {
+                updateSuccess = "Update triggered successfully! The application will restart shortly.";
+            }
+            else
+            {
+                updateError = "Update trigger failed. Please check the deployment configuration.";
+            }
+        }
+        catch (Exception ex)
+        {
+            updateError = $"Failed to trigger update: {ex.Message}";
+        }
+        finally
+        {
+            updatingInProgress = false;
+        }
+    }
+
+    private string GetPlatform()
+    {
+        if (OperatingSystem.IsWindows()) return "Windows";
+        if (OperatingSystem.IsLinux()) return "Linux";
+        if (OperatingSystem.IsMacOS()) return "macOS";
+        return "Unknown";
+    }
+
+    private string GetArchitecture()
+    {
+        return System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture.ToString();
+    }
+
+    private string GetServerIP()
+    {
+        // Get the host from the browser's current URL using NavigationManager
+        try
+        {
+            var uri = new Uri(NavigationManager.Uri);
+            return uri.Host;
+        }
+        catch { }
+
+        // Fallback to localhost
+        return "localhost";
+    }
+
+    public class VersionInfo
+    {
+        public string Version { get; set; } = "";
+        public DateTime BuildDate { get; set; }
+    }
+
+    public class UpdateInfo
+    {
+        public string CurrentVersion { get; set; } = "";
+        public string? LatestVersion { get; set; }
+        public bool UpdateAvailable { get; set; }
+        public DateTime? PublishedAt { get; set; }
+        public string? ReleaseNotes { get; set; }
+        public string? DownloadUrl { get; set; }
+        public string? HtmlUrl { get; set; }
+    }
+}
+
+<style>
+    .tabs {
+        display: flex;
+        gap: 0.5rem;
+        margin-bottom: 1rem;
+        border-bottom: 2px solid #334155;
+    }
+
+    .tab-button {
+        padding: 0.75rem 1.5rem;
+        background: transparent;
+        border: none;
+        color: #94a3b8;
+        cursor: pointer;
+        font-weight: 500;
+        transition: all 0.2s;
+        border-bottom: 2px solid transparent;
+        margin-bottom: -2px;
+    }
+
+    .tab-button:hover {
+        color: #e2e8f0;
+        background: rgba(148, 163, 184, 0.1);
+    }
+
+    .tab-button.active {
+        color: #3b82f6;
+        border-bottom-color: #3b82f6;
+    }
+
+    .log-container {
+        background: #0f172a;
+        border: 1px solid #334155;
+        border-radius: 8px;
+        padding: 1rem;
+        max-height: 600px;
+        overflow-y: auto;
+        font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+    }
+
+    .log-output {
+        margin: 0;
+        color: #e2e8f0;
+        font-size: 0.875rem;
+        line-height: 1.6;
+        white-space: pre-wrap;
+        word-wrap: break-word;
+    }
+
+    .log-controls {
+        display: flex;
+        gap: 1rem;
+        align-items: center;
+        flex-wrap: wrap;
+    }
+
+    .log-controls select {
+        background: #1e293b;
+        border: 1px solid #334155;
+        color: #e2e8f0;
+        padding: 0.5rem;
+        border-radius: 6px;
+    }
+
+    .loading-state {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 3rem;
+        color: #94a3b8;
+    }
+
+    .spinner {
+        width: 40px;
+        height: 40px;
+        border: 4px solid #334155;
+        border-top-color: #3b82f6;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+        margin-bottom: 1rem;
+    }
+
+    @@keyframes spin {
+        to { transform: rotate(360deg); }
+    }
+
+    .log-info {
+        display: flex;
+        gap: 2rem;
+        padding: 0.75rem;
+        background: #1e293b;
+        border-radius: 6px;
+    }
+
+    .log-info p {
+        margin: 0;
+    }
+</style>

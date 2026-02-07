@@ -1,0 +1,465 @@
+﻿@page "/"
+@rendermode InteractiveServer
+@using HostCraft.Core.Enums
+@using HostCraft.Web.Services
+@inject IHttpClientFactory HttpClientFactory
+@inject IWebAuthService AuthService
+
+<PageTitle>HostCraft Dashboard</PageTitle>
+
+<div class="page-container">
+    <div class="page-header">
+        <h1>🚀 HostCraft Dashboard</h1>
+        <p class="page-subtitle">Self-Hosted Docker PaaS Platform</p>
+    </div>
+
+    @if (!string.IsNullOrEmpty(errorMessage))
+    {
+        <div class="card" style="border-left: 4px solid #ef4444;">
+            <h3 style="color: #ef4444;">⚠️ Error Loading Dashboard</h3>
+            <p>@errorMessage</p>
+            <button @onclick="LoadData" class="btn btn-primary">🔄 Retry</button>
+        </div>
+    }
+
+    @if (servers == null)
+    {
+        <div class="card loading-state">
+            <div class="loading-spinner"></div>
+            <p>Loading deployment information...</p>
+        </div>
+    }
+    else if (!servers.Any())
+    {
+        <div class="card empty-state">
+            <div class="empty-icon">🐋</div>
+            <h2>Welcome to HostCraft!</h2>
+            <p>No servers configured yet. Add your first server to get started.</p>
+            <a href="/servers/new" class="btn btn-primary">
+                <span>➕</span> Add Server
+            </a>
+        </div>
+    }
+    else
+    {
+        <!-- Quick Stats -->
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-icon">🖥️</div>
+                <div class="stat-content">
+                    <div class="stat-value">@(healthData?.TotalServers ?? servers.Count)</div>
+                    <div class="stat-label">Total Servers</div>
+                </div>
+            </div>
+            
+            <div class="stat-card stat-online">
+                <div class="stat-icon">✅</div>
+                <div class="stat-content">
+                    <div class="stat-value">@(healthData?.OnlineServers ?? servers.Count(s => s.Status == ServerStatus.Online))</div>
+                    <div class="stat-label">Online</div>
+                </div>
+            </div>
+
+            <div class="stat-card stat-containers">
+                <div class="stat-icon">📦</div>
+                <div class="stat-content">
+                    <div class="stat-value">@(healthData?.RunningContainers ?? 0)</div>
+                    <div class="stat-label">Containers</div>
+                </div>
+            </div>
+
+            <div class="stat-card stat-cpu">
+                <div class="stat-icon">⚡</div>
+                <div class="stat-content">
+                    <div class="stat-value">@((healthData?.AverageCpuUsage ?? 0).ToString("F1"))%</div>
+                    <div class="stat-label">Avg CPU</div>
+                </div>
+            </div>
+
+            <div class="stat-card stat-memory">
+                <div class="stat-icon">💾</div>
+                <div class="stat-content">
+                    <div class="stat-value">@((healthData?.AverageMemoryUsage ?? 0).ToString("F1"))%</div>
+                    <div class="stat-label">Avg Memory</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Health Monitoring Section -->
+        @if (healthData?.ServerMetrics?.Any() == true)
+        {
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">
+                        <span>📊</span> Server Health & Resources
+                    </h2>
+                    <span class="badge">Last updated: @DateTime.Now.ToString("HH:mm:ss")</span>
+                </div>
+                
+                <div class="health-grid">
+                    @foreach (var metric in healthData.ServerMetrics)
+                    {
+                        <div class="health-card @GetHealthStatus(metric)">
+                            <div class="health-header">
+                                <h3>@metric.ServerName</h3>
+                                <span class="status-badge @metric.Status.ToString().ToLower()">
+                                    @GetStatusIcon(metric.Status) @metric.Status
+                                </span>
+                            </div>
+                            
+                            @if (metric.Status == ServerStatus.Online)
+                            {
+                                <div class="metrics-grid">
+                                    <div class="metric">
+                                        <div class="metric-label">CPU</div>
+                                        <div class="metric-bar">
+                                            <div class="metric-fill" style="width: @(metric.CpuUsagePercent)%; background: @GetMetricColor(metric.CpuUsagePercent)"></div>
+                                        </div>
+                                        <div class="metric-value">@metric.CpuUsagePercent.ToString("F1")%</div>
+                                    </div>
+                                    
+                                    <div class="metric">
+                                        <div class="metric-label">Memory</div>
+                                        <div class="metric-bar">
+                                            <div class="metric-fill" style="width: @(metric.MemoryUsagePercent)%; background: @GetMetricColor(metric.MemoryUsagePercent)"></div>
+                                        </div>
+                                        <div class="metric-value">@metric.MemoryUsagePercent.ToString("F1")%</div>
+                                    </div>
+                                    
+                                    <div class="metric">
+                                        <div class="metric-label">Disk</div>
+                                        <div class="metric-bar">
+                                            <div class="metric-fill" style="width: @(metric.DiskUsagePercent)%; background: @GetMetricColor(metric.DiskUsagePercent)"></div>
+                                        </div>
+                                        <div class="metric-value">@metric.DiskUsagePercent.ToString("F1")%</div>
+                                    </div>
+                                </div>
+                                
+                                <div class="container-stats">
+                                    <span>📦 @metric.RunningContainers running / @metric.ContainerCount total</span>
+                                </div>
+                            }
+                            else
+                            {
+                                <div class="error-message">
+                                    ⚠️ @(metric.ErrorMessage ?? "Server offline or unreachable")
+                                </div>
+                            }
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+
+        <!-- Swarm Cluster Section -->
+        @if (swarmServers.Any())
+        {
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">
+                        <span>🐝</span> Docker Swarm Cluster
+                    </h2>
+                    <span class="badge badge-@GetSwarmStatus()">@GetSwarmClusterHealth()</span>
+                </div>
+                
+                <div class="server-list">
+                    @foreach (var manager in swarmServers.Where(s => s.Type == ServerType.SwarmManager))
+                    {
+                        <div class="server-item server-manager">
+                            <div class="server-icon">👑</div>
+                            <div class="server-info">
+                                <div class="server-name">@manager.Name</div>
+                                <div class="server-host">@manager.Host</div>
+                            </div>
+                            <div class="server-meta">
+                                <span class="server-role">Manager</span>
+                                <span class="server-status status-@manager.Status.ToString().ToLower()">
+                                    @(manager.Status == ServerStatus.Online ? "●" : "○") @manager.Status
+                                </span>
+                            </div>
+                        </div>
+                    }
+                    
+                    @foreach (var worker in swarmServers.Where(s => s.Type == ServerType.SwarmWorker))
+                    {
+                        <div class="server-item server-worker">
+                            <div class="server-icon">⚙️</div>
+                            <div class="server-info">
+                                <div class="server-name">@worker.Name</div>
+                                <div class="server-host">@worker.Host</div>
+                            </div>
+                            <div class="server-meta">
+                                <span class="server-role">Worker</span>
+                                <span class="server-status status-@worker.Status.ToString().ToLower()">
+                                    @(worker.Status == ServerStatus.Online ? "●" : "○") @worker.Status
+                                </span>
+                            </div>
+                        </div>
+                    }
+                </div>
+                
+                <div class="swarm-stats">
+                    <div class="stat-item">
+                        <span class="stat-label">Managers</span>
+                        <span class="stat-value">@swarmServers.Count(s => s.Type == ServerType.SwarmManager)</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">Workers</span>
+                        <span class="stat-value">@swarmServers.Count(s => s.Type == ServerType.SwarmWorker)</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">Quorum</span>
+                        <span class="stat-value">@GetQuorumStatus()</span>
+                    </div>
+                </div>
+            </div>
+        }
+
+        <!-- Standalone Servers Section -->
+        @if (standaloneServers.Any())
+        {
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">
+                        <span>🐳</span> Standalone Servers
+                    </h2>
+                </div>
+                
+                <div class="server-list">
+                    @foreach (var server in standaloneServers)
+                    {
+                        <div class="server-item server-standalone">
+                            <div class="server-icon">🖥️</div>
+                            <div class="server-info">
+                                <div class="server-name">@server.Name</div>
+                                <div class="server-host">@server.Host</div>
+                            </div>
+                            <div class="server-meta">
+                                <span class="server-role">Standalone</span>
+                                <span class="server-status status-@server.Status.ToString().ToLower()">
+                                    @(server.Status == ServerStatus.Online ? "●" : "○") @server.Status
+                                </span>
+                            </div>
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+
+        <!-- Quick Actions -->
+        <div class="actions-card">
+            <a href="/servers/new" class="btn btn-primary">
+                <span>➕</span> Add Server
+            </a>
+            <a href="/projects" class="btn btn-outline">
+                <span>📂</span> View Projects
+            </a>
+            <a href="/deployments" class="btn btn-outline">
+                <span>🚀</span> View Deployments
+            </a>
+        </div>
+    }
+</div>
+
+@code {
+    private List<ServerDto>? servers;
+    private DashboardHealth? healthData;
+    private string? errorMessage;
+    private List<ServerDto> swarmServers => servers?.Where(s => s.IsSwarm).ToList() ?? new();
+    private List<ServerDto> standaloneServers => servers?.Where(s => !s.IsSwarm).ToList() ?? new();
+    private List<ServerDto> kubernetesServers => new(); // Placeholder for future K8s support
+    private System.Threading.Timer? refreshTimer;
+
+    private bool _dataLoaded = false;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && !_dataLoaded)
+        {
+            _dataLoaded = true;
+
+            // Initialize auth first (loads token from localStorage into TokenStore)
+            await AuthService.InitializeAsync();
+
+            // Now load data with token available
+            await LoadData();
+            StateHasChanged();
+
+            // Refresh health data every 30 seconds
+            refreshTimer = new System.Threading.Timer(async _ =>
+            {
+                await LoadData();
+                await InvokeAsync(StateHasChanged);
+            }, null, TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(30));
+        }
+    }
+
+    private async Task LoadData()
+    {
+        errorMessage = null;
+
+        // Create a new HttpClient for this request to avoid disposal issues
+        var httpClient = HttpClientFactory.CreateClient("HostCraftAPI");
+
+        // Load servers first (critical data)
+        try
+        {
+            // Debug: Check if we have a token before making the request
+            var token = await AuthService.GetTokenAsync();
+            Console.WriteLine($"[Dashboard] Token available before API call: {!string.IsNullOrEmpty(token)}, length: {token?.Length ?? 0}");
+            Console.WriteLine($"[Dashboard] Calling API at: {httpClient.BaseAddress}api/servers");
+            servers = await httpClient.GetFromJsonAsync<List<ServerDto>>("api/servers");
+            Console.WriteLine($"[Dashboard] Loaded {servers?.Count ?? 0} servers from API");
+            
+            if (servers == null)
+            {
+                servers = new List<ServerDto>();
+                errorMessage = "API returned null for servers list";
+            }
+        }
+        catch (HttpRequestException ex)
+        {
+            errorMessage = $"Failed to connect to API: {ex.Message}. API URL: {httpClient.BaseAddress}";
+            Console.WriteLine($"[Dashboard] HTTP Error loading servers: {ex.Message}");
+            servers = new List<ServerDto>();
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error loading servers: {ex.Message}";
+            Console.WriteLine($"[Dashboard] Error loading servers: {ex.Message}");
+            servers = new List<ServerDto>();
+        }
+        
+        // Load health data separately (non-critical, can fail)
+        try
+        {
+            Console.WriteLine($"[Dashboard] Calling health endpoint...");
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            healthData = await httpClient.GetFromJsonAsync<DashboardHealth>("api/health/dashboard", cts.Token);
+            Console.WriteLine($"[Dashboard] Health data loaded successfully");
+        }
+        catch (OperationCanceledException)
+        {
+            Console.WriteLine($"[Dashboard] Health endpoint timed out after 10 seconds");
+            healthData = null;
+            // Don't show error to user, health data is optional
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Dashboard] Failed to load health data: {ex.Message}");
+            healthData = null;
+            // Don't overwrite servers or errorMessage, health data is optional
+        }
+    }
+
+    public void Dispose()
+    {
+        refreshTimer?.Dispose();
+    }
+
+    private string GetSwarmStatus()
+    {
+        var managers = swarmServers.Count(s => s.Type == ServerType.SwarmManager);
+        var onlineManagers = swarmServers.Count(s => s.Type == ServerType.SwarmManager && s.Status == ServerStatus.Online);
+        
+        if (managers >= 3 && onlineManagers >= (managers / 2) + 1)
+            return "healthy";
+        if (onlineManagers >= (managers / 2) + 1)
+            return "degraded";
+        return "critical";
+    }
+
+    private string GetSwarmDescription()
+    {
+        var managers = swarmServers.Count(s => s.Type == ServerType.SwarmManager);
+        var workers = swarmServers.Count(s => s.Type == ServerType.SwarmWorker);
+        return $"{managers} manager{(managers != 1 ? "s" : "")}, {workers} worker{(workers != 1 ? "s" : "")} - High availability enabled";
+    }
+
+    private string GetSwarmClusterHealth()
+    {
+        var status = GetSwarmStatus();
+        return status switch
+        {
+            "healthy" => "✅ HEALTHY - Quorum Maintained",
+            "degraded" => "⚠️ DEGRADED - Reduced Redundancy",
+            "critical" => "🔴 CRITICAL - Quorum Lost",
+            _ => "❓ UNKNOWN"
+        };
+    }
+
+    private string GetQuorumStatus()
+    {
+        var managers = swarmServers.Count(s => s.Type == ServerType.SwarmManager);
+        var required = (managers / 2) + 1;
+        return $"{required}/{managers}";
+    }
+
+    private string GetHealthStatus(ServerHealthMetrics metric)
+    {
+        if (metric.Status != ServerStatus.Online) return "health-error";
+        
+        var maxUsage = Math.Max(Math.Max(metric.CpuUsagePercent, metric.MemoryUsagePercent), metric.DiskUsagePercent);
+        
+        if (maxUsage > 90) return "health-critical";
+        if (maxUsage > 75) return "health-warning";
+        return "health-good";
+    }
+
+    private string GetMetricColor(double percentage)
+    {
+        if (percentage > 90) return "var(--error)";
+        if (percentage > 75) return "var(--warning)";
+        return "var(--success)";
+    }
+
+    private string GetStatusIcon(ServerStatus status) => status switch
+    {
+        ServerStatus.Online => "🟢",
+        ServerStatus.Offline => "🔴",
+        ServerStatus.Error => "⚠️",
+        ServerStatus.Validating => "🔄",
+        _ => "❓"
+    };
+
+    // DTOs (temporary - should be in Shared project later)
+    public class ServerDto
+    {
+        public int Id { get; set; }
+        public string Name { get; set; } = "";
+        public string Host { get; set; } = "";
+        public ServerType Type { get; set; }
+        public ServerStatus Status { get; set; }
+        public string? Region { get; set; }
+        public int? SwarmManagerCount { get; set; }
+        public int? SwarmWorkerCount { get; set; }
+        public bool IsSwarm => Type == ServerType.SwarmManager || Type == ServerType.SwarmWorker;
+    }
+
+    public class DashboardHealth
+    {
+        public int TotalServers { get; set; }
+        public int OnlineServers { get; set; }
+        public int TotalContainers { get; set; }
+        public int RunningContainers { get; set; }
+        public double AverageCpuUsage { get; set; }
+        public double AverageMemoryUsage { get; set; }
+        public List<ServerHealthMetrics> ServerMetrics { get; set; } = new();
+    }
+
+    public class ServerHealthMetrics
+    {
+        public int ServerId { get; set; }
+        public string ServerName { get; set; } = "";
+        public ServerStatus Status { get; set; }
+        public double CpuUsagePercent { get; set; }
+        public double MemoryUsagePercent { get; set; }
+        public double DiskUsagePercent { get; set; }
+        public long TotalMemoryMB { get; set; }
+        public long UsedMemoryMB { get; set; }
+        public int ContainerCount { get; set; }
+        public int RunningContainers { get; set; }
+        public DateTime LastChecked { get; set; }
+        public string? ErrorMessage { get; set; }
+    }
+}

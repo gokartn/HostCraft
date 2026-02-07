@@ -1,0 +1,918 @@
+@page "/backups/history"
+@rendermode InteractiveServer
+@inject HttpClient Http
+@inject IJSRuntime JSRuntime
+@inject ILogger<BackupHistory> Logger
+@using System.Text.Json
+
+<PageTitle>Backup History - HostCraft</PageTitle>
+
+<div class="backup-history-page">
+    <section class="hero-panel">
+        <div class="hero-copy">
+            <p class="eyebrow">Data recovery & system restoration</p>
+            <h1>Backup History</h1>
+            <p class="subtitle">View, download, and restore system-wide backups with integrity verification.</p>
+            <div class="hero-tags">
+                <span class="tag">Verified</span>
+                <span class="tag">Downloadable</span>
+                <span class="tag">Restorable</span>
+            </div>
+        </div>
+        <div class="hero-metrics">
+            <div class="metric-card">
+                <span>Total Backups</span>
+                <strong>@backups.Count</strong>
+                <p>System snapshots</p>
+            </div>
+            <div class="metric-card">
+                <span>Storage Used</span>
+                <strong>@FormatBytes(backups.Sum(b => b.SizeBytes))</strong>
+                <p>Total size</p>
+            </div>
+            <div class="metric-card">
+                <span>Latest</span>
+                <strong>@(backups.Any() ? backups.First().CreatedAt.ToString("MMM d") : "N/A")</strong>
+                <p>Most recent</p>
+            </div>
+        </div>
+    </section>
+
+    @if (loading)
+    {
+        <div class="loading-state">
+            <div class="spinner"></div>
+            <p>Loading backups...</p>
+        </div>
+    }
+    else if (error != null)
+    {
+        <div class="error-banner">
+            <span class="icon">❌</span>
+            <div>
+                <strong>Error loading backups</strong>
+                <p>@error</p>
+            </div>
+            <button class="btn btn-secondary" @onclick="LoadBackups">Retry</button>
+        </div>
+    }
+    else
+    {
+        <section class="filters-panel">
+            <div>
+                <h2>System Backups</h2>
+                <p>Download backups to your computer for offline storage or restoration on another instance.</p>
+            </div>
+            <div class="filter-actions">
+                <button class="btn btn-primary" @onclick="@(() => NavigationManager.NavigateTo("/backups"))">
+                    <span class="icon">➕</span>
+                    Create New Backup
+                </button>
+            </div>
+        </section>
+
+        @if (backups.Count == 0)
+        {
+            <div class="empty-state">
+                <div class="empty-icon">📦</div>
+                <h3>No backups yet</h3>
+                <p>Create your first system backup to protect your HostCraft configuration and data.</p>
+                <div class="mt-4">
+                    <button class="btn btn-primary btn-lg" @onclick="@(() => NavigationManager.NavigateTo("/backups"))">
+                        <span class="icon">➕</span>
+                        Create Backup
+                    </button>
+                </div>
+            </div>
+        }
+        else
+        {
+            <div class="backups-grid">
+                @foreach (var backup in backups)
+                {
+                    <article class="backup-card @(backup.Status == "Success" ? "" : "warning")">
+                        <div class="card-accent"></div>
+                        <div class="backup-header">
+                            <div class="backup-icon">
+                                @GetBackupIcon(backup.Status)
+                            </div>
+                            <div class="backup-info">
+                                <h3>System Backup #@backup.Id</h3>
+                                <span class="backup-date">@backup.CreatedAt.ToString("MMMM dd, yyyy 'at' HH:mm")</span>
+                            </div>
+                            <div class="backup-status">
+                                <span class="status-pill @backup.Status.ToLower()">@backup.Status</span>
+                                @if (backup.IsVerified)
+                                {
+                                    <span class="verified-badge" title="Integrity verified">✓ Verified</span>
+                                }
+                            </div>
+                        </div>
+
+                        <div class="backup-details">
+                            <div class="detail-row">
+                                <span class="label">Scope:</span>
+                                <span class="value">@backup.Scope</span>
+                            </div>
+                            <div class="detail-row">
+                                <span class="label">Size:</span>
+                                <span class="value">@FormatBytes(backup.SizeBytes)</span>
+                            </div>
+                            <div class="detail-row">
+                                <span class="label">Triggered by:</span>
+                                <span class="value">@(backup.TriggeredBy ?? "System")</span>
+                            </div>
+                            @if (backup.IsCompressed)
+                            {
+                                <div class="detail-row">
+                                    <span class="label">Compression:</span>
+                                    <span class="value">✓ Enabled</span>
+                                </div>
+                            }
+                            @if (backup.IsEncrypted)
+                            {
+                                <div class="detail-row">
+                                    <span class="label">Encryption:</span>
+                                    <span class="value">🔒 Encrypted</span>
+                                </div>
+                            }
+                        </div>
+
+                        <div class="backup-counts">
+                            @if (backup.ProjectCount > 0)
+                            {
+                                <div class="count-chip">
+                                    <span class="count">@backup.ProjectCount</span>
+                                    <span class="label">Projects</span>
+                                </div>
+                            }
+                            @if (backup.ApplicationCount > 0)
+                            {
+                                <div class="count-chip">
+                                    <span class="count">@backup.ApplicationCount</span>
+                                    <span class="label">Applications</span>
+                                </div>
+                            }
+                            @if (backup.ServerCount > 0)
+                            {
+                                <div class="count-chip">
+                                    <span class="count">@backup.ServerCount</span>
+                                    <span class="label">Servers</span>
+                                </div>
+                            }
+                        </div>
+
+                        <div class="backup-actions">
+                            <button class="btn btn-icon" title="Verify integrity" @onclick="() => VerifyBackup(backup.Id)" disabled="@(verifyingId == backup.Id)">
+                                @if (verifyingId == backup.Id)
+                                {
+                                    <span class="spinner-small"></span>
+                                }
+                                else
+                                {
+                                    <span>🔍</span>
+                                }
+                            </button>
+                            <button class="btn btn-icon btn-primary" title="Download to computer" @onclick="() => DownloadBackup(backup.Id)" disabled="@(downloadingId == backup.Id)">
+                                @if (downloadingId == backup.Id)
+                                {
+                                    <span class="spinner-small"></span>
+                                }
+                                else
+                                {
+                                    <span>⬇️</span>
+                                }
+                            </button>
+                            <button class="btn btn-icon btn-success" title="Restore backup" @onclick="@(() => NavigationManager.NavigateTo($"/backups/restore/{backup.Id}"))">
+                                <span>♻️</span>
+                            </button>
+                            <button class="btn btn-icon btn-info" title="View manifest" @onclick="() => ShowManifestModal(backup)">
+                                <span>📋</span>
+                            </button>
+                        </div>
+                    </article>
+                }
+            </div>
+        }
+    }
+</div>
+
+<!-- Manifest Modal -->
+@if (showManifestModal && selectedBackup != null)
+{
+    <div class="modal-overlay" @onclick="CloseManifestModal">
+        <div class="modal-content large" @onclick:stopPropagation="true">
+            <div class="modal-header">
+                <h2>Backup Manifest #@selectedBackup.Id</h2>
+                <button class="modal-close" @onclick="CloseManifestModal">×</button>
+            </div>
+
+            <div class="modal-body">
+                @if (!string.IsNullOrEmpty(selectedBackup.ManifestJson))
+                {
+                    <pre class="manifest-content">@selectedBackup.ManifestJson</pre>
+                }
+                else
+                {
+                    <p class="text-muted">No manifest available for this backup.</p>
+                }
+            </div>
+
+            <div class="modal-footer">
+                <button class="btn btn-secondary" @onclick="CloseManifestModal">
+                    Close
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Verification Toast -->
+@if (verificationResult != null)
+{
+    <div class="toast @(verificationResult.IsValid ? "success" : "error")">
+        <span class="icon">@(verificationResult.IsValid ? "✓" : "✗")</span>
+        <span>@verificationResult.Message</span>
+        <button class="toast-close" @onclick="() => verificationResult = null">×</button>
+    </div>
+}
+
+@code {
+    [Inject] private NavigationManager NavigationManager { get; set; } = default!;
+
+    private List<BackupDto> backups = new();
+    private bool loading = true;
+    private string? error = null;
+
+    private bool showManifestModal = false;
+    private BackupDto? selectedBackup = null;
+
+    private int? verifyingId = null;
+    private int? downloadingId = null;
+    private VerificationResult? verificationResult = null;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadBackups();
+    }
+
+    private async Task LoadBackups()
+    {
+        loading = true;
+        error = null;
+
+        try
+        {
+            var response = await Http.GetAsync("api/Backups/system/list");
+            if (response.IsSuccessStatusCode)
+            {
+                backups = await response.Content.ReadFromJsonAsync<List<BackupDto>>() ?? new();
+            }
+            else
+            {
+                error = $"Failed to load backups: {response.StatusCode}";
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading backups");
+            error = "An error occurred while loading backups";
+        }
+        finally
+        {
+            loading = false;
+        }
+    }
+
+    private async Task VerifyBackup(int backupId)
+    {
+        verifyingId = backupId;
+        verificationResult = null;
+
+        try
+        {
+            var response = await Http.PostAsync($"api/Backups/{backupId}/verify", null);
+            var result = await response.Content.ReadFromJsonAsync<VerifyBackupResponse>();
+
+            verificationResult = new VerificationResult
+            {
+                IsValid = result?.IsValid ?? false,
+                Message = result?.Message ?? "Unknown error"
+            };
+
+            // Update backup verification status in UI
+            var backup = backups.FirstOrDefault(b => b.Id == backupId);
+            if (backup != null)
+            {
+                backup.IsVerified = result?.IsValid ?? false;
+            }
+
+            // Auto-hide after 5 seconds
+            _ = Task.Delay(5000).ContinueWith(_ => verificationResult = null);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error verifying backup");
+            verificationResult = new VerificationResult
+            {
+                IsValid = false,
+                Message = $"Verification failed: {ex.Message}"
+            };
+        }
+        finally
+        {
+            verifyingId = null;
+        }
+    }
+
+    private async Task DownloadBackup(int backupId)
+    {
+        downloadingId = backupId;
+
+        try
+        {
+            // Trigger download by navigating to the download endpoint
+            var downloadUrl = $"{Http.BaseAddress}api/Backups/{backupId}/download-file";
+            await JSRuntime.InvokeVoidAsync("open", downloadUrl, "_blank");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error initiating backup download");
+            verificationResult = new VerificationResult
+            {
+                IsValid = false,
+                Message = $"Download failed: {ex.Message}"
+            };
+        }
+        finally
+        {
+            // Small delay so user sees the loading state
+            await Task.Delay(1000);
+            downloadingId = null;
+        }
+    }
+
+    private void ShowManifestModal(BackupDto backup)
+    {
+        selectedBackup = backup;
+        showManifestModal = true;
+    }
+
+    private void CloseManifestModal()
+    {
+        showManifestModal = false;
+        selectedBackup = null;
+    }
+
+    private string GetBackupIcon(string status)
+    {
+        return status switch
+        {
+            "Success" => "✅",
+            "Running" => "⏳",
+            "Failed" => "❌",
+            _ => "📦"
+        };
+    }
+
+    private string FormatBytes(long bytes)
+    {
+        string[] sizes = { "B", "KB", "MB", "GB", "TB" };
+        double len = bytes;
+        int order = 0;
+        while (len >= 1024 && order < sizes.Length - 1)
+        {
+            order++;
+            len = len / 1024;
+        }
+        return $"{len:0.##} {sizes[order]}";
+    }
+
+    private class BackupDto
+    {
+        public int Id { get; set; }
+        public string Type { get; set; } = "";
+        public string Status { get; set; } = "";
+        public string Scope { get; set; } = "";
+        public long SizeBytes { get; set; }
+        public bool IsVerified { get; set; }
+        public bool IsEncrypted { get; set; }
+        public bool IsCompressed { get; set; }
+        public int ProjectCount { get; set; }
+        public int ApplicationCount { get; set; }
+        public int ServerCount { get; set; }
+        public string? TriggeredBy { get; set; }
+        public string? ManifestJson { get; set; }
+        public DateTime CreatedAt { get; set; }
+    }
+
+    private class VerifyBackupResponse
+    {
+        public int BackupId { get; set; }
+        public bool IsValid { get; set; }
+        public string Message { get; set; } = "";
+    }
+
+    private class VerificationResult
+    {
+        public bool IsValid { get; set; }
+        public string Message { get; set; } = "";
+    }
+}
+
+<style>
+    .backup-history-page {
+        padding: clamp(1.5rem, 3vw, 3rem);
+        min-height: 100vh;
+        background: radial-gradient(circle at top, rgba(99, 102, 241, 0.25), transparent 55%)
+            , radial-gradient(circle at 20% 20%, rgba(59, 130, 246, 0.2), transparent 45%)
+            , #0f172a;
+        color: #e2e8f0;
+    }
+
+    .hero-panel {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+        gap: 2rem;
+        padding: 2rem;
+        border-radius: 1.5rem;
+        border: 1px solid rgba(99, 102, 241, 0.4);
+        background: rgba(15, 23, 42, 0.75);
+        box-shadow: 0 25px 60px rgba(15, 23, 42, 0.45);
+    }
+
+    .hero-copy h1 {
+        font-size: clamp(2rem, 4vw, 2.8rem);
+        margin-bottom: 0.5rem;
+    }
+
+    .eyebrow {
+        text-transform: uppercase;
+        letter-spacing: 0.2em;
+        font-size: 0.75rem;
+        color: #a5b4fc;
+        margin-bottom: 0.5rem;
+    }
+
+    .subtitle {
+        color: #cbd5e1;
+        font-size: 1rem;
+        margin-bottom: 1rem;
+    }
+
+    .hero-tags {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        margin-top: 1rem;
+    }
+
+    .hero-tags .tag {
+        padding: 0.35rem 0.8rem;
+        border-radius: 999px;
+        border: 1px solid rgba(148, 163, 184, 0.3);
+        font-size: 0.85rem;
+    }
+
+    .hero-metrics {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+        gap: 1rem;
+    }
+
+    .metric-card {
+        padding: 1rem;
+        border-radius: 1rem;
+        background: linear-gradient(135deg, rgba(99, 102, 241, 0.2), rgba(79, 70, 229, 0.05));
+        border: 1px solid rgba(99, 102, 241, 0.3);
+    }
+
+    .metric-card strong {
+        display: block;
+        font-size: 2rem;
+        margin: 0.35rem 0;
+        color: #ffffff;
+    }
+
+    .filters-panel {
+        margin-top: 2rem;
+        padding: 1.5rem;
+        border-radius: 1.25rem;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        background: rgba(15, 23, 42, 0.8);
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: space-between;
+        gap: 1rem;
+    }
+
+    .backups-grid {
+        margin-top: 2rem;
+        display: grid;
+        gap: 1.5rem;
+        grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
+    }
+
+    .backup-card {
+        position: relative;
+        padding: 1.75rem;
+        border-radius: 1.25rem;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        background: rgba(15, 23, 42, 0.9);
+        overflow: hidden;
+        transition: transform 0.25s ease, border 0.25s ease;
+    }
+
+    .backup-card:hover {
+        transform: translateY(-6px);
+        border-color: rgba(99, 102, 241, 0.6);
+    }
+
+    .backup-card.warning {
+        border-color: rgba(251, 191, 36, 0.4);
+    }
+
+    .card-accent {
+        position: absolute;
+        inset: 0;
+        background: radial-gradient(circle at top right, rgba(99, 102, 241, 0.35), transparent 55%);
+        opacity: 0.7;
+        pointer-events: none;
+    }
+
+    .backup-header {
+        position: relative;
+        display: flex;
+        align-items: flex-start;
+        gap: 1rem;
+        margin-bottom: 1.5rem;
+    }
+
+    .backup-icon {
+        width: 3rem;
+        height: 3rem;
+        border-radius: 0.75rem;
+        background: rgba(99, 102, 241, 0.2);
+        display: grid;
+        place-items: center;
+        font-size: 1.5rem;
+        flex-shrink: 0;
+    }
+
+    .backup-info {
+        flex: 1;
+    }
+
+    .backup-info h3 {
+        margin: 0 0 0.25rem 0;
+        font-size: 1.25rem;
+    }
+
+    .backup-date {
+        font-size: 0.85rem;
+        color: #94a3b8;
+    }
+
+    .backup-status {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+        align-items: flex-end;
+    }
+
+    .status-pill {
+        padding: 0.35rem 0.8rem;
+        border-radius: 999px;
+        font-size: 0.85rem;
+        font-weight: 500;
+    }
+
+    .status-pill.success {
+        background: rgba(16, 185, 129, 0.15);
+        border: 1px solid rgba(16, 185, 129, 0.4);
+        color: #10b981;
+    }
+
+    .status-pill.running {
+        background: rgba(59, 130, 246, 0.15);
+        border: 1px solid rgba(59, 130, 246, 0.4);
+        color: #3b82f6;
+    }
+
+    .status-pill.failed {
+        background: rgba(239, 68, 68, 0.15);
+        border: 1px solid rgba(239, 68, 68, 0.4);
+        color: #ef4444;
+    }
+
+    .verified-badge {
+        padding: 0.25rem 0.6rem;
+        border-radius: 999px;
+        background: rgba(16, 185, 129, 0.15);
+        border: 1px solid rgba(16, 185, 129, 0.4);
+        color: #10b981;
+        font-size: 0.75rem;
+    }
+
+    .backup-details {
+        margin-bottom: 1.5rem;
+    }
+
+    .detail-row {
+        display: flex;
+        justify-content: space-between;
+        padding: 0.5rem 0;
+        border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+        font-size: 0.9rem;
+    }
+
+    .detail-row .label {
+        color: #94a3b8;
+    }
+
+    .detail-row .value {
+        color: #e2e8f0;
+        font-weight: 500;
+    }
+
+    .backup-counts {
+        display: flex;
+        gap: 1rem;
+        margin-bottom: 1.5rem;
+        flex-wrap: wrap;
+    }
+
+    .count-chip {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding: 0.75rem 1rem;
+        border-radius: 0.75rem;
+        background: rgba(15, 23, 42, 0.8);
+        border: 1px solid rgba(148, 163, 184, 0.2);
+    }
+
+    .count-chip .count {
+        font-size: 1.5rem;
+        font-weight: 600;
+        color: #ffffff;
+    }
+
+    .count-chip .label {
+        font-size: 0.75rem;
+        color: #94a3b8;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+    }
+
+    .backup-actions {
+        display: flex;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+    }
+
+    .btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        padding: 0.65rem 1.4rem;
+        border-radius: 999px;
+        border: none;
+        color: white;
+        cursor: pointer;
+        font-weight: 500;
+        transition: all 0.2s;
+    }
+
+    .btn:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+    }
+
+    .btn-primary {
+        background: linear-gradient(135deg, #ec4899, #8b5cf6);
+        box-shadow: 0 12px 25px rgba(139, 92, 246, 0.35);
+    }
+
+    .btn-secondary {
+        background: rgba(255, 255, 255, 0.1);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .btn-icon {
+        padding: 0.5rem 0.75rem;
+        border-radius: 0.65rem;
+        background: rgba(59, 130, 246, 0.15);
+        border: 1px solid rgba(59, 130, 246, 0.3);
+        font-size: 1.1rem;
+    }
+
+    .btn-icon.btn-primary {
+        background: rgba(139, 92, 246, 0.2);
+        border-color: rgba(139, 92, 246, 0.4);
+    }
+
+    .btn-icon.btn-success {
+        background: rgba(16, 185, 129, 0.15);
+        border-color: rgba(16, 185, 129, 0.3);
+    }
+
+    .btn-icon.btn-info {
+        background: rgba(59, 130, 246, 0.15);
+        border-color: rgba(59, 130, 246, 0.3);
+    }
+
+    .spinner {
+        width: 40px;
+        height: 40px;
+        border: 3px solid rgba(99, 102, 241, 0.3);
+        border-top-color: #8b5cf6;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+        margin: 0 auto 1rem;
+    }
+
+    .spinner-small {
+        width: 16px;
+        height: 16px;
+        border: 2px solid rgba(99, 102, 241, 0.3);
+        border-top-color: #8b5cf6;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+        display: inline-block;
+    }
+
+    @@keyframes spin {
+        to { transform: rotate(360deg); }
+    }
+
+    .loading-state {
+        text-align: center;
+        padding: 3rem;
+        color: #94a3b8;
+    }
+
+    .empty-state {
+        margin-top: 2rem;
+        padding: 3rem 2rem;
+        border-radius: 1.25rem;
+        border: 1px dashed rgba(248, 250, 252, 0.2);
+        background: rgba(15, 23, 42, 0.7);
+        text-align: center;
+    }
+
+    .empty-icon {
+        font-size: 4rem;
+        margin-bottom: 1rem;
+        opacity: 0.5;
+    }
+
+    .error-banner {
+        padding: 1rem;
+        border-radius: 0.75rem;
+        background: rgba(239, 68, 68, 0.1);
+        border: 1px solid rgba(239, 68, 68, 0.3);
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+        color: #fca5a5;
+        margin-top: 2rem;
+    }
+
+    .toast {
+        position: fixed;
+        bottom: 2rem;
+        right: 2rem;
+        padding: 1rem 1.5rem;
+        border-radius: 0.75rem;
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+        box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+        z-index: 2000;
+    }
+
+    .toast.success {
+        background: rgba(6, 95, 70, 0.9);
+        border: 1px solid rgba(16, 185, 129, 0.5);
+        color: #ecfdf5;
+    }
+
+    .toast.error {
+        background: rgba(127, 29, 29, 0.9);
+        border: 1px solid rgba(239, 68, 68, 0.5);
+        color: #fecaca;
+    }
+
+    .toast-close {
+        background: transparent;
+        border: none;
+        color: inherit;
+        font-size: 1.25rem;
+        cursor: pointer;
+        opacity: 0.7;
+    }
+
+    .modal-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.7);
+        backdrop-filter: blur(8px);
+        z-index: 1000;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .modal-content {
+        background: #1e293b;
+        border: 1px solid rgba(148, 163, 184, 0.2);
+        border-radius: 1rem;
+        width: 90%;
+        max-width: 500px;
+        max-height: 90vh;
+        overflow-y: auto;
+        box-shadow: 0 25px 60px rgba(0,0,0,0.5);
+    }
+
+    .modal-content.large {
+        max-width: 800px;
+    }
+
+    .modal-header {
+        padding: 1.5rem;
+        border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+
+    .modal-header h2 {
+        margin: 0;
+        font-size: 1.25rem;
+    }
+
+    .modal-close {
+        background: transparent;
+        border: none;
+        color: #94a3b8;
+        font-size: 1.5rem;
+        cursor: pointer;
+    }
+
+    .modal-body {
+        padding: 1.5rem;
+    }
+
+    .modal-footer {
+        padding: 1.5rem;
+        border-top: 1px solid rgba(148, 163, 184, 0.1);
+        display: flex;
+        justify-content: flex-end;
+        gap: 1rem;
+    }
+
+    .alert-warning {
+        padding: 1rem;
+        border-radius: 0.5rem;
+        background: rgba(251, 191, 36, 0.1);
+        border: 1px solid rgba(251, 191, 36, 0.3);
+        color: #fbbf24;
+        margin-bottom: 1.5rem;
+    }
+
+    .backup-summary {
+        margin-top: 1.5rem;
+    }
+
+    .backup-summary h4 {
+        margin-top: 0;
+        color: #e2e8f0;
+    }
+
+    .backup-summary ul {
+        list-style: none;
+        padding: 0;
+    }
+
+    .backup-summary li {
+        padding: 0.5rem 0;
+        border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+    }
+
+    .manifest-content {
+        background: #0f172a;
+        border: 1px solid rgba(148, 163, 184, 0.2);
+        border-radius: 0.5rem;
+        padding: 1rem;
+        overflow-x: auto;
+        max-height: 500px;
+        font-family: 'Consolas', 'Monaco', monospace;
+        font-size: 0.85rem;
+        color: #e2e8f0;
+    }
+
+    .text-muted {
+        color: #94a3b8;
+    }
+</style>

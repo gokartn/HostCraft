@@ -1,0 +1,710 @@
+@page "/ha/dashboard"
+@rendermode InteractiveServer
+@using HostCraft.Core.Models
+@using Microsoft.AspNetCore.SignalR.Client
+@inject IHttpClientFactory HttpClientFactory
+@inject NavigationManager Navigation
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+
+<PageTitle>HA Dashboard - HostCraft</PageTitle>
+
+<div class="page-container">
+    <div class="page-header">
+        <div>
+            <h1>🎯 High Availability Dashboard</h1>
+            <p class="page-subtitle">Real-time cluster health and quorum status</p>
+        </div>
+        <div style="display: flex; gap: 1rem; align-items: center;">
+            <span class="connection-indicator @(isConnected ? "connected" : "disconnected")">
+                <span class="status-dot"></span>
+                @(isConnected ? "Live" : "Disconnected")
+            </span>
+            <button @onclick="RefreshData" class="btn btn-secondary" disabled="@isLoading">
+                <span>@(isLoading ? "🔄" : "↻")</span> Refresh
+            </button>
+        </div>
+    </div>
+
+    @if (!isSystemConfigured)
+    {
+        <div class="card" style="border-left: 4px solid #f59e0b; background: rgba(245, 158, 11, 0.05);">
+            <h3 style="color: #f59e0b;">⚙️ Configuration Required</h3>
+            <p style="margin: 1rem 0;">
+                To enable real-time cluster monitoring, you need to configure the <strong>HostCraft Web Domain</strong> in Settings.
+                This allows SignalR connections to work correctly.
+            </p>
+            <div style="padding: 1rem; background: var(--bg-primary); border-radius: var(--radius-md); margin: 1rem 0;">
+                <strong>Quick Setup:</strong>
+                <ol style="margin: 0.5rem 0 0 1.5rem; color: var(--text-secondary);">
+                    <li>Go to <a href="/settings" style="color: var(--accent-primary);">Settings</a></li>
+                    <li>Scroll to "HostCraft Domain & SSL" section</li>
+                    <li>Enter your domain (e.g., <code>hostcraft.yourdomain.com</code> or <code>your-ip:5000</code>)</li>
+                    <li>Click "Save Configuration"</li>
+                    <li>Return here and refresh</li>
+                </ol>
+            </div>
+            <div style="display: flex; gap: 1rem;">
+                <a href="/settings" class="btn btn-primary">⚙️ Go to Settings</a>
+                <button @onclick="CheckConfiguration" class="btn btn-secondary">🔄 Check Again</button>
+            </div>
+        </div>
+    }
+
+    @if (!string.IsNullOrEmpty(errorMessage))
+    {
+        <div class="card" style="border-left: 4px solid #ef4444;">
+            <h3 style="color: #ef4444;">⚠️ Error Loading Cluster Status</h3>
+            <p>@errorMessage</p>
+            @if (errorMessage.Contains("SSL connection") || errorMessage.Contains("real-time"))
+            {
+                <p style="margin-top: 0.5rem; color: var(--text-secondary);">
+                    <strong>Hint:</strong> This usually means the HostCraft Domain is not configured. 
+                    <a href="/settings" style="color: var(--accent-primary);">Configure it in Settings →</a>
+                </p>
+            }
+            <button @onclick="RefreshData" class="btn btn-primary">🔄 Retry</button>
+        </div>
+    }
+
+    @if (clusterStatus == null)
+    {
+        <div class="card loading-state">
+            <div class="loading-spinner"></div>
+            <p>Loading cluster information...</p>
+        </div>
+    }
+    else if (clusterStatus.TotalManagers == 0 && clusterStatus.TotalWorkers == 0)
+    {
+        <div class="card empty-state">
+            <div class="empty-icon">🐝</div>
+            <h2>No Swarm Cluster Found</h2>
+            <p>Initialize a Docker Swarm cluster to enable High Availability features.</p>
+            <a href="/servers" class="btn btn-primary">
+                <span>🖥️</span> Go to Servers
+            </a>
+        </div>
+    }
+    else
+    {
+        <!-- Cluster Overview Stats -->
+        <div class="stats-grid">
+            <div class="stat-card stat-managers">
+                <div class="stat-icon">👑</div>
+                <div class="stat-content">
+                    <div class="stat-value">@clusterStatus.OnlineManagers / @clusterStatus.TotalManagers</div>
+                    <div class="stat-label">Manager Nodes</div>
+                </div>
+            </div>
+            
+            <div class="stat-card stat-workers">
+                <div class="stat-icon">⚙️</div>
+                <div class="stat-content">
+                    <div class="stat-value">@clusterStatus.OnlineWorkers / @clusterStatus.TotalWorkers</div>
+                    <div class="stat-label">Worker Nodes</div>
+                </div>
+            </div>
+
+            <div class="stat-card @GetQuorumStatusClass()">
+                <div class="stat-icon">@GetQuorumIcon()</div>
+                <div class="stat-content">
+                    <div class="stat-value">@clusterStatus.QuorumStatus.ToUpper()</div>
+                    <div class="stat-label">Quorum Status</div>
+                </div>
+            </div>
+
+            <div class="stat-card stat-leader">
+                <div class="stat-icon">🌟</div>
+                <div class="stat-content">
+                    <div class="stat-value">@(clusterStatus.LeaderHostname ?? "None")</div>
+                    <div class="stat-label">Leader Node</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Recommendations -->
+        @if (clusterStatus.Recommendations?.Any() == true)
+        {
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">
+                        <span>💡</span> Recommendations
+                    </h2>
+                </div>
+                <div class="recommendations">
+                    @foreach (var recommendation in clusterStatus.Recommendations)
+                    {
+                        <div class="recommendation @GetRecommendationClass(recommendation)">
+                            <span class="rec-text">@recommendation</span>
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+
+        <!-- Historical Trends Chart -->
+        @if (historicalData != null)
+        {
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">
+                        <span>📈</span> 24-Hour Availability Trends
+                    </h2>
+                    <span class="badge">@historicalData.StartTime.ToString("MMM dd HH:mm") - @historicalData.EndTime.ToString("HH:mm")</span>
+                </div>
+                <div class="chart-container">
+                    <canvas id="haChart" style="max-height: 300px;"></canvas>
+                </div>
+            </div>
+        }
+
+        <!-- Regional Distribution -->
+        @if (clusterStatus.Regions?.Any() == true)
+        {
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">
+                        <span>🌍</span> Regional Distribution
+                    </h2>
+                </div>
+                <div class="health-grid">
+                    @foreach (var region in clusterStatus.Regions)
+                    {
+                        <div class="region-card">
+                            <div class="region-header">
+                                <h3>@region.Name</h3>
+                                <span class="badge">@region.Nodes.Count nodes</span>
+                            </div>
+                            <div class="region-stats">
+                                <div class="region-stat">
+                                    <span class="stat-icon">👑</span>
+                                    <span>@region.OnlineManagers / @region.ManagerCount Managers</span>
+                                </div>
+                                <div class="region-stat">
+                                    <span class="stat-icon">⚙️</span>
+                                    <span>@region.OnlineWorkers / @region.WorkerCount Workers</span>
+                                </div>
+                            </div>
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+
+        <!-- Node Details -->
+        <div class="card">
+            <div class="card-header">
+                <h2 class="card-title">
+                    <span>🖥️</span> Cluster Nodes
+                </h2>
+                <span class="badge">@clusterStatus.Nodes.Count total</span>
+            </div>
+            <div class="nodes-grid">
+                @foreach (var node in clusterStatus.Nodes.OrderByDescending(n => n.Role).ThenBy(n => n.Hostname))
+                {
+                    <div class="node-card @GetNodeStatusClass(node)">
+                        <div class="node-header">
+                            <div class="node-title">
+                                <span class="node-role-icon">@(node.Role == "manager" ? "👑" : "⚙️")</span>
+                                <h3>@node.Hostname</h3>
+                                @if (node.IsLeader)
+                                {
+                                    <span class="leader-badge">🌟 LEADER</span>
+                                }
+                            </div>
+                            <span class="status-indicator status-@node.State.ToLower()">
+                                <span class="status-dot"></span>
+                                @node.State.ToUpper()
+                            </span>
+                        </div>
+                        
+                        <div class="node-details">
+                            <div class="detail-row">
+                                <span class="detail-label">Role:</span>
+                                <span class="detail-value">@node.Role.ToUpper()</span>
+                            </div>
+                            <div class="detail-row">
+                                <span class="detail-label">Address:</span>
+                                <span class="detail-value">@node.Address</span>
+                            </div>
+                            <div class="detail-row">
+                                <span class="detail-label">Availability:</span>
+                                <span class="detail-value">@node.Availability</span>
+                            </div>
+                            @if (!string.IsNullOrEmpty(node.Region))
+                            {
+                                <div class="detail-row">
+                                    <span class="detail-label">Region:</span>
+                                    <span class="detail-value">@node.Region</span>
+                                </div>
+                            }
+                            <div class="detail-row">
+                                <span class="detail-label">Resources:</span>
+                                <span class="detail-value">@(node.NanoCPUs / 1_000_000_000.0) CPUs, @FormatBytes(node.MemoryBytes)</span>
+                            </div>
+                            
+                            @if (node.Metrics != null)
+                            {
+                                <!-- CPU Usage -->
+                                <div class="detail-row">
+                                    <span class="detail-label">CPU:</span>
+                                    <div class="metric-container">
+                                        <div class="metric-bar">
+                                            <div class="metric-fill" style="width: @node.Metrics.CpuPercent%; background-color: @GetMetricColor(node.Metrics.CpuPercent)"></div>
+                                        </div>
+                                        <span class="metric-value">@node.Metrics.CpuPercent.ToString("F1")%</span>
+                                    </div>
+                                </div>
+                                
+                                <!-- Memory Usage -->
+                                <div class="detail-row">
+                                    <span class="detail-label">Memory:</span>
+                                    <div class="metric-container">
+                                        <div class="metric-bar">
+                                            <div class="metric-fill" style="width: @node.Metrics.MemoryPercent%; background-color: @GetMetricColor(node.Metrics.MemoryPercent)"></div>
+                                        </div>
+                                        <span class="metric-value">@node.Metrics.MemoryPercent.ToString("F1")% (@FormatBytes(node.Metrics.MemoryUsedBytes) / @FormatBytes(node.Metrics.MemoryTotalBytes))</span>
+                                    </div>
+                                </div>
+                                
+                                <!-- Disk Usage -->
+                                <div class="detail-row">
+                                    <span class="detail-label">Disk:</span>
+                                    <div class="metric-container">
+                                        <div class="metric-bar">
+                                            <div class="metric-fill" style="width: @node.Metrics.DiskPercent%; background-color: @GetMetricColor(node.Metrics.DiskPercent)"></div>
+                                        </div>
+                                        <span class="metric-value">@node.Metrics.DiskPercent.ToString("F1")% (@FormatBytes(node.Metrics.DiskUsedBytes) / @FormatBytes(node.Metrics.DiskTotalBytes))</span>
+                                    </div>
+                                </div>
+                            }
+                            
+                            @if (node.ServerId.HasValue)
+                            {
+                                <div class="detail-row">
+                                    <a href="/servers/@node.ServerId" class="btn-link">View Server Details →</a>
+                                </div>
+                            }
+                        </div>
+                    </div>
+                }
+            </div>
+        </div>
+
+        <!-- Service Health -->
+        @if (clusterStatus.Services?.Any() == true)
+        {
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">
+                        <span>📦</span> Service Health
+                    </h2>
+                    <span class="badge">@clusterStatus.Services.Count services</span>
+                </div>
+                <div class="services-table">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Service</th>
+                                <th>Image</th>
+                                <th>Replicas</th>
+                                <th>Status</th>
+                                <th>HA Ready</th>
+                                <th>Updated</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var service in clusterStatus.Services.OrderBy(s => s.Name))
+                            {
+                                <tr class="service-row @(service.Name.Contains("traefik", StringComparison.OrdinalIgnoreCase) ? "service-highlighted" : "")">
+                                    <td>
+                                        <strong>@service.Name</strong>
+                                        @if (service.Name.Contains("traefik", StringComparison.OrdinalIgnoreCase))
+                                        {
+                                            <span class="service-badge">PROXY</span>
+                                        }
+                                    </td>
+                                    <td><code>@service.Image</code></td>
+                                    <td>
+                                        <div class="replica-bar">
+                                            <div class="replica-fill" style="width: @GetReplicaPercentage(service)%; background: @GetReplicaColor(service)"></div>
+                                            <span class="replica-text">@service.RunningReplicas / @service.DesiredReplicas</span>
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <span class="badge badge-@service.Status">@service.Status.ToUpper()</span>
+                                    </td>
+                                    <td>
+                                        @if (service.IsHAReady)
+                                        {
+                                            <span class="badge badge-healthy">✓ YES</span>
+                                        }
+                                        else
+                                        {
+                                            <span class="badge badge-degraded">✗ NO</span>
+                                        }
+                                    </td>
+                                    <td>@service.UpdatedAt.ToString("MMM dd, HH:mm")</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        }
+    }
+</div>
+
+@code {
+    private HAClusterStatusDto? clusterStatus;
+    private HAHistoricalDataDto? historicalData;
+    private HubConnection? hubConnection;
+    private bool isConnected = false;
+    private bool isLoading = false;
+    private string? errorMessage;
+    private bool isSystemConfigured = true;
+    private string? configuredDomain;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await CheckSystemConfiguration();
+        await LoadData();
+        if (isSystemConfigured)
+        {
+            await ConnectToHub();
+        }
+    }
+
+    private async Task CheckSystemConfiguration()
+    {
+        try
+        {
+            var httpClient = HttpClientFactory.CreateClient("HostCraftAPI");
+            var response = await httpClient.GetAsync("api/settings");
+            if (response.IsSuccessStatusCode)
+            {
+                var settings = await response.Content.ReadFromJsonAsync<SystemSettingsDto>();
+                configuredDomain = settings?.HostCraftDomain;
+                isSystemConfigured = !string.IsNullOrWhiteSpace(configuredDomain);
+            }
+        }
+        catch
+        {
+            // If we can't check settings, assume it's configured and let the connection attempt show the real error
+            isSystemConfigured = true;
+        }
+    }
+
+    private async Task CheckConfiguration()
+    {
+        await CheckSystemConfiguration();
+        if (isSystemConfigured)
+        {
+            await LoadData();
+            await ConnectToHub();
+        }
+        StateHasChanged();
+    }
+
+    private async Task LoadData()
+    {
+        isLoading = true;
+        errorMessage = null;
+        StateHasChanged();
+
+        try
+        {
+            var httpClient = HttpClientFactory.CreateClient("HostCraftAPI");
+
+            // Load current cluster status
+            var statusResponse = await httpClient.GetAsync("api/ha/cluster-status");
+            if (statusResponse.IsSuccessStatusCode)
+            {
+                clusterStatus = await statusResponse.Content.ReadFromJsonAsync<HAClusterStatusDto>();
+            }
+            else
+            {
+                errorMessage = $"Failed to load cluster status: {statusResponse.StatusCode}";
+            }
+
+            // Load historical data
+            var historyResponse = await httpClient.GetAsync("api/ha/history?hours=24");
+            if (historyResponse.IsSuccessStatusCode)
+            {
+                historicalData = await historyResponse.Content.ReadFromJsonAsync<HAHistoricalDataDto>();
+                if (historicalData != null)
+                {
+                    await RenderChart();
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error loading dashboard: {ex.Message}";
+        }
+        finally
+        {
+            isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task ConnectToHub()
+    {
+        if (!isSystemConfigured)
+        {
+            return; // Don't attempt connection if not configured
+        }
+
+        try
+        {
+            var baseUrl = ResolveHubBaseUrl();
+            
+            hubConnection = new HubConnectionBuilder()
+                .WithUrl($"{baseUrl}/hubs/hadashboard")
+                .WithAutomaticReconnect(new[] { TimeSpan.Zero, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(10) })
+                .Build();
+
+            hubConnection.On<HAClusterStatusDto>("ClusterStatusUpdate", async (status) =>
+            {
+                clusterStatus = status;
+                await InvokeAsync(StateHasChanged);
+                await UpdateChart();
+            });
+
+            hubConnection.Reconnecting += (error) =>
+            {
+                isConnected = false;
+                InvokeAsync(StateHasChanged);
+                return Task.CompletedTask;
+            };
+
+            hubConnection.Reconnected += (connectionId) =>
+            {
+                isConnected = true;
+                InvokeAsync(StateHasChanged);
+                return Task.CompletedTask;
+            };
+
+            hubConnection.Closed += (error) =>
+            {
+                isConnected = false;
+                InvokeAsync(StateHasChanged);
+                return Task.CompletedTask;
+            };
+
+            await hubConnection.StartAsync();
+            isConnected = true;
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Failed to connect to real-time updates: {ex.Message}";
+        }
+    }
+
+    private string ResolveHubBaseUrl()
+    {
+        // Prefer explicitly configured domain from settings (supports values with or without scheme)
+        if (!string.IsNullOrWhiteSpace(configuredDomain))
+        {
+            var domain = configuredDomain.TrimEnd('/');
+            if (!domain.Contains("://", StringComparison.Ordinal))
+            {
+                domain = $"https://{domain}";
+            }
+            return domain;
+        }
+
+        // When running inside a container the site listens on the internal ASPNETCORE_URLS (usually 8080)
+        // so localhost:5000 from NavigationManager is not reachable. Switch to the container binding instead.
+        var runningInContainer = string.Equals(
+            Environment.GetEnvironmentVariable("DOTNET_RUNNING_IN_CONTAINER"),
+            "true",
+            StringComparison.OrdinalIgnoreCase);
+
+        if (runningInContainer)
+        {
+            var containerUrls = Environment.GetEnvironmentVariable("ASPNETCORE_URLS");
+            if (!string.IsNullOrWhiteSpace(containerUrls))
+            {
+                var firstUrl = containerUrls
+                    .Split(';', StringSplitOptions.RemoveEmptyEntries)
+                    .FirstOrDefault();
+
+                if (!string.IsNullOrWhiteSpace(firstUrl))
+                {
+                    return firstUrl.Replace("+", "127.0.0.1", StringComparison.Ordinal).TrimEnd('/');
+                }
+            }
+
+            return "http://127.0.0.1:8080";
+        }
+
+        return Navigation.BaseUri.TrimEnd('/');
+    }
+
+    private async Task RefreshData()
+    {
+        await LoadData();
+    }
+
+    private async Task RenderChart()
+    {
+        if (historicalData == null) return;
+
+        try
+        {
+            var chartData = new
+            {
+                labels = historicalData.ManagerAvailability.Select(p => p.Timestamp.ToString("HH:mm")).ToArray(),
+                datasets = new object[]
+                {
+                    new
+                    {
+                        label = "Managers",
+                        data = historicalData.ManagerAvailability.Select(p => p.Value).ToArray(),
+                        borderColor = "#f59e0b",
+                        backgroundColor = "rgba(245, 158, 11, 0.1)",
+                        tension = 0.4,
+                        fill = true
+                    },
+                    new
+                    {
+                        label = "Workers",
+                        data = historicalData.WorkerAvailability.Select(p => p.Value).ToArray(),
+                        borderColor = "#3b82f6",
+                        backgroundColor = "rgba(59, 130, 246, 0.1)",
+                        tension = 0.4,
+                        fill = true
+                    },
+                    new
+                    {
+                        label = "Quorum Status",
+                        data = historicalData.QuorumStatus.Select(p => p.Value * 3).ToArray(), // Scale to match manager count
+                        borderColor = "#10b981",
+                        backgroundColor = "rgba(16, 185, 129, 0.1)",
+                        tension = 0.4,
+                        fill = false,
+                        borderDash = new[] { 5, 5 }
+                    }
+                }
+            };
+
+            await JS.InvokeVoidAsync("renderHAChart", "haChart", chartData);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error rendering chart: {ex.Message}");
+        }
+    }
+
+    private async Task UpdateChart()
+    {
+        // Refresh historical data periodically
+        if (DateTime.Now.Second % 30 == 0) // Every 30 seconds
+        {
+            try
+            {
+                var httpClient = HttpClientFactory.CreateClient("HostCraftAPI");
+                var response = await httpClient.GetAsync("api/ha/history?hours=24");
+                if (response.IsSuccessStatusCode)
+                {
+                    historicalData = await response.Content.ReadFromJsonAsync<HAHistoricalDataDto>();
+                    await RenderChart();
+                }
+            }
+            catch { }
+        }
+    }
+
+    // Helper methods
+    private string GetQuorumStatusClass()
+    {
+        return clusterStatus?.QuorumStatus switch
+        {
+            "healthy" => "stat-healthy",
+            "degraded" => "stat-degraded",
+            "critical" => "stat-critical",
+            _ => ""
+        };
+    }
+
+    private string GetQuorumIcon()
+    {
+        return clusterStatus?.QuorumStatus switch
+        {
+            "healthy" => "✅",
+            "degraded" => "⚠️",
+            "critical" => "🔴",
+            _ => "❓"
+        };
+    }
+
+    private string GetRecommendationClass(string recommendation)
+    {
+        if (recommendation.StartsWith("🔴")) return "recommendation-critical";
+        if (recommendation.StartsWith("⚠️")) return "recommendation-warning";
+        if (recommendation.StartsWith("✅")) return "recommendation-success";
+        return "recommendation-info";
+    }
+
+    private string GetNodeStatusClass(HANodeDto node)
+    {
+        return node.State.ToLower() switch
+        {
+            "ready" => "node-ready",
+            "down" => "node-down",
+            _ => "node-unknown"
+        };
+    }
+
+    private double GetReplicaPercentage(HAServiceStatusDto service)
+    {
+        if (service.DesiredReplicas == 0) return 0;
+        return (double)service.RunningReplicas / service.DesiredReplicas * 100;
+    }
+
+    private string GetReplicaColor(HAServiceStatusDto service)
+    {
+        var percentage = GetReplicaPercentage(service);
+        if (percentage >= 100) return "var(--accent-success)";
+        if (percentage >= 50) return "var(--accent-warning)";
+        return "var(--accent-danger)";
+    }
+
+    private string FormatBytes(long bytes)
+    {
+        string[] sizes = { "B", "KB", "MB", "GB", "TB" };
+        double len = bytes;
+        int order = 0;
+        while (len >= 1024 && order < sizes.Length - 1)
+        {
+            order++;
+            len = len / 1024;
+        }
+        return $"{len:0.##} {sizes[order]}";
+    }
+    
+    private string GetMetricColor(double percentage)
+    {
+        if (percentage >= 90) return "#ef4444"; // Red - Critical
+        if (percentage >= 75) return "#f59e0b"; // Orange - Warning
+        if (percentage >= 50) return "#eab308"; // Yellow - Caution
+        return "#10b981"; // Green - Healthy
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (hubConnection is not null)
+        {
+            await hubConnection.DisposeAsync();
+        }
+    }
+
+    private class SystemSettingsDto
+    {
+        public string? HostCraftDomain { get; set; }
+        public string? HostCraftApiDomain { get; set; }
+    }
+}

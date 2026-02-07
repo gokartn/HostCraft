@@ -1,0 +1,1492 @@
+@page "/databases/templates"
+@page "/templates"
+@rendermode InteractiveServer
+@inject HttpClient Http
+@inject IWebAuthService AuthService
+@inject NavigationManager Navigation
+@inject ILogger<DatabaseTemplates> Logger
+@using System.Collections.Generic
+@using System.Net
+@using System.Linq
+@using System.Security.Cryptography
+@using System.Text
+@using System.Text.Json
+@using HostCraft.Web.Services
+
+<PageTitle>Database Templates - HostCraft</PageTitle>
+
+<div class="database-templates-page">
+    <section class="hero-panel">
+        <div class="hero-copy">
+            <p class="eyebrow">High-availability data layers</p>
+            <h1>Database Templates</h1>
+            <p class="subtitle">Launch resilient, multi-node databases with opinionated defaults that honor HostCraft's HA/DR mandate.</p>
+            <div class="hero-tags">
+                <span class="tag">Swarm ready</span>
+                <span class="tag">Zero-downtime deploy</span>
+                <span class="tag">Project scoped</span>
+            </div>
+        </div>
+        <div class="hero-metrics">
+            <div class="metric-card">
+                <span>Templates</span>
+                <strong>@templates.Count</strong>
+                <p>Curated service blueprints</p>
+            </div>
+            <div class="metric-card">
+                <span>Categories</span>
+                <strong>@categories.Count</strong>
+                <p>Optimized stacks</p>
+            </div>
+            <div class="metric-card">
+                <span>Ready Servers</span>
+                <strong>@servers.Count</strong>
+                <p>Eligible targets</p>
+            </div>
+        </div>
+    </section>
+
+    @if (!string.IsNullOrWhiteSpace(projectContextName))
+    {
+        <div class="project-context-banner">
+            <div>
+                <strong>Project Context:</strong> @projectContextName
+                <p class="context-subtext">Deployed databases will be attached to this project.</p>
+            </div>
+            <button class="btn btn-secondary" @onclick="ClearProjectContext">Clear</button>
+        </div>
+    }
+
+    @if (loading)
+    {
+        <div class="loading-state">
+            <div class="spinner"></div>
+            <p>Loading database templates...</p>
+        </div>
+    }
+    else if (error != null)
+    {
+        <div class="error-banner">
+            <span class="icon">❌</span>
+            <div>
+                <strong>Error loading templates</strong>
+                <p>@error</p>
+            </div>
+            <button class="btn btn-secondary" @onclick="LoadTemplates">Retry</button>
+        </div>
+    }
+    else
+    {
+        var filteredTemplates = GetFilteredTemplates().ToList();
+
+        <section class="filters-panel">
+            <div>
+                <h2>Explore templates</h2>
+                <p>Pick a blueprint, wire it to a Swarm manager, and HostCraft handles the rest.</p>
+            </div>
+            <div class="filter-summary">
+                <span>@filteredTemplates.Count templates</span>
+                <span>Category: @selectedCategory</span>
+            </div>
+        </section>
+
+        <div class="category-tabs">
+            <button class="tab @(selectedCategory == "All" ? "active" : "")" @onclick="@(() => selectedCategory = "All")">
+                <span class="icon">@GetCategoryIcon("All")</span>
+                <span>All Templates</span>
+            </button>
+            @foreach (var category in categories)
+            {
+                var cat = category;
+                <button class="tab @(selectedCategory == cat ? "active" : "")" @onclick="@(() => selectedCategory = cat)">
+                    <span class="icon">@GetCategoryIcon(cat)</span>
+                    <span>@cat</span>
+                </button>
+            }
+        </div>
+
+        @if (filteredTemplates.Count == 0)
+        {
+            <div class="empty-state">
+                <h3>No templates in this category</h3>
+                <p>Switch categories or sync new templates from Git to keep your catalog fresh.</p>
+            </div>
+        }
+        else
+        {
+            <div class="templates-grid">
+                @foreach (var template in filteredTemplates)
+                {
+                    <article class="template-card">
+                        <div class="card-accent"></div>
+                        <div class="template-top">
+                            <div class="template-icon">
+                                @GetDatabaseIcon(template.Type)
+                            </div>
+                            <div class="template-heading">
+                                <span class="template-type">@template.Type</span>
+                                <h3>@template.Name</h3>
+                            </div>
+                            <span class="category-pill">@GetCategoryIcon(template.Category) @template.Category</span>
+                        </div>
+
+                        <p class="template-description">@template.Description</p>
+
+                        <div class="template-specs">
+                            <div class="spec-chip">
+                                <span class="label">Image</span>
+                                <span class="value">@template.DockerImage</span>
+                            </div>
+                            <div class="spec-chip">
+                                <span class="label">Port</span>
+                                <span class="value">@template.DefaultPort</span>
+                            </div>
+                            <div class="spec-chip">
+                                <span class="label">Memory</span>
+                                <span class="value">@FormatMemory(template)</span>
+                            </div>
+                            <div class="spec-chip">
+                                <span class="label">CPU</span>
+                                <span class="value">@FormatCpu(template)</span>
+                            </div>
+                        </div>
+
+                        <div class="template-footer">
+                            <div class="resource-hint">
+                                <span class="hint-label">Recommended footprint</span>
+                                <div class="hint-values">
+                                    <span>@FormatMemory(template)</span>
+                                    <span>@FormatCpu(template)</span>
+                                </div>
+                            </div>
+                            <button class="btn btn-primary" @onclick="async () => await ShowDeployModal(template)">
+                                <span class="icon">🚀</span>
+                                Deploy
+                            </button>
+                        </div>
+                    </article>
+                }
+            </div>
+        }
+    }
+</div>
+
+<!-- Deploy Modal -->
+@if (showDeployModal && selectedTemplate != null)
+{
+    <div class="modal-overlay" @onclick="CloseDeployModal">
+        <div class="modal-content" @onclick:stopPropagation="true">
+            <div class="modal-header">
+                <h2>Deploy @selectedTemplate.Name</h2>
+                <button class="modal-close" @onclick="CloseDeployModal">×</button>
+            </div>
+
+            <div class="modal-body">
+                @if (deployError != null)
+                {
+                    <div class="error-message">
+                        <span class="icon">❌</span>
+                        <span>@deployError</span>
+                    </div>
+                }
+                @if (lastDeployResponse != null)
+                {
+                    <div class="success-panel">
+                        <h3>Deployment queued</h3>
+                        <p>Your database is provisioning with the hardened credentials below. Store them securely.</p>
+                        <div class="success-grid">
+                            @foreach (var envVar in lastDeployResponse.EnvironmentVariables.Where(e => e.DisplayInWizard))
+                            {
+                                <div class="success-card">
+                                    <span class="label">@envVar.Label <small>@envVar.Key</small></span>
+                                    <code>@envVar.Value</code>
+                                </div>
+                            }
+                        </div>
+                        <div class="success-meta">
+                            <span>Image: @lastDeployResponse.DockerImage</span>
+                            @if (lastDeployResponse.PublishedPort.HasValue)
+                            {
+                                <span>Published Port: @lastDeployResponse.PublishedPort</span>
+                            }
+                        </div>
+                    </div>
+                }
+                else
+                {
+                    <div class="form-group">
+                        <label>Database Name *</label>
+                        <input type="text" class="form-control" value="@databaseName" @oninput="OnDatabaseNameChanged" placeholder="e.g., my-postgres-db" autocomplete="off" />
+                    </div>
+
+                    <div class="form-group">
+                        <label>Server *</label>
+                        <select class="form-control" @bind="selectedServerId">
+                            <option value="0">-- Select a server --</option>
+                            @foreach (var server in servers)
+                            {
+                                <option value="@server.Id">@server.Name (@server.Type)</option>
+                            }
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Project *</label>
+                        <select class="form-control" @bind="selectedProjectId">
+                            <option value="0">-- Select a project --</option>
+                            @foreach (var project in projects)
+                            {
+                                <option value="@project.Id">@project.Name</option>
+                            }
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Docker Image</label>
+                        <input type="text" class="form-control" @bind="dockerImageInput" placeholder="e.g., postgres:16-alpine" autocomplete="off" />
+                        <small class="form-text">Preloaded from the template; override with your preferred tag if needed.</small>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Memory Limit (MB)</label>
+                        <input type="number" class="form-control" @bind="memoryLimitMB" placeholder="@(selectedTemplate.RecommendedMemoryMB?.ToString() ?? "512")" />
+                        <small class="form-text">Recommended: @(selectedTemplate.RecommendedMemoryMB ?? 512) MB</small>
+                    </div>
+
+                    <div class="form-group">
+                        <label>CPU Limit (Cores)</label>
+                        <input type="number" step="0.1" class="form-control" @bind="cpuLimitCores" placeholder="@(selectedTemplate.RecommendedCpuCores?.ToString("0.0") ?? "0.5")" />
+                        <small class="form-text">Recommended: @(selectedTemplate.RecommendedCpuCores?.ToString("0.0") ?? "0.5") cores</small>
+                    </div>
+
+                    @if (templateDetailLoading)
+                    {
+                        <div class="loading-state inline">
+                            <div class="spinner"></div>
+                            <p>Loading hardening defaults…</p>
+                        </div>
+                    }
+                    else if (credentialInputs.Any(ci => ci.DisplayInWizard))
+                    {
+                        <div class="credential-section">
+                            <div class="section-header">
+                                <h4>Credential &amp; policy defaults</h4>
+                                <p>HostCraft generates secure usernames, passwords, and database names per template. Adjust only if required.</p>
+                            </div>
+                            @foreach (var variable in credentialInputs.Where(ci => ci.DisplayInWizard))
+                            {
+                                <div class="credential-field">
+                                    <label>@variable.Label @if (variable.IsRequired) { <span class="required">*</span> }</label>
+                                    <small class="env-key">@variable.Key</small>
+                                    <div class="credential-input-row">
+                                        <input type="@(variable.IsSecret && !variable.RevealSecret ? "password" : "text")"
+                                               class="form-control"
+                                               value="@variable.Value"
+                                               autocomplete="off"
+                                               @oninput="e => OnCredentialValueChanged(variable, e.Value?.ToString())" />
+
+                                        @if (variable.IsSecret)
+                                        {
+                                            <button type="button" class="btn btn-icon" title="Toggle visibility" @onclick="() => ToggleSecretVisibility(variable)">
+                                                @(variable.RevealSecret ? "🙈" : "👁️")
+                                            </button>
+                                        }
+                                        <button type="button" class="btn btn-icon" title="Regenerate" @onclick="() => RegenerateCredential(variable)">
+                                            ↻
+                                        </button>
+                                    </div>
+                                    <small class="form-text">@variable.Description</small>
+                                </div>
+                            }
+                        </div>
+                    }
+
+                    <div class="form-group">
+                        <label>
+                            <input type="checkbox" @bind="showAdvanced" /> Advanced Options
+                        </label>
+                    </div>
+
+                    @if (showAdvanced)
+                    {
+                        <div class="advanced-section">
+                            <h4>Environment Variables</h4>
+                            <p class="help-text">Add extra variables or override the generated defaults.</p>
+                            <div class="env-vars">
+                                @for (int i = 0; i < envVarKeys.Count; i++)
+                                {
+                                    var index = i;
+                                    <div class="env-var-row">
+                                        <input type="text" class="form-control" @bind="envVarKeys[index]" placeholder="KEY" />
+                                        <input type="text" class="form-control" @bind="envVarValues[index]" placeholder="value" />
+                                        <button class="btn btn-danger btn-sm" @onclick="() => RemoveEnvVar(index)">×</button>
+                                    </div>
+                                }
+                            </div>
+                            <button class="btn btn-secondary btn-sm" @onclick="AddEnvVar">
+                                <span class="icon">➕</span> Add Variable
+                            </button>
+                        </div>
+                    }
+                }
+            </div>
+
+            <div class="modal-footer">
+                @if (lastDeployResponse != null)
+                {
+                    <button class="btn btn-secondary" @onclick="CloseDeployModal">Close</button>
+                    <button class="btn btn-primary" @onclick="GoToApplicationsAfterSuccess">
+                        View Applications
+                    </button>
+                }
+                else
+                {
+                    <button class="btn btn-secondary" @onclick="CloseDeployModal" disabled="@deploying">
+                        Cancel
+                    </button>
+                    <button class="btn btn-primary" @onclick="DeployDatabase" disabled="@(!CanDeploy)">
+                        @if (deploying)
+                        {
+                            <span class="icon">⏳</span> <text>Deploying...</text>
+                        }
+                        else if (templateDetailLoading)
+                        {
+                            <span class="icon">⏳</span> <text>Loading...</text>
+                        }
+                        else if (string.IsNullOrWhiteSpace(databaseName))
+                        {
+                            <span class="icon">📝</span> <text>Enter Database Name</text>
+                        }
+                        else if (selectedServerId == 0)
+                        {
+                            <span class="icon">🖥️</span> <text>Select Server</text>
+                        }
+                        else if (selectedProjectId == 0)
+                        {
+                            <span class="icon">📁</span> <text>Select Project</text>
+                        }
+                        else
+                        {
+                            <span class="icon">🚀</span> <text>Deploy Database</text>
+                        }
+                    </button>
+                }
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private List<DatabaseTemplateDto> templates = new();
+    private List<ServerDto> servers = new();
+    private List<ProjectDto> projects = new();
+    private bool loading = true;
+    private string? error = null;
+    private string selectedCategory = "All";
+    private List<string> categories = new();
+    private string? projectContextName;
+    private int? projectIdFromQuery;
+
+    // Deploy modal state
+    private bool showDeployModal = false;
+    private DatabaseTemplateDto? selectedTemplate = null;
+    private string databaseName = "";
+    private int selectedServerId = 0;
+    private int selectedProjectId = 0;
+    private string dockerImageInput = string.Empty;
+    private long? memoryLimitMB = null;
+    private double? cpuLimitCores = null;
+    private bool showAdvanced = false;
+    private List<string> envVarKeys = new();
+    private List<string> envVarValues = new();
+    private bool deploying = false;
+    private string? deployError = null;
+    private DatabaseTemplateDetailDto? selectedTemplateDetail;
+    private bool templateDetailLoading = false;
+    private List<EnvironmentVariableInputModel> credentialInputs = new();
+    private DeployDatabaseResponseDto? lastDeployResponse;
+
+    private bool CanDeploy => !deploying 
+        && !templateDetailLoading 
+        && !string.IsNullOrWhiteSpace(databaseName) 
+        && selectedServerId > 0 
+        && selectedProjectId > 0
+        && credentialInputs.Count > 0;
+
+    protected override async Task OnInitializedAsync()
+    {
+        ReadProjectContextFromQuery();
+        await LoadTemplates();
+        await LoadServers();
+        await LoadProjects();
+    }
+
+    private async Task LoadTemplates()
+    {
+        loading = true;
+        error = null;
+
+        try
+        {
+            var response = await Http.GetAsync("api/DatabaseTemplates");
+            if (response.IsSuccessStatusCode)
+            {
+                templates = await response.Content.ReadFromJsonAsync<List<DatabaseTemplateDto>>() ?? new();
+                categories = templates.Select(t => t.Category).Distinct().OrderBy(c => c).ToList();
+            }
+            else
+            {
+                error = $"Failed to load templates: {response.StatusCode}";
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading database templates");
+            error = "An error occurred while loading templates";
+        }
+        finally
+        {
+            loading = false;
+        }
+    }
+
+    private async Task LoadServers()
+    {
+        try
+        {
+            servers = await Http.GetFromJsonAsync<List<ServerDto>>("api/Servers") ?? new();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading servers");
+        }
+    }
+
+    private async Task LoadProjects()
+    {
+        try
+        {
+            projects = await Http.GetFromJsonAsync<List<ProjectDto>>("api/Projects") ?? new();
+            ApplyProjectContext();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading projects");
+        }
+    }
+
+    private void ApplyProjectContext()
+    {
+        if (projectIdFromQuery.HasValue)
+        {
+            var project = projects.FirstOrDefault(p => p.Id == projectIdFromQuery.Value);
+            if (project != null)
+            {
+                projectContextName = project.Name;
+                selectedProjectId = project.Id;
+                return;
+            }
+        }
+
+        if (selectedProjectId == 0)
+        {
+            selectedProjectId = projects.FirstOrDefault()?.Id ?? 0;
+        }
+    }
+
+    private IEnumerable<DatabaseTemplateDto> GetFilteredTemplates()
+    {
+        if (selectedCategory == "All")
+            return templates;
+        return templates.Where(t => t.Category == selectedCategory);
+    }
+
+    private string GetDatabaseIcon(string type)
+    {
+        return type switch
+        {
+            "PostgreSQL" => "🐘",
+            "MySQL" => "🐬",
+            "MongoDB" => "🍃",
+            "Redis" => "⚡",
+            "MariaDB" => "🦭",
+            "Clickhouse" => "📊",
+            "DragonFly" => "🐉",
+            "KeyDB" => "🔑",
+            _ => "💾"
+        };
+    }
+
+    private string GetCategoryIcon(string category)
+    {
+        return category switch
+        {
+            "Analytics" => "📈",
+            "Cache" => "⚡",
+            "NoSQL" => "🗂️",
+            "SQL" => "🧮",
+            "Message Queue" => "📨",
+            "Search" => "🔎",
+            "Monitoring" => "📡",
+            _ => "✨"
+        };
+    }
+
+    private string FormatMemory(DatabaseTemplateDto template)
+        => template.RecommendedMemoryMB.HasValue
+            ? $"{template.RecommendedMemoryMB.Value:N0} MB"
+            : "Auto";
+
+    private string FormatCpu(DatabaseTemplateDto template)
+        => template.RecommendedCpuCores.HasValue
+            ? $"{template.RecommendedCpuCores.Value:0.0} cores"
+            : "Auto";
+
+    private async Task ShowDeployModal(DatabaseTemplateDto template)
+    {
+        selectedTemplate = template;
+        showDeployModal = true;
+        databaseName = string.Empty;
+        selectedServerId = servers.FirstOrDefault()?.Id ?? 0;
+        selectedProjectId = DetermineProjectSelection();
+        dockerImageInput = template.DockerImage;
+        memoryLimitMB = template.RecommendedMemoryMB;
+        cpuLimitCores = template.RecommendedCpuCores;
+        showAdvanced = false;
+        envVarKeys.Clear();
+        envVarValues.Clear();
+        deployError = null;
+        lastDeployResponse = null;
+        credentialInputs.Clear();
+        selectedTemplateDetail = null;
+        templateDetailLoading = true;
+
+        try
+        {
+            Logger.LogInformation("[DatabaseTemplates] Fetching template detail for id={TemplateId}...", template.Id);
+            var response = await Http.GetAsync($"api/DatabaseTemplates/{template.Id}");
+            Logger.LogInformation("[DatabaseTemplates] Template detail response: {StatusCode}", response.StatusCode);
+            
+            if (response.IsSuccessStatusCode)
+            {
+                selectedTemplateDetail = await response.Content.ReadFromJsonAsync<DatabaseTemplateDetailDto>();
+                Logger.LogInformation("[DatabaseTemplates] Template detail loaded: {Name}, {EnvCount} env vars", 
+                    selectedTemplateDetail?.Name, selectedTemplateDetail?.EnvironmentVariables?.Count ?? 0);
+                PrepareCredentialInputs();
+            }
+            else
+            {
+                var errorContent = await response.Content.ReadAsStringAsync();
+                Logger.LogError("[DatabaseTemplates] Failed to load template detail: {StatusCode} - {Error}", response.StatusCode, errorContent);
+                deployError = $"Failed to load template details: {response.StatusCode}. {errorContent}";
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "[DatabaseTemplates] Exception loading template detail {TemplateId}: {Message}", template.Id, ex.Message);
+            deployError = $"Unable to load template hardening defaults: {ex.Message}";
+        }
+        finally
+        {
+            templateDetailLoading = false;
+        }
+    }
+
+    private int DetermineProjectSelection()
+    {
+        if (projectIdFromQuery.HasValue)
+        {
+            var match = projects.FirstOrDefault(p => p.Id == projectIdFromQuery.Value);
+            if (match != null)
+            {
+                projectContextName = match.Name;
+                return match.Id;
+            }
+        }
+
+        return selectedProjectId != 0 ? selectedProjectId : projects.FirstOrDefault()?.Id ?? 0;
+    }
+
+    private void ClearProjectContext()
+    {
+        projectIdFromQuery = null;
+        projectContextName = null;
+        selectedProjectId = projects.FirstOrDefault()?.Id ?? 0;
+        Navigation.NavigateTo("/databases/templates", forceLoad: true);
+    }
+
+    private void ReadProjectContextFromQuery()
+    {
+        var uri = Navigation.ToAbsoluteUri(Navigation.Uri);
+        if (string.IsNullOrEmpty(uri.Query))
+        {
+            projectIdFromQuery = null;
+            return;
+        }
+
+        var query = QueryHelpers.ParseQuery(uri.Query);
+        if (query.TryGetValue("projectId", out var values) && int.TryParse(values.FirstOrDefault(), out var parsed))
+        {
+            projectIdFromQuery = parsed;
+        }
+    }
+
+    private void CloseDeployModal()
+    {
+        showDeployModal = false;
+        selectedTemplate = null;
+        selectedTemplateDetail = null;
+        credentialInputs.Clear();
+        templateDetailLoading = false;
+        lastDeployResponse = null;
+        dockerImageInput = string.Empty;
+    }
+
+    private void GoToApplicationsAfterSuccess()
+    {
+        CloseDeployModal();
+        Navigation.NavigateTo("/applications", forceLoad: true);
+    }
+
+    private void OnDatabaseNameChanged(ChangeEventArgs args)
+    {
+        databaseName = args.Value?.ToString()?.Trim() ?? string.Empty;
+        SyncNameDerivedCredentials();
+    }
+
+    private void PrepareCredentialInputs()
+    {
+        credentialInputs.Clear();
+
+        if (selectedTemplateDetail?.EnvironmentVariables == null)
+        {
+            return;
+        }
+
+        foreach (var definition in selectedTemplateDetail.EnvironmentVariables)
+        {
+            var input = new EnvironmentVariableInputModel
+            {
+                Key = definition.Key,
+                Label = definition.Label,
+                Description = definition.Description,
+                IsSecret = definition.IsSecret,
+                IsRequired = definition.IsRequired,
+                Strategy = definition.Strategy,
+                DefaultValue = definition.DefaultValue,
+                SuggestedValue = definition.SuggestedValue,
+                Length = definition.Length,
+                Prefix = definition.Prefix,
+                Suffix = definition.Suffix,
+                DisplayInWizard = definition.DisplayInWizard
+            };
+
+            input.Value = GenerateDefaultValue(input);
+            credentialInputs.Add(input);
+        }
+
+        SyncNameDerivedCredentials(force: true);
+    }
+
+    private void OnCredentialValueChanged(EnvironmentVariableInputModel variable, string? value)
+    {
+        variable.Value = value?.Trim() ?? string.Empty;
+        variable.UserModified = true;
+    }
+
+    private void ToggleSecretVisibility(EnvironmentVariableInputModel variable)
+    {
+        variable.RevealSecret = !variable.RevealSecret;
+    }
+
+    private void RegenerateCredential(EnvironmentVariableInputModel variable)
+    {
+        variable.UserModified = false;
+        variable.Value = GenerateDefaultValue(variable);
+        if (StrategyEquals(variable, "ApplicationSlug"))
+        {
+            SyncNameDerivedCredentials(force: true);
+        }
+    }
+
+    private void SyncNameDerivedCredentials(bool force = false)
+    {
+        foreach (var variable in credentialInputs.Where(v => StrategyEquals(v, "ApplicationSlug")))
+        {
+            if (!variable.UserModified || force)
+            {
+                variable.Value = BuildSlugValue(variable);
+                if (force)
+                {
+                    variable.UserModified = false;
+                }
+            }
+        }
+    }
+
+    private string GenerateDefaultValue(EnvironmentVariableInputModel variable)
+    {
+        if (StrategyEquals(variable, "ApplicationSlug"))
+        {
+            return BuildSlugValue(variable);
+        }
+
+        if (StrategyEquals(variable, "RandomSecure"))
+        {
+            return GenerateSecretValue(variable.Length ?? 32, includeSymbols: false);
+        }
+
+        if (StrategyEquals(variable, "RandomSecureWithSymbols"))
+        {
+            return GenerateSecretValue(variable.Length ?? 48, includeSymbols: true);
+        }
+
+        if (StrategyEquals(variable, "Literal"))
+        {
+            return variable.DefaultValue ?? variable.SuggestedValue ?? string.Empty;
+        }
+
+        return variable.SuggestedValue ?? variable.DefaultValue ?? string.Empty;
+    }
+
+    private string BuildSlugValue(EnvironmentVariableInputModel variable)
+    {
+        var seed = string.IsNullOrWhiteSpace(databaseName)
+            ? selectedTemplate?.Name ?? variable.Key
+            : databaseName;
+
+        var slug = Slugify(seed, variable.Length ?? 32);
+        var prefix = variable.Prefix ?? string.Empty;
+        var suffix = variable.Suffix ?? string.Empty;
+        return string.Concat(prefix, slug, suffix);
+    }
+
+    private static string Slugify(string value, int maxLength)
+    {
+        if (maxLength <= 0)
+        {
+            maxLength = 32;
+        }
+
+        var builder = new StringBuilder(value.Length);
+        char previous = '\0';
+
+        foreach (var character in value.ToLowerInvariant())
+        {
+            if (char.IsLetterOrDigit(character))
+            {
+                builder.Append(character);
+                previous = character;
+            }
+            else if (previous != '-')
+            {
+                builder.Append('-');
+                previous = '-';
+            }
+        }
+
+        var slug = builder.ToString().Trim('-');
+        if (string.IsNullOrWhiteSpace(slug))
+        {
+            slug = "hostcraft-db";
+        }
+
+        if (slug.Length > maxLength)
+        {
+            slug = slug[..maxLength];
+        }
+
+        return slug;
+    }
+
+    private static string GenerateSecretValue(int length, bool includeSymbols)
+    {
+        if (length <= 0)
+        {
+            length = 32;
+        }
+
+        const string baseChars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+        const string symbolChars = "!@#$%^&*()-_=+[]{}:?";
+        var charset = includeSymbols ? baseChars + symbolChars : baseChars;
+        Span<byte> buffer = stackalloc byte[length];
+        RandomNumberGenerator.Fill(buffer);
+        var chars = new char[length];
+
+        for (int i = 0; i < length; i++)
+        {
+            chars[i] = charset[buffer[i] % charset.Length];
+        }
+
+        return new string(chars);
+    }
+
+    private static bool StrategyEquals(EnvironmentVariableInputModel variable, string strategy)
+    {
+        return string.Equals(variable.Strategy, strategy, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private void AddEnvVar()
+    {
+        envVarKeys.Add("");
+        envVarValues.Add("");
+    }
+
+    private void RemoveEnvVar(int index)
+    {
+        envVarKeys.RemoveAt(index);
+        envVarValues.RemoveAt(index);
+    }
+
+    private async Task DeployDatabase()
+    {
+        if (lastDeployResponse != null)
+        {
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(databaseName))
+        {
+            deployError = "Database name is required";
+            return;
+        }
+
+        if (selectedServerId == 0)
+        {
+            deployError = "Please select a server";
+            return;
+        }
+
+        if (selectedProjectId == 0)
+        {
+            deployError = "Please select a project";
+            return;
+        }
+
+        if (templateDetailLoading)
+        {
+            deployError = "Template safeguards are still loading. Please wait.";
+            return;
+        }
+
+        if (credentialInputs.Count == 0)
+        {
+            deployError = "Credential defaults are unavailable. Close and reopen the modal.";
+            return;
+        }
+
+        foreach (var variable in credentialInputs.Where(v => v.IsRequired))
+        {
+            if (string.IsNullOrWhiteSpace(variable.Value))
+            {
+                deployError = $"{variable.Label} is required";
+                return;
+            }
+        }
+
+        deploying = true;
+        deployError = null;
+        lastDeployResponse = null;
+
+        try
+        {
+            var envVars = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var variable in credentialInputs)
+            {
+                if (!string.IsNullOrWhiteSpace(variable.Key) && !string.IsNullOrWhiteSpace(variable.Value))
+                {
+                    envVars[variable.Key] = variable.Value;
+                }
+            }
+
+            for (int i = 0; i < envVarKeys.Count; i++)
+            {
+                if (!string.IsNullOrWhiteSpace(envVarKeys[i]))
+                {
+                    envVars[envVarKeys[i]] = envVarValues[i];
+                }
+            }
+
+            var request = new
+            {
+                Name = databaseName,
+                ServerId = selectedServerId,
+                ProjectId = selectedProjectId,
+                DockerImage = string.IsNullOrWhiteSpace(dockerImageInput) ? selectedTemplate!.DockerImage : dockerImageInput.Trim(),
+                EnvironmentVariables = envVars,
+                MemoryLimitMB = memoryLimitMB,
+                CpuLimitCores = cpuLimitCores
+            };
+
+            var response = await PostDeployWithRefreshAsync(selectedTemplate!.Id, request);
+
+            if (response.StatusCode == HttpStatusCode.Unauthorized)
+            {
+                deployError = "Session expired. Please log in again.";
+                return;
+            }
+
+            if (response.IsSuccessStatusCode)
+            {
+                lastDeployResponse = await response.Content.ReadFromJsonAsync<DeployDatabaseResponseDto>();
+                if (lastDeployResponse == null)
+                {
+                    deployError = "Deployment completed but credentials could not be loaded.";
+                }
+            }
+            else
+            {
+                var rawError = await response.Content.ReadAsStringAsync();
+                ErrorResponse? errorResponse = null;
+
+                if (!string.IsNullOrWhiteSpace(rawError))
+                {
+                    try
+                    {
+                        errorResponse = JsonSerializer.Deserialize<ErrorResponse>(rawError, new JsonSerializerOptions
+                        {
+                            PropertyNameCaseInsensitive = true
+                        });
+                    }
+                    catch (JsonException ex)
+                    {
+                        Logger.LogWarning(ex, "Failed to parse deployment error payload: {Payload}", rawError);
+                    }
+                }
+
+                deployError = errorResponse?.Error
+                    ?? (!string.IsNullOrWhiteSpace(rawError) ? rawError.Trim() : $"Deployment failed with status {response.StatusCode}");
+                Logger.LogError("Failed to deploy database: {Error}", deployError);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error deploying database");
+            deployError = $"An error occurred: {ex.Message}";
+        }
+        finally
+        {
+            deploying = false;
+        }
+    }
+
+    private async Task<HttpResponseMessage> PostDeployWithRefreshAsync(int templateId, object request)
+    {
+        var response = await Http.PostAsJsonAsync($"api/DatabaseTemplates/{templateId}/deploy", request);
+
+        if (response.StatusCode != HttpStatusCode.Unauthorized)
+        {
+            return response;
+        }
+
+        Logger.LogWarning("Deploy request for template {TemplateId} returned 401; attempting token refresh", templateId);
+
+        var refresh = await AuthService.RefreshTokenAsync();
+        if (refresh.Success && !string.IsNullOrEmpty(refresh.Token))
+        {
+            response.Dispose();
+            return await Http.PostAsJsonAsync($"api/DatabaseTemplates/{templateId}/deploy", request);
+        }
+
+        Logger.LogWarning("Token refresh failed for deploy request; keeping 401 response");
+        return response;
+    }
+
+    // DTOs
+    private class DatabaseTemplateDto
+    {
+        public int Id { get; set; }
+        public string Name { get; set; } = "";
+        public string Type { get; set; } = "";
+        public string DockerImage { get; set; } = "";
+        public int DefaultPort { get; set; }
+        public string Category { get; set; } = "";
+        public string? Description { get; set; }
+        public string? IconUrl { get; set; }
+        public long? RecommendedMemoryMB { get; set; }
+        public double? RecommendedCpuCores { get; set; }
+    }
+
+    private class DatabaseTemplateDetailDto : DatabaseTemplateDto
+    {
+        public string? DefaultEnvironmentVariables { get; set; }
+        public string DefaultVolumePath { get; set; } = string.Empty;
+        public string? HealthCheckCommand { get; set; }
+        public DateTime CreatedAt { get; set; }
+        public List<EnvironmentVariableDefinitionDto> EnvironmentVariables { get; set; } = new();
+    }
+
+    private class EnvironmentVariableDefinitionDto
+    {
+        public string Key { get; set; } = string.Empty;
+        public string Label { get; set; } = string.Empty;
+        public string Description { get; set; } = string.Empty;
+        public bool IsSecret { get; set; }
+        public bool IsRequired { get; set; }
+        public string Strategy { get; set; } = string.Empty;
+        public string? DefaultValue { get; set; }
+        public string? SuggestedValue { get; set; }
+        public int? Length { get; set; }
+        public string? Prefix { get; set; }
+        public string? Suffix { get; set; }
+        public bool DisplayInWizard { get; set; } = true;
+    }
+
+    private class ServerDto
+    {
+        public int Id { get; set; }
+        public string Name { get; set; } = "";
+        public ServerType Type { get; set; }
+    }
+
+    private class ProjectDto
+    {
+        public int Id { get; set; }
+        public string Name { get; set; } = "";
+    }
+    private class ErrorResponse
+    {
+        public string? Error { get; set; }
+    }
+
+    private class DeployDatabaseResponseDto
+    {
+        public int ApplicationId { get; set; }
+        public string Name { get; set; } = string.Empty;
+        public string Message { get; set; } = string.Empty;
+        public DateTime DeployedAt { get; set; }
+        public int? PublishedPort { get; set; }
+        public string? DockerImage { get; set; }
+        public List<ResolvedEnvironmentVariableDto> EnvironmentVariables { get; set; } = new();
+    }
+
+    private class ResolvedEnvironmentVariableDto
+    {
+        public string Key { get; set; } = string.Empty;
+        public string Label { get; set; } = string.Empty;
+        public string Value { get; set; } = string.Empty;
+        public bool IsSecret { get; set; }
+        public bool IsUserProvided { get; set; }
+        public string Description { get; set; } = string.Empty;
+        public bool DisplayInWizard { get; set; }
+    }
+
+    private class EnvironmentVariableInputModel
+    {
+        public string Key { get; set; } = string.Empty;
+        public string Label { get; set; } = string.Empty;
+        public string Description { get; set; } = string.Empty;
+        public bool IsSecret { get; set; }
+        public bool IsRequired { get; set; }
+        public string Strategy { get; set; } = string.Empty;
+        public string? DefaultValue { get; set; }
+        public string? SuggestedValue { get; set; }
+        public int? Length { get; set; }
+        public string? Prefix { get; set; }
+        public string? Suffix { get; set; }
+        public bool DisplayInWizard { get; set; } = true;
+        public string Value { get; set; } = string.Empty;
+        public bool RevealSecret { get; set; }
+        public bool UserModified { get; set; }
+    }
+}
+
+<style>
+    .database-templates-page {
+        padding: clamp(1.5rem, 3vw, 3rem);
+        min-height: 100vh;
+        background: radial-gradient(circle at top, rgba(99, 102, 241, 0.25), transparent 55%)
+            , radial-gradient(circle at 20% 20%, rgba(59, 130, 246, 0.2), transparent 45%)
+            , #0f172a;
+        color: #e2e8f0;
+    }
+
+    .hero-panel {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+        gap: 2rem;
+        padding: 2rem;
+        border-radius: 1.5rem;
+        border: 1px solid rgba(99, 102, 241, 0.4);
+        background: rgba(15, 23, 42, 0.75);
+        box-shadow: 0 25px 60px rgba(15, 23, 42, 0.45);
+    }
+
+    .hero-copy h1 {
+        font-size: clamp(2rem, 4vw, 2.8rem);
+        margin-bottom: 0.5rem;
+    }
+
+    .eyebrow {
+        text-transform: uppercase;
+        letter-spacing: 0.2em;
+        font-size: 0.75rem;
+        color: #a5b4fc;
+        margin-bottom: 0.5rem;
+    }
+
+    .hero-tags {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        margin-top: 1rem;
+    }
+
+    .hero-tags .tag {
+        padding: 0.35rem 0.8rem;
+        border-radius: 999px;
+        border: 1px solid rgba(148, 163, 184, 0.3);
+        font-size: 0.85rem;
+    }
+
+    .hero-metrics {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+        gap: 1rem;
+    }
+
+    .metric-card {
+        padding: 1rem;
+        border-radius: 1rem;
+        background: linear-gradient(135deg, rgba(99, 102, 241, 0.2), rgba(79, 70, 229, 0.05));
+        border: 1px solid rgba(99, 102, 241, 0.3);
+    }
+
+    .metric-card strong {
+        display: block;
+        font-size: 2rem;
+        margin: 0.35rem 0;
+        color: #ffffff;
+    }
+
+    .project-context-banner {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin: 1.5rem 0;
+        padding: 1.25rem 1.5rem;
+        border-radius: 1rem;
+        border: 1px solid rgba(45, 212, 191, 0.4);
+        background: rgba(13, 148, 136, 0.15);
+        backdrop-filter: blur(8px);
+        gap: 1rem;
+    }
+
+    .project-context-banner .context-subtext {
+        margin: 0.25rem 0 0;
+        color: #a7f3d0;
+        font-size: 0.85rem;
+    }
+
+    .filters-panel {
+        margin-top: 2rem;
+        padding: 1.5rem;
+        border-radius: 1.25rem;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        background: rgba(15, 23, 42, 0.8);
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: space-between;
+        gap: 1rem;
+    }
+
+    .filter-summary {
+        display: flex;
+        flex-direction: column;
+        gap: 0.35rem;
+        text-align: right;
+        font-size: 0.9rem;
+        color: #cbd5f5;
+    }
+
+    .category-tabs {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-top: 1.5rem;
+    }
+
+    .category-tabs .tab {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.45rem;
+        padding: 0.65rem 1.1rem;
+        border-radius: 999px;
+        border: 1px solid rgba(148, 163, 184, 0.3);
+        background: transparent;
+        color: inherit;
+        cursor: pointer;
+        transition: all 0.2s ease;
+    }
+
+    .category-tabs .tab.active {
+        background: linear-gradient(135deg, #6366f1, #8b5cf6);
+        border-color: transparent;
+        box-shadow: 0 8px 20px rgba(99, 102, 241, 0.35);
+    }
+
+    .templates-grid {
+        margin-top: 2rem;
+        display: grid;
+        gap: 1.5rem;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    }
+
+    .template-card {
+        position: relative;
+        padding: 1.75rem;
+        border-radius: 1.25rem;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        background: rgba(15, 23, 42, 0.9);
+        overflow: hidden;
+        transition: transform 0.25s ease, border 0.25s ease;
+    }
+
+    .template-card:hover {
+        transform: translateY(-6px);
+        border-color: rgba(99, 102, 241, 0.6);
+    }
+
+    .card-accent {
+        position: absolute;
+        inset: 0;
+        background: radial-gradient(circle at top right, rgba(99, 102, 241, 0.35), transparent 55%);
+        opacity: 0.7;
+        pointer-events: none;
+    }
+
+    .template-top {
+        position: relative;
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+    }
+
+    .template-icon {
+        width: 3.5rem;
+        height: 3.5rem;
+        border-radius: 1rem;
+        background: rgba(99, 102, 241, 0.2);
+        display: grid;
+        place-items: center;
+        font-size: 1.75rem;
+    }
+
+    .template-heading h3 {
+        margin: 0;
+        font-size: 1.4rem;
+    }
+
+    .template-type {
+        font-size: 0.85rem;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        color: #94a3b8;
+    }
+
+    .category-pill {
+        margin-left: auto;
+        padding: 0.35rem 0.8rem;
+        border-radius: 999px;
+        background: rgba(15, 118, 255, 0.15);
+        border: 1px solid rgba(59, 130, 246, 0.4);
+        font-size: 0.85rem;
+        white-space: nowrap;
+    }
+
+    .template-description {
+        margin: 1.25rem 0;
+        color: #cbd5f5;
+        min-height: 3rem;
+    }
+
+    .template-specs {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+        gap: 0.75rem;
+    }
+
+    .spec-chip {
+        padding: 0.75rem;
+        border-radius: 0.85rem;
+        background: rgba(15, 23, 42, 0.8);
+        border: 1px solid rgba(148, 163, 184, 0.2);
+    }
+
+    .spec-chip .label {
+        display: block;
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        color: #94a3b8;
+        letter-spacing: 0.08em;
+        margin-bottom: 0.25rem;
+    }
+
+    .template-footer {
+        margin-top: 1.25rem;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 1rem;
+    }
+
+    .resource-hint {
+        display: flex;
+        flex-direction: column;
+        gap: 0.35rem;
+    }
+
+    .hint-label {
+        font-size: 0.8rem;
+        color: #94a3b8;
+    }
+
+    .hint-values {
+        display: flex;
+        gap: 0.65rem;
+        flex-wrap: wrap;
+        font-weight: 600;
+    }
+
+    .btn.btn-primary {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        border-radius: 999px;
+        padding: 0.65rem 1.4rem;
+        background: linear-gradient(135deg, #ec4899, #8b5cf6);
+        border: none;
+        box-shadow: 0 12px 25px rgba(139, 92, 246, 0.35);
+    }
+
+    .credential-section {
+        margin-top: 1.5rem;
+        padding: 1.25rem;
+        border-radius: 1rem;
+        border: 1px solid rgba(148, 163, 184, 0.25);
+        background: rgba(15, 23, 42, 0.6);
+        box-shadow: inset 0 0 0 1px rgba(15, 118, 255, 0.1);
+    }
+
+    .credential-section .section-header {
+        margin-bottom: 1rem;
+    }
+
+    .credential-field {
+        margin-bottom: 1rem;
+    }
+
+    .credential-field label {
+        display: flex;
+        align-items: center;
+        gap: 0.35rem;
+        font-weight: 600;
+    }
+
+    .credential-field .required {
+        color: #fbbf24;
+        font-size: 0.85rem;
+    }
+
+    .credential-field .env-key {
+        display: inline-block;
+        font-size: 0.75rem;
+        color: #94a3b8;
+        margin-bottom: 0.35rem;
+    }
+
+    .credential-input-row {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+
+    .btn.btn-icon {
+        border-radius: 0.65rem;
+        padding: 0.35rem 0.6rem;
+        background: rgba(59, 130, 246, 0.15);
+        border: 1px solid rgba(59, 130, 246, 0.3);
+        color: #e2e8f0;
+        font-size: 0.9rem;
+    }
+
+    .success-panel {
+        padding: 1.5rem;
+        border-radius: 1.25rem;
+        border: 1px solid rgba(16, 185, 129, 0.35);
+        background: rgba(6, 95, 70, 0.35);
+        color: #ecfdf5;
+    }
+
+    .success-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 1rem;
+        margin: 1rem 0;
+    }
+
+    .success-card {
+        padding: 0.85rem;
+        border-radius: 0.85rem;
+        background: rgba(15, 23, 42, 0.5);
+        border: 1px solid rgba(148, 163, 184, 0.2);
+    }
+
+    .success-card .label {
+        display: flex;
+        flex-direction: column;
+        font-size: 0.9rem;
+        color: #e2e8f0;
+    }
+
+    .success-card code {
+        display: block;
+        margin-top: 0.5rem;
+        padding: 0.35rem 0.5rem;
+        border-radius: 0.5rem;
+        background: #0f172a;
+        color: #cffafe;
+        font-family: 'JetBrains Mono', Consolas, monospace;
+        font-size: 0.85rem;
+        word-break: break-all;
+    }
+
+    .success-meta {
+        display: flex;
+        gap: 1rem;
+        flex-wrap: wrap;
+        font-size: 0.9rem;
+        color: #d1fae5;
+    }
+
+    .loading-state.inline {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        padding: 0.75rem 1rem;
+        border-radius: 0.75rem;
+        background: rgba(15, 23, 42, 0.5);
+        border: 1px solid rgba(148, 163, 184, 0.2);
+    }
+
+    .empty-state {
+        margin-top: 2rem;
+        padding: 2rem;
+        border-radius: 1.25rem;
+        border: 1px dashed rgba(248, 250, 252, 0.3);
+        text-align: center;
+        background: rgba(15, 23, 42, 0.7);
+    }
+
+    @@media (max-width: 768px) {
+        .template-footer {
+            flex-direction: column;
+            align-items: flex-start;
+        }
+
+        .filter-summary {
+            text-align: left;
+        }
+    }
+</style>

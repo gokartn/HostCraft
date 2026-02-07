@@ -1,0 +1,401 @@
+# HostCraft Platform - Unified Docker Compose Configuration
+# Version: 0.0.1-alpha
+#
+# This unified compose file works for ALL deployment scenarios:
+# - Development (local build, bridge networking)
+# - Production from source (build, swarm mode with HA)
+# - Production from releases (pre-built images, optional swarm)
+#
+# Environment Variables (set via .env file or install script):
+# - WEB_IMAGE: Docker image for Web UI (default: hostcraft-web:latest, or ghcr.io URL for pre-built)
+# - API_IMAGE: Docker image for API (default: hostcraft-api:latest, or ghcr.io URL for pre-built)
+# - NETWORK_DRIVER: overlay/bridge (default: overlay for swarm, bridge for standalone)
+# - POSTGRES_PASSWORD: Database password (required)
+# - ENCRYPTION_KEY: Data encryption key (required)
+# - TRAEFIK_EMAIL: Let's Encrypt email (required)
+#
+# Build Mode:
+# - When src/ directory exists: Builds images from source and tags with WEB_IMAGE/API_IMAGE
+# - When src/ missing: Pulls pre-built images from WEB_IMAGE/API_IMAGE (ghcr.io registry)
+#
+# Note: All services (Traefik, Registry) are included by default for HA/DR deployments.
+# To exclude services in standalone mode, comment them out or use separate compose file.
+
+# Centralized configuration
+x-common-variables: &common-variables
+  WEB_PORT: 5050
+  API_PORT: 5100
+
+# Common deployment defaults for HA services (Swarm mode)
+# Works on single-node (all replicas on same node) and multi-node (spread across nodes)
+x-ha-deployment: &ha-deployment
+  replicas: 1  # Start with 1, scale up when adding nodes: docker service scale hostcraft_api=3
+  placement:
+    preferences:
+      - spread: node.id  # Spread replicas evenly across all managers when available
+    constraints:
+      - node.role == manager  # Run on managers (access to docker.sock)
+  restart_policy:
+    condition: on-failure
+    delay: 10s
+    max_attempts: 10
+    window: 120s
+  update_config:
+    parallelism: 1  # Update one replica at a time
+    delay: 10s
+    failure_action: rollback  # Auto-rollback on failure
+    order: start-first  # Zero-downtime updates
+  rollback_config:
+    parallelism: 1
+    delay: 5s
+    failure_action: pause
+    order: stop-first
+
+services:
+  # =====================================================
+  # HostCraft Web UI
+  # =====================================================
+  web:
+    # Pre-built image from GitHub Container Registry
+    image: ${WEB_IMAGE:-ghcr.io/gokartn/hostcraft-web:latest}
+    ports:
+      - target: 8080
+        published: ${WEB_PORT:-5050}
+        protocol: tcp
+        mode: ${NETWORK_DRIVER:+ingress}${NETWORK_DRIVER:-ingress}  # ingress for swarm
+    environment:
+      <<: *common-variables
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Production}
+      ASPNETCORE_URLS: http://+:8080
+      ApiUrl: http://api:8080
+      ConnectionStrings__DefaultConnection: Host=postgres;Database=hostcraft;Username=hostcraft;Password=${POSTGRES_PASSWORD:-HostCraft2024!SecureDefault}
+      Encryption__Key: ${ENCRYPTION_KEY:-}
+      Encryption__KeyPath: /app/data/encryption.key
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /proc:/host/proc:ro  # Access host processes for nsenter
+      - hostcraft-data:/app/data
+      - dataprotection-keys:/root/.aspnet/DataProtection-Keys
+    cap_add:
+      - SYS_ADMIN  # Required for nsenter
+      - SYS_PTRACE  # Required for process inspection
+    security_opt:
+      - apparmor:unconfined  # Allow nsenter operations
+    # Standalone mode (docker-compose up)
+    restart: unless-stopped
+    # Swarm mode (docker stack deploy) - ignored in standalone
+    deploy:
+      <<: *ha-deployment
+      labels:
+        - "hostcraft.service=web"
+        - "hostcraft.managed=true"
+        # Traefik labels
+        - "traefik.enable=true"
+        # HTTPS router - secured with Let's Encrypt
+        - "traefik.http.routers.hostcraft-web.rule=Host(`${HOSTCRAFT_DOMAIN:-hostcraft.localhost}`)"
+        - "traefik.http.routers.hostcraft-web.entrypoints=websecure"
+        - "traefik.http.routers.hostcraft-web.tls=true"
+        - "traefik.http.routers.hostcraft-web.tls.certresolver=letsencrypt"
+        - "traefik.http.routers.hostcraft-web.service=hostcraft-web"
+        # HTTP router - redirects to HTTPS
+        - "traefik.http.routers.hostcraft-web-http.rule=Host(`${HOSTCRAFT_DOMAIN:-hostcraft.localhost}`)"
+        - "traefik.http.routers.hostcraft-web-http.entrypoints=web"
+        - "traefik.http.routers.hostcraft-web-http.service=hostcraft-web"
+        - "traefik.http.routers.hostcraft-web-http.middlewares=redirect-to-https"
+        # Service definition
+        - "traefik.http.services.hostcraft-web.loadbalancer.server.port=8080"
+        # Redirect middleware
+        - "traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https"
+        - "traefik.http.middlewares.redirect-to-https.redirectscheme.permanent=true"
+    networks:
+      - hostcraft-network
+    depends_on:
+      - api
+
+  # =====================================================
+  # HostCraft API
+  # =====================================================
+  api:
+    # Pre-built image from GitHub Container Registry
+    image: ${API_IMAGE:-ghcr.io/gokartn/hostcraft-api:latest}
+    ports:
+      - target: 8080
+        published: ${API_PORT:-5100}
+        protocol: tcp
+        mode: ${NETWORK_DRIVER:+ingress}${NETWORK_DRIVER:-ingress}
+    environment:
+      <<: *common-variables
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Production}
+      ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__DefaultConnection: Host=postgres;Database=hostcraft;Username=hostcraft;Password=${POSTGRES_PASSWORD:-HostCraft2024!SecureDefault}
+      # CRITICAL FIX: Add Encryption__Key to API (was missing in all compose files!)
+      Encryption__Key: ${ENCRYPTION_KEY:-}
+      Encryption__KeyPath: /app/data/encryption.key
+      LOCALHOST_IS_SWARM_MANAGER: ${LOCALHOST_IS_SWARM_MANAGER:-false}
+      SKIP_LOCALHOST_SEED: ${SKIP_LOCALHOST_SEED:-false}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /proc:/host/proc:ro  # Read host system metrics
+      - /sys:/host/sys:ro    # Read host system info
+      - dataprotection-keys:/root/.aspnet/DataProtection-Keys
+      - hostcraft-data:/app/data
+      - /var/lib/hostcraft/secrets:/app/secrets:ro
+      - /var/lib/hostcraft/traefik:/var/lib/hostcraft/traefik
+    restart: unless-stopped
+    deploy:
+      <<: *ha-deployment
+      labels:
+        - "hostcraft.service=api"
+        - "hostcraft.managed=true"
+        # Traefik labels
+        - "traefik.enable=true"
+        # HTTPS router - secured with Let's Encrypt
+        - "traefik.http.routers.hostcraft-api.rule=Host(`${HOSTCRAFT_API_DOMAIN:-hostcraft.localhost}`) && PathPrefix(`/api`)"
+        - "traefik.http.routers.hostcraft-api.entrypoints=websecure"
+        - "traefik.http.routers.hostcraft-api.tls=true"
+        - "traefik.http.routers.hostcraft-api.tls.certresolver=letsencrypt"
+        - "traefik.http.routers.hostcraft-api.service=hostcraft-api"
+        # HTTP router - allows API access over HTTP too
+        - "traefik.http.routers.hostcraft-api-http.rule=Host(`${HOSTCRAFT_API_DOMAIN:-hostcraft.localhost}`) && PathPrefix(`/api`)"
+        - "traefik.http.routers.hostcraft-api-http.entrypoints=web"
+        - "traefik.http.routers.hostcraft-api-http.service=hostcraft-api"
+        # Service definition
+        - "traefik.http.services.hostcraft-api.loadbalancer.server.port=8080"
+    networks:
+      - hostcraft-network
+
+  # =====================================================
+  # PostgreSQL Database
+  # =====================================================
+  postgres:
+    image: postgres:18
+    environment:
+      - POSTGRES_DB=hostcraft
+      - POSTGRES_USER=hostcraft
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-HostCraft2024!SecureDefault}
+      - PGDATA=/var/lib/postgresql/data/pgdata
+    volumes:
+      # CRITICAL FIX: Always mount to /var/lib/postgresql/data (not parent directory!)
+      # This follows Docker best practices and prevents permission issues
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hostcraft -d hostcraft"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+      update_config:
+        parallelism: 1
+        delay: 10s
+        failure_action: rollback
+        order: stop-first  # Database needs stop-first for safety
+      labels:
+        - "hostcraft.service=postgres"
+        - "hostcraft.managed=true"
+        - "hostcraft.ha=simple-failover"
+    networks:
+      - hostcraft-network
+
+  # =====================================================
+  # Docker Registry (HA/DR recommended for private images)
+  # =====================================================
+  registry:
+    image: registry:2.8
+    ports:
+      - target: 5000
+        published: 5000
+        protocol: tcp
+        mode: ${NETWORK_DRIVER:+ingress}${NETWORK_DRIVER:-ingress}
+    environment:
+      - REGISTRY_STORAGE_FILESYSTEM_ROOTDIRECTORY=/var/lib/registry
+      - REGISTRY_STORAGE_DELETE_ENABLED=true
+      - REGISTRY_HTTP_ADDR=0.0.0.0:5000
+      - REGISTRY_HTTP_SECRET=${REGISTRY_HTTP_SECRET:-changeme-generate-random-secret}
+      - REGISTRY_HEALTH_STORAGEDRIVER_ENABLED=true
+      - REGISTRY_HEALTH_STORAGEDRIVER_INTERVAL=10s
+      - REGISTRY_HEALTH_STORAGEDRIVER_THRESHOLD=3
+      - REGISTRY_LOG_LEVEL=info
+    volumes:
+      - registry-data:/var/lib/registry
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:5000/v2/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    deploy:
+      <<: *ha-deployment
+      labels:
+        - "hostcraft.service=registry"
+        - "hostcraft.managed=true"
+        - "hostcraft.internal=true"
+    networks:
+      - hostcraft-network
+
+  # =====================================================
+  # Registry UI (Web interface for Docker Registry)
+  # =====================================================
+  registry-ui:
+    image: joxit/docker-registry-ui:latest
+    environment:
+      - REGISTRY_TITLE=HostCraft Registry
+      - REGISTRY_URL=http://registry:5000
+      - DELETE_IMAGES=true
+      - SHOW_CONTENT_DIGEST=true
+      - SINGLE_REGISTRY=true
+      - NGINX_PROXY_PASS_URL=http://registry:5000
+    restart: unless-stopped
+    deploy:
+      <<: *ha-deployment
+      labels:
+        - "hostcraft.service=registry-ui"
+        - "hostcraft.managed=true"
+        - "hostcraft.internal=true"
+        - "traefik.enable=false"
+        - "traefik.http.routers.registry-ui.rule=Host(`registry.${HOSTCRAFT_DOMAIN:-hostcraft.localhost}`)"
+        - "traefik.http.services.registry-ui.loadbalancer.server.port=80"
+    networks:
+      - hostcraft-network
+    depends_on:
+      - registry
+
+  # =====================================================
+  # Traefik Reverse Proxy (HA ingress controller)
+  # Handles HTTP/HTTPS traffic, Let's Encrypt, routing
+  # =====================================================
+  traefik:
+    image: traefik:v3.6
+    command:
+      # API and Dashboard
+      - --api.insecure=true
+      - --api.dashboard=true
+      # Docker Swarm Provider (auto-detects swarm mode)
+      - --providers.swarm=true
+      - --providers.swarm.exposedbydefault=false
+      - --providers.swarm.network=${COMPOSE_PROJECT_NAME:-hostcraft}_hostcraft-network
+      - --providers.swarm.endpoint=unix:///var/run/docker.sock
+      # Docker Provider (auto-detects standalone mode)
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --providers.docker.network=${COMPOSE_PROJECT_NAME:-hostcraft}_hostcraft-network
+      - --providers.docker.endpoint=unix:///var/run/docker.sock
+      # File Provider (for dynamic configuration)
+      - --providers.file.directory=/etc/traefik/dynamic
+      - --providers.file.watch=true
+      # Entrypoints
+      - --entrypoints.web.address=:80
+      - --entrypoints.websecure.address=:443
+      # Let's Encrypt - placeholder email (will be updated by HostCraft API on first boot)
+      # Docker Stack Deploy doesn't expand variables in command arrays
+      - --certificatesresolvers.letsencrypt.acme.email=admin@example.com
+      - --certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json
+      - --certificatesresolvers.letsencrypt.acme.httpchallenge=true
+      - --certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web
+      # Logging
+      - --log.level=INFO
+      - --accesslog=true
+    ports:
+      - target: 80
+        published: 80
+        protocol: tcp
+        mode: host  # Direct binding on each node
+      - target: 443
+        published: 443
+        protocol: tcp
+        mode: host  # Direct binding on each node
+      - target: 8080
+        published: 8080
+        protocol: tcp
+        mode: host  # Direct binding on each node (dashboard)
+    environment:
+      - DOCKER_API_VERSION=1.52
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - traefik-certs:/letsencrypt
+      - /var/lib/hostcraft/traefik/dynamic:/etc/traefik/dynamic:ro
+    restart: unless-stopped
+    deploy:
+      mode: global  # Run on ALL manager nodes for HA
+      placement:
+        constraints:
+          - node.role == manager
+      update_config:
+        parallelism: 1
+        delay: 10s
+      restart_policy:
+        condition: on-failure
+      labels:
+        - "hostcraft.service=traefik"
+        - "hostcraft.managed=true"
+    networks:
+      - hostcraft-network
+
+# =====================================================
+# Volumes
+# Using local driver by default
+# For HA with GlusterFS, update driver_opts in production
+# =====================================================
+volumes:
+  hostcraft-data:
+    driver: local
+    # For GlusterFS HA (multi-node):
+    # driver_opts:
+    #   type: glusterfs
+    #   o: rw
+    #   device: "localhost:/hostcraft-volumes/hostcraft-data"
+
+  dataprotection-keys:
+    driver: local
+    # For GlusterFS HA:
+    # driver_opts:
+    #   type: glusterfs
+    #   o: rw
+    #   device: "localhost:/hostcraft-volumes/dataprotection-keys"
+
+  postgres-data:
+    driver: local
+    # For GlusterFS HA:
+    # driver_opts:
+    #   type: glusterfs
+    #   o: rw
+    #   device: "localhost:/hostcraft-volumes/postgres-data"
+
+  registry-data:
+    driver: local
+    # For GlusterFS HA:
+    # driver_opts:
+    #   type: glusterfs
+    #   o: rw
+    #   device: "localhost:/hostcraft-volumes/registry-data"
+
+  traefik-certs:
+    driver: local
+    # For GlusterFS HA:
+    # driver_opts:
+    #   type: glusterfs
+    #   o: rw
+    #   device: "localhost:/hostcraft-volumes/traefik-certs"
+
+# =====================================================
+# Networks
+# Driver controlled by NETWORK_DRIVER env var:
+# - overlay: Multi-host networking for Swarm (default for HA)
+# - bridge: Single-host networking for standalone Docker
+# =====================================================
+networks:
+  hostcraft-network:
+    driver: ${NETWORK_DRIVER:-overlay}
+    attachable: true

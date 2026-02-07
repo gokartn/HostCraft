@@ -1,0 +1,984 @@
+@page "/projects/{ProjectId:int}"
+@rendermode InteractiveServer
+@inject HttpClient Http
+@inject NavigationManager Navigation
+@inject ILogger<ProjectDetails> Logger
+@using System.Linq
+@using System.Threading.Tasks
+
+<div class="page-container">
+    @if (isLoading)
+    {
+        <div class="loading-spinner">
+            <div class="spinner"></div>
+            <p>Loading project...</p>
+        </div>
+    }
+    else if (project == null)
+    {
+        <div class="error-state">
+            <h2>Project Not Found</h2>
+            <p>The requested project could not be found.</p>
+            <button class="btn btn-primary" @onclick="NavigateToProjects">
+                Back to Projects
+            </button>
+        </div>
+    }
+    else
+    {
+        <div class="page-header">
+            <div class="header-left">
+                <div class="breadcrumb">
+                    <a href="/projects">Projects</a>
+                    <span>/</span>
+                    <span>@project.Name</span>
+                </div>
+                <h1>@project.Name</h1>
+                @if (!string.IsNullOrEmpty(project.Description))
+                {
+                    <p class="subtitle">@project.Description</p>
+                }
+            </div>
+            <div class="header-actions">
+                <button class="btn btn-secondary" @onclick="RefreshProject">
+                    🔄 Refresh
+                </button>
+                <button class="btn btn-secondary" @onclick="NavigateToDatabaseTemplates">
+                    ⚡ Deploy Template
+                </button>
+                <button class="btn btn-primary" @onclick="NavigateToCreateApp">
+                    ➕ New Application
+                </button>
+            </div>
+        </div>
+
+        @if (applications == null || !applications.Any())
+        {
+            <div class="empty-state">
+                <div class="empty-icon">📦</div>
+                <h2>No Applications</h2>
+                <p>Deploy your first application in this project</p>
+                <button class="btn btn-primary" @onclick="NavigateToCreateApp">
+                    ➕ Deploy Application
+                </button>
+                <button class="btn btn-secondary" @onclick="NavigateToDatabaseTemplates">
+                    ⚡ Deploy Template
+                </button>
+            </div>
+        }
+        else
+        {
+            <div class="apps-grid">
+                @foreach (var app in applications)
+                {
+                    <div class="app-card @GetStatusClass(app.Status)">
+                        <div class="app-header">
+                            <div class="app-name">
+                                <h3>@app.Name</h3>
+                                @if (!string.IsNullOrEmpty(app.Description))
+                                {
+                                    <span class="app-description">@app.Description</span>
+                                }
+                            </div>
+                            <span class="status-badge @GetStatusClass(app.Status)">
+                                @GetStatusIcon(app.Status)
+                            </span>
+                        </div>
+
+                        <div class="app-info">
+                            <div class="info-item">
+                                <span class="label">Image</span>
+                                <span class="value">@app.DockerImage</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="label">Server</span>
+                                <span class="value">@app.ServerName</span>
+                            </div>
+                            @if (!string.IsNullOrEmpty(app.ServiceId))
+                            {
+                                <div class="info-item">
+                                    <span class="label">Mode</span>
+                                    <span class="value">🐝 Swarm Service</span>
+                                </div>
+                                @if (app.SwarmReplicas.HasValue)
+                                {
+                                    <div class="info-item">
+                                        <span class="label">Replicas</span>
+                                        <span class="value">@app.RunningReplicas/@app.SwarmReplicas</span>
+                                    </div>
+                                }
+                            }
+                            else if (!string.IsNullOrEmpty(app.ContainerId))
+                            {
+                                <div class="info-item">
+                                    <span class="label">Mode</span>
+                                    <span class="value">📦 Container</span>
+                                </div>
+                            }
+                            @if (app.LastDeployedAt.HasValue)
+                            {
+                                <div class="info-item">
+                                    <span class="label">Deployed</span>
+                                    <span class="value">@app.LastDeployedAt.Value.ToString("MM/dd HH:mm")</span>
+                                </div>
+                            }
+                        </div>
+
+                        <div class="app-actions">
+                            <button class="btn-icon" @onclick="() => ViewDetails(app.Id)" title="View Details">
+                                👁️
+                            </button>
+                            @if (!string.IsNullOrEmpty(app.ContainerId) || !string.IsNullOrEmpty(app.ServiceId))
+                            {
+                                <button class="btn-icon" @onclick="() => ViewLogs(app.Id)" title="Logs">
+                                    📄
+                        @if (!string.IsNullOrEmpty(app.ServiceId))
+                        {
+                            var badges = GetNodeBadges(app.Id).ToList();
+                            if (badges.Any())
+                            {
+                                <div class="node-badges">
+                                    @foreach (var node in badges)
+                                    {
+                                        <span class="chip chip-node">
+                                            <span class="chip-label">@node.NodeName</span>
+                                            <span class="chip-meta">@node.Role</span>
+                                            <span class="chip-meta">@node.Availability</span>
+                                        </span>
+                                    }
+                                </div>
+                            }
+                        }
+                                </button>
+                            }
+                            <button class="btn-icon btn-primary" @onclick="() => Redeploy(app.Id)" title="Redeploy">
+                                🔄
+                            </button>
+                            <button class="btn-icon btn-danger" @onclick="() => DeleteApplication(app.Id)" title="Delete">
+                                🗑️
+                            </button>
+                        </div>
+
+                        @if (!string.IsNullOrEmpty(app.ServiceId))
+                        {
+                            <div class="replica-control">
+                                <div class="replica-header">
+                                    <span class="label">Replicas</span>
+                                    <span class="value">Desired: @GetDesired(app.Id) · Running: @app.RunningReplicas</span>
+                                </div>
+                                <div class="replica-input">
+                                    <button class="chip" @onclick="() => AdjustDesired(app.Id, -1)" disabled="GetDesired(app.Id) <= 1">➖</button>
+                                    <input type="number" min="1" value="@GetDesired(app.Id)" @onchange="e => OnDesiredChange(app.Id, e)" />
+                                    <button class="chip" @onclick="() => AdjustDesired(app.Id, 1)">➕</button>
+                                    <button class="btn btn-primary btn-apply" @onclick="() => ApplyScale(app.Id)" disabled="scalingApps.Contains(app.Id)">
+                                        @(scalingApps.Contains(app.Id) ? "Scaling..." : "Apply")
+                                    </button>
+                                </div>
+
+                                <div class="placement-grid">
+                                    @if (appStatuses.TryGetValue(app.Id, out var status) && status.Placements.Any())
+                                    {
+                                        @foreach (var placement in status.Placements.OrderBy(p => p.Slot))
+                                        {
+                                            <div class="placement-card">
+                                                <div class="placement-row">
+                                                    <span class="node">@placement.NodeName</span>
+                                                    <span class="badge">@placement.Role</span>
+                                                </div>
+                                                <div class="placement-row">
+                                                    <span class="state">@placement.CurrentState</span>
+                                                    <span class="availability">@placement.Availability</span>
+                                                </div>
+                                                <div class="placement-row meta">
+                                                    <span>Slot @placement.Slot</span>
+                                                    @if (!string.IsNullOrWhiteSpace(placement.Error))
+                                                    {
+                                                        <span class="error">@placement.Error</span>
+                                                    }
+                                                </div>
+                                            </div>
+                                        }
+                                    }
+                                    else
+                                    {
+                                        <span class="muted">Placement data not available yet.</span>
+                                    }
+                                </div>
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+        }
+    }
+</div>
+
+@code {
+    [Parameter]
+    public int ProjectId { get; set; }
+
+    private ProjectDto? project;
+    private List<ApplicationDto>? applications;
+    private bool isLoading = true;
+    private Dictionary<int, ApplicationStatusView> appStatuses = new();
+    private Dictionary<int, int> desiredReplicas = new();
+    private HashSet<int> scalingApps = new();
+    private HashSet<int> pendingStatusPolls = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadProject();
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        await LoadProject();
+    }
+
+    private async Task LoadProject()
+    {
+        isLoading = true;
+        StateHasChanged();
+
+        try
+        {
+            project = await Http.GetFromJsonAsync<ProjectDto>($"api/projects/{ProjectId}");
+            applications = await Http.GetFromJsonAsync<List<ApplicationDto>>($"api/applications?projectId={ProjectId}");
+
+            if (project != null && IsGlobalSystemProject(project))
+            {
+                Navigation.NavigateTo("/deployments/global", forceLoad: true);
+                return;
+            }
+
+            InitializeReplicaState();
+            await LoadStatusesAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading project");
+        }
+        finally
+        {
+            isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task RefreshProject()
+    {
+        await LoadProject();
+    }
+
+    private void NavigateToCreateApp()
+    {
+        Navigation.NavigateTo($"/projects/{ProjectId}/applications/new");
+    }
+
+    private void NavigateToProjects()
+    {
+        Navigation.NavigateTo("/projects");
+    }
+
+    private void NavigateToDatabaseTemplates()
+    {
+        Navigation.NavigateTo($"/templates?projectId={ProjectId}");
+    }
+
+    private void ViewDetails(int appId)
+    {
+        Navigation.NavigateTo($"/applications/{appId}");
+    }
+
+    private void ViewLogs(int appId)
+    {
+        Navigation.NavigateTo($"/applications/{appId}/logs");
+    }
+
+    private async Task Redeploy(int appId)
+    {
+        try
+        {
+            var response = await Http.PostAsync($"api/applications/{appId}/deploy", null);
+            if (response.IsSuccessStatusCode)
+            {
+                await LoadProject();
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error redeploying application");
+        }
+    }
+
+    private async Task DeleteApplication(int appId)
+    {
+        try
+        {
+            var response = await Http.DeleteAsync($"api/applications/{appId}");
+            if (response.IsSuccessStatusCode)
+            {
+                await LoadProject();
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error deleting application");
+        }
+    }
+
+    private async Task ScaleUp(int appId)
+    {
+        try
+        {
+            var app = applications?.FirstOrDefault(a => a.Id == appId);
+            if (app != null)
+            {
+                AdjustDesired(appId, 1);
+                await ApplyScale(appId);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error scaling up application");
+        }
+    }
+
+    private async Task ScaleDown(int appId)
+    {
+        try
+        {
+            var app = applications?.FirstOrDefault(a => a.Id == appId);
+            if (app != null)
+            {
+                AdjustDesired(appId, -1);
+                await ApplyScale(appId);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error scaling down application");
+        }
+    }
+
+    private void InitializeReplicaState()
+    {
+        desiredReplicas.Clear();
+        if (applications == null)
+            return;
+
+        foreach (var app in applications.Where(a => !string.IsNullOrEmpty(a.ServiceId)))
+        {
+            desiredReplicas[app.Id] = app.SwarmReplicas ?? 1;
+        }
+    }
+
+    private async Task LoadStatusesAsync()
+    {
+        appStatuses.Clear();
+
+        if (applications == null)
+            return;
+
+        var tasks = applications
+            .Where(a => !string.IsNullOrEmpty(a.ServiceId))
+            .Select(async app =>
+            {
+                try
+                {
+                    var status = await Http.GetFromJsonAsync<ApplicationStatusView>($"api/applications/{app.Id}/status");
+                    if (status != null)
+                    {
+                        appStatuses[app.Id] = status;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogWarning(ex, "Failed to load status for app {AppId}", app.Id);
+                }
+            });
+
+        await Task.WhenAll(tasks);
+        StateHasChanged();
+    }
+
+    private int GetDesired(int appId)
+    {
+        return desiredReplicas.TryGetValue(appId, out var replicas) ? replicas : 1;
+    }
+
+    private void OnDesiredChange(int appId, ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out var value))
+        {
+            desiredReplicas[appId] = Math.Max(1, value);
+        }
+    }
+
+    private void AdjustDesired(int appId, int delta)
+    {
+        desiredReplicas.TryGetValue(appId, out var current);
+        var next = Math.Max(1, current + delta);
+        desiredReplicas[appId] = next;
+    }
+
+    private async Task ApplyScale(int appId)
+    {
+        if (scalingApps.Contains(appId))
+            return;
+
+        scalingApps.Add(appId);
+        StateHasChanged();
+
+        try
+        {
+            var replicas = GetDesired(appId);
+            var response = await Http.PostAsync($"api/applications/{appId}/scale?replicas={replicas}", null);
+            if (response.IsSuccessStatusCode)
+            {
+                await LoadProject();
+                await LoadStatusesAsync();
+                _ = PollStatusLater(appId, TimeSpan.FromSeconds(5));
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error applying scale for app {AppId}", appId);
+        }
+        finally
+        {
+            scalingApps.Remove(appId);
+            StateHasChanged();
+        }
+    }
+
+    private IEnumerable<(string NodeName, string Role, string Availability)> GetNodeBadges(int appId)
+    {
+        if (appStatuses.TryGetValue(appId, out var status) && status.Placements != null)
+        {
+            return status.Placements
+                .GroupBy(p => p.NodeId)
+                .Select(g =>
+                {
+                    var first = g.First();
+                    return (first.NodeName, first.Role, first.Availability);
+                });
+        }
+
+        return Enumerable.Empty<(string, string, string)>();
+    }
+
+    private async Task PollStatusLater(int appId, TimeSpan delay)
+    {
+        if (pendingStatusPolls.Contains(appId))
+            return;
+
+        pendingStatusPolls.Add(appId);
+        try
+        {
+            await Task.Delay(delay);
+            await LoadSingleStatusAsync(appId);
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Deferred status poll failed for app {AppId}", appId);
+        }
+        finally
+        {
+            pendingStatusPolls.Remove(appId);
+        }
+    }
+
+    private async Task LoadSingleStatusAsync(int appId)
+    {
+        try
+        {
+            var status = await Http.GetFromJsonAsync<ApplicationStatusView>($"api/applications/{appId}/status");
+            if (status != null)
+            {
+                appStatuses[appId] = status;
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed single status refresh for app {AppId}", appId);
+        }
+    }
+
+    private string GetStatusClass(DeploymentStatus status) => status switch
+    {
+        DeploymentStatus.Running => "status-running",
+        DeploymentStatus.Success => "status-success",
+        DeploymentStatus.Failed => "status-failed",
+        DeploymentStatus.Queued => "status-queued",
+        DeploymentStatus.Cancelled => "status-cancelled",
+        _ => "status-unknown"
+    };
+
+    private string GetStatusIcon(DeploymentStatus status) => status switch
+    {
+        DeploymentStatus.Running => "🔄",
+        DeploymentStatus.Success => "✅",
+        DeploymentStatus.Failed => "❌",
+        DeploymentStatus.Queued => "⏳",
+        DeploymentStatus.Cancelled => "🚫",
+        _ => "⚪"
+    };
+
+    private static bool IsGlobalSystemProject(ProjectDto project) =>
+        string.Equals(project.Name, SystemProjects.GlobalDeployments, StringComparison.OrdinalIgnoreCase);
+
+    private record ProjectDto(int Id, string Name, string? Description, DateTime CreatedAt);
+
+    private record ApplicationDto(
+        int Id,
+        string Name,
+        string? Description,
+        int ServerId,
+        string ServerName,
+        int ProjectId,
+        string ProjectName,
+        string? DockerImage,
+        bool UsePrivateRegistry,
+        string? RegistryServer,
+        string? RegistryUsername,
+        bool HasRegistryPassword,
+        DeploymentStatus Status,
+        string? ContainerId,
+        string? ServiceId,
+        DateTime? LastDeployedAt,
+        DateTime CreatedAt,
+        int? SwarmReplicas,
+        int? RunningReplicas
+    );
+
+    private record ApplicationStatusView(
+        int ApplicationId,
+        string Status,
+        bool IsRunning,
+        string? ActualState,
+        string? ContainerId,
+        string? ServiceId,
+        List<ReplicaPlacementView> Placements
+    );
+
+    private record ReplicaPlacementView(
+        string TaskId,
+        string NodeId,
+        string NodeName,
+        string Role,
+        string Availability,
+        string DesiredState,
+        string CurrentState,
+        string? Error,
+        int Slot,
+        DateTime? UpdatedAt
+    );
+}
+
+<style>
+    .page-container {
+        padding: 2rem;
+        max-width: 1400px;
+        margin: 0 auto;
+    }
+
+    .page-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        margin-bottom: 2rem;
+        gap: 1rem;
+        flex-wrap: wrap;
+    }
+
+    .breadcrumb {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        font-size: 0.9rem;
+        color: #94a3b8;
+        margin-bottom: 0.5rem;
+    }
+
+    .breadcrumb a {
+        color: #6366f1;
+        text-decoration: none;
+        transition: color 0.2s;
+    }
+
+    .breadcrumb a:hover {
+        color: #8b5cf6;
+    }
+
+    .header-left h1 {
+        font-size: 2rem;
+        font-weight: 700;
+        color: #fff;
+        margin: 0;
+    }
+
+    .subtitle {
+        color: #94a3b8;
+        font-size: 0.95rem;
+        margin-top: 0.5rem;
+    }
+
+    .header-actions {
+        display: flex;
+        gap: 0.75rem;
+    }
+
+    .btn {
+        padding: 0.5rem 1.25rem;
+        border-radius: 0.5rem;
+        font-weight: 500;
+        font-size: 0.95rem;
+        border: none;
+        cursor: pointer;
+        transition: all 0.2s;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+
+    .btn-primary {
+        background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+        color: #fff;
+    }
+
+    .btn-primary:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 10px 25px rgba(99, 102, 241, 0.3);
+    }
+
+    .btn-secondary {
+        background: #334155;
+        color: #fff;
+    }
+
+    .btn-secondary:hover {
+        background: #475569;
+    }
+
+    .loading-spinner, .empty-state, .error-state {
+        text-align: center;
+        padding: 4rem 2rem;
+        background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+        border-radius: 1rem;
+        border: 1px solid #334155;
+    }
+
+    .spinner {
+        border: 3px solid #334155;
+        border-top-color: #6366f1;
+        border-radius: 50%;
+        width: 40px;
+        height: 40px;
+        animation: spin 1s linear infinite;
+        margin: 0 auto 1rem;
+    }
+
+    @@keyframes spin {
+        to { transform: rotate(360deg); }
+    }
+
+    .empty-icon {
+        font-size: 4rem;
+        margin-bottom: 1rem;
+        opacity: 0.5;
+    }
+
+    .empty-state h2, .error-state h2 {
+        color: #fff;
+        font-size: 1.5rem;
+        margin-bottom: 0.5rem;
+    }
+
+    .empty-state p, .error-state p {
+        color: #94a3b8;
+        margin-bottom: 1.5rem;
+    }
+
+    .apps-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
+        gap: 1.5rem;
+    }
+
+    .app-card {
+        background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+        border: 2px solid #334155;
+        border-radius: 1rem;
+        padding: 1.5rem;
+        transition: all 0.3s;
+    }
+
+    .app-card:hover {
+        transform: translateY(-4px);
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+    }
+
+    .app-card.status-running {
+        border-color: #3b82f6;
+    }
+
+    .app-card.status-success {
+        border-color: #10b981;
+    }
+
+    .app-card.status-failed {
+        border-color: #ef4444;
+        background: linear-gradient(135deg, #1e293b 0%, #2a1215 100%);
+    }
+
+    .app-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        margin-bottom: 1.5rem;
+        padding-bottom: 1rem;
+        border-bottom: 1px solid #334155;
+    }
+
+    .app-name h3 {
+        color: #fff;
+        font-size: 1.25rem;
+        font-weight: 600;
+        margin: 0;
+    }
+
+    .app-description {
+        color: #94a3b8;
+        font-size: 0.85rem;
+        margin-top: 0.25rem;
+        display: block;
+    }
+
+    .status-badge {
+        padding: 0.4rem 0.9rem;
+        border-radius: 0.5rem;
+        font-size: 1.2rem;
+    }
+
+    .status-badge.status-running {
+        background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+        box-shadow: 0 2px 10px rgba(59, 130, 246, 0.3);
+    }
+
+    .status-badge.status-success {
+        background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+        box-shadow: 0 2px 10px rgba(16, 185, 129, 0.3);
+    }
+
+    .status-badge.status-failed {
+        background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+        box-shadow: 0 2px 10px rgba(239, 68, 68, 0.3);
+    }
+
+    .app-info {
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+    }
+
+    .info-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 1rem;
+    }
+
+    .info-item .label {
+        color: #94a3b8;
+        font-size: 0.85rem;
+        font-weight: 500;
+    }
+
+    .info-item .value {
+        color: #fff;
+        font-size: 0.9rem;
+        text-align: right;
+        word-break: break-all;
+    }
+
+    .app-actions {
+        display: flex;
+        gap: 0.5rem;
+        padding-top: 1rem;
+        border-top: 1px solid #334155;
+        flex-wrap: wrap;
+    }
+
+    .node-badges {
+        display: flex;
+        gap: 0.35rem;
+        flex-wrap: wrap;
+        margin-top: 0.35rem;
+    }
+
+    .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
+        padding: 0.25rem 0.5rem;
+        border-radius: 0.5rem;
+        border: 1px solid #334155;
+        background: #111827;
+        color: #e2e8f0;
+        font-size: 0.85rem;
+        font-weight: 600;
+    }
+
+    .chip-node {
+        background: linear-gradient(135deg, #111827 0%, #0f172a 100%);
+    }
+
+    .chip-label {
+        color: #fff;
+    }
+
+    .chip-meta {
+        color: #94a3b8;
+        font-size: 0.8rem;
+        padding: 0.05rem 0.4rem;
+        border-radius: 0.4rem;
+        background: #1e293b;
+    }
+
+    .replica-control {
+        margin-top: 1rem;
+        padding-top: 1rem;
+        border-top: 1px solid #334155;
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+    }
+
+    .replica-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        color: #cbd5e1;
+        font-weight: 600;
+    }
+
+    .replica-input {
+        display: flex;
+        gap: 0.5rem;
+        align-items: center;
+        flex-wrap: wrap;
+    }
+
+    .replica-input input[type="number"] {
+        width: 80px;
+        padding: 0.35rem 0.5rem;
+        border-radius: 0.4rem;
+        border: 1px solid #334155;
+        background: #0f172a;
+        color: #e2e8f0;
+    }
+
+    .btn-apply {
+        padding: 0.5rem 1rem;
+        font-size: 0.9rem;
+    }
+
+    .placement-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 0.75rem;
+    }
+
+    .placement-card {
+        border: 1px solid #334155;
+        border-radius: 0.6rem;
+        padding: 0.6rem 0.7rem;
+        background: #0b1220;
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+    }
+
+    .placement-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-size: 0.9rem;
+        color: #cbd5e1;
+    }
+
+    .placement-row.meta {
+        font-size: 0.8rem;
+        color: #94a3b8;
+    }
+
+    .placement-card .badge {
+        background: #1e293b;
+        padding: 0.2rem 0.4rem;
+        border-radius: 0.4rem;
+        font-size: 0.8rem;
+    }
+
+    .placement-card .error {
+        color: #f97316;
+        font-weight: 600;
+    }
+
+    .muted {
+        color: #94a3b8;
+        font-size: 0.9rem;
+    }
+
+    .btn-icon {
+        width: 42px;
+        height: 42px;
+        border-radius: 0.5rem;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1.2rem;
+        border: 1px solid #334155;
+        background: #1e293b;
+        color: #fff;
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+
+    .btn-icon:hover:not(:disabled) {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    }
+
+    .btn-icon:disabled {
+        opacity: 0.3;
+        cursor: not-allowed;
+    }
+
+    .btn-icon.btn-primary {
+        background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+        border-color: #6366f1;
+    }
+
+    .btn-icon.btn-danger {
+        background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+        border-color: #ef4444;
+    }
+
+    @@media (max-width: 768px) {
+        .page-container {
+            padding: 1rem;
+        }
+
+        .page-header {
+            flex-direction: column;
+            align-items: stretch;
+        }
+
+        .apps-grid {
+            grid-template-columns: 1fr;
+        }
+    }
+</style>

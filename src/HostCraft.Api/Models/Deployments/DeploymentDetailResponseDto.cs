@@ -1,0 +1,18 @@
+using HostCraft.Core.Enums;
+
+namespace HostCraft.Api.Models.Deployments;
+
+public record DeploymentDetailResponseDto
+{
+    public int Id { get; init; }
+    public int ApplicationId { get; init; }
+    public string ApplicationName { get; init; } = string.Empty;
+    public string ServerName { get; init; } = string.Empty;
+    public DeploymentStatus Status { get; init; }
+    public string? ContainerId { get; init; }
+    public string? ServiceId { get; init; }
+    public DateTime StartedAt { get; init; }
+    public DateTime? FinishedAt { get; init; }
+    public string? ErrorMessage { get; init; }
+    public List<DeploymentLogResponseDto> Logs { get; init; } = new();
+}

@@ -1,0 +1,191 @@
+@page "/system-status"
+@rendermode InteractiveServer
+@inject HttpClient Http
+@inject NavigationManager Navigation
+
+<PageTitle>System Status - HostCraft</PageTitle>
+
+<div class="page-container">
+    <div class="page-header">
+        <div>
+            <h1>📊 System Status</h1>
+            <p class="page-subtitle">Cluster health, nodes, and system monitoring</p>
+        </div>
+    </div>
+
+    <div class="status-sections">
+        <!-- High Availability Section -->
+        <div class="status-section">
+            <button class="section-button ha-section" @onclick='() => Navigation.NavigateTo("/ha/dashboard")'>
+                <div class="section-icon">🎯</div>
+                <div class="section-content">
+                    <h2>High Availability Dashboard</h2>
+                    <p>Real-time cluster health, quorum status, and availability monitoring</p>
+                </div>
+                <div class="section-arrow">→</div>
+            </button>
+        </div>
+
+        <!-- Swarm Nodes Section -->
+        <div class="status-section">
+            <button class="section-button nodes-section" @onclick='() => Navigation.NavigateTo("/swarm/nodes")'>
+                <div class="section-icon">⚡</div>
+                <div class="section-content">
+                    <h2>Swarm Nodes</h2>
+                    <p>Manage Docker Swarm managers and workers across your cluster</p>
+                </div>
+                <div class="section-arrow">→</div>
+            </button>
+        </div>
+
+        <!-- Deployments Section -->
+        <div class="status-section">
+            <button class="section-button deployments-section" @onclick='() => Navigation.NavigateTo("/deployments")'>
+                <div class="section-icon">🚢</div>
+                <div class="section-content">
+                    <h2>Deployments</h2>
+                    <p>View and manage application deployments and build history</p>
+                </div>
+                <div class="section-arrow">→</div>
+            </button>
+        </div>
+
+        <!-- Global Deployments Section -->
+        <div class="status-section">
+            <button class="section-button global-section" @onclick='() => Navigation.NavigateTo("/deployments/global")'>
+                <div class="section-icon">🌐</div>
+                <div class="section-content">
+                    <h2>Global Deployments</h2>
+                    <p>Multi-region deployment orchestration and management</p>
+                </div>
+                <div class="section-arrow">→</div>
+            </button>
+        </div>
+
+        <!-- Orphans Section -->
+        <div class="status-section">
+            <button class="section-button orphans-section" @onclick='() => Navigation.NavigateTo("/orphans")'>
+                <div class="section-icon">🧹</div>
+                <div class="section-content">
+                    <h2>Orphaned Resources</h2>
+                    <p>Cleanup orphaned containers, services, and resources</p>
+                </div>
+                <div class="section-arrow">→</div>
+            </button>
+        </div>
+    </div>
+</div>
+
+<style>
+    .status-sections {
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+    }
+
+    .status-section {
+        width: 100%;
+    }
+
+    .section-button {
+        width: 100%;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-lg);
+        padding: 1.5rem;
+        display: flex;
+        align-items: center;
+        gap: 1.5rem;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        text-align: left;
+    }
+
+    .section-button:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        border-color: var(--accent-primary);
+    }
+
+    .ha-section:hover {
+        border-left: 4px solid #6366f1;
+        padding-left: calc(1.5rem - 3px);
+    }
+
+    .nodes-section:hover {
+        border-left: 4px solid #f59e0b;
+        padding-left: calc(1.5rem - 3px);
+    }
+
+    .deployments-section:hover {
+        border-left: 4px solid #10b981;
+        padding-left: calc(1.5rem - 3px);
+    }
+
+    .global-section:hover {
+        border-left: 4px solid #06b6d4;
+        padding-left: calc(1.5rem - 3px);
+    }
+
+    .orphans-section:hover {
+        border-left: 4px solid #ef4444;
+        padding-left: calc(1.5rem - 3px);
+    }
+
+    .section-icon {
+        font-size: 3rem;
+        flex-shrink: 0;
+    }
+
+    .section-content {
+        flex: 1;
+    }
+
+    .section-content h2 {
+        margin: 0 0 0.5rem 0;
+        font-size: 1.25rem;
+        font-weight: 600;
+        color: var(--text-primary);
+    }
+
+    .section-content p {
+        margin: 0;
+        color: var(--text-secondary);
+        font-size: 0.9rem;
+    }
+
+    .section-arrow {
+        font-size: 1.5rem;
+        color: var(--text-tertiary);
+        flex-shrink: 0;
+    }
+
+    .section-button:hover .section-arrow {
+        color: var(--accent-primary);
+        transform: translateX(4px);
+        transition: all 0.2s ease;
+    }
+
+    /* Responsive */
+    @@media (max-width: 768px) {
+        .section-icon {
+            font-size: 2rem;
+        }
+
+        .section-content h2 {
+            font-size: 1.1rem;
+        }
+
+        .section-content p {
+            font-size: 0.85rem;
+        }
+    }
+</style>
+
+@code {
+    protected override async Task OnInitializedAsync()
+    {
+        // Any initialization if needed
+        await Task.CompletedTask;
+    }
+}

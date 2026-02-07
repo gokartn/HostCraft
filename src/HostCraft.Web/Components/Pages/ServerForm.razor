@@ -1,0 +1,602 @@
+@page "/servers/new"
+@page "/servers/{id:int}/edit"
+@rendermode InteractiveServer
+@using HostCraft.Core.Enums
+@inject HttpClient Http
+@inject NavigationManager Navigation
+@inject ILogger<ServerForm> Logger
+
+<PageTitle>@(IsEditMode ? "Edit Server" : "Add Server") - HostCraft</PageTitle>
+
+<div class="server-form-page">
+    <div class="form-header">
+        <button class="btn-back" @onclick="GoBack">← Back</button>
+        <h1>@(IsEditMode ? "Edit Server" : "Add New Server")</h1>
+    </div>
+
+    <div class="form-container">
+        <EditForm Model="@model" OnValidSubmit="HandleSubmit">
+            <DataAnnotationsValidator />
+
+            <!-- Basic Information -->
+            <div class="form-section">
+                <h2>Basic Information</h2>
+                
+                <div class="form-group">
+                    <label for="name">Server Name *</label>
+                    <InputText id="name" @bind-Value="model.Name" class="form-control" placeholder="e.g., production-server-1" />
+                    <ValidationMessage For="@(() => model.Name)" />
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="host">Host / IP Address *</label>
+                        <InputText id="host" @bind-Value="model.Host" class="form-control" placeholder="192.168.1.100" />
+                        <ValidationMessage For="@(() => model.Host)" />
+                    </div>
+
+                    <div class="form-group">
+                        <label for="port">SSH Port *</label>
+                        <InputNumber id="port" @bind-Value="model.Port" class="form-control" />
+                        <ValidationMessage For="@(() => model.Port)" />
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="user">SSH User *</label>
+                    <InputText id="user" @bind-Value="model.User" class="form-control" placeholder="root" />
+                    <ValidationMessage For="@(() => model.User)" />
+                    <small class="form-text">User must have Docker permissions</small>
+                </div>
+
+                <div class="form-group">
+                    <label for="region">Region / Datacenter</label>
+                    <InputText id="region" @bind-Value="model.Region" class="form-control" placeholder="us-east-1 (AWS)" />
+                    <small class="form-text">Optional: Used for multi-region deployments and DR</small>
+                </div>
+            </div>
+
+            <!-- Authentication -->
+            <div class="form-section">
+                <h2>SSH Authentication</h2>
+                
+                <div class="form-group">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-sm);">
+                        <label for="privateKey">Private Key *</label>
+                        <button type="button" class="btn btn-outline btn-sm" @onclick="GenerateKeyPair">
+                            🔑 Generate Key Pair
+                        </button>
+                    </div>
+                    <InputTextArea id="privateKey" @bind-Value="model.PrivateKeyContent" class="form-control code-input" rows="8" 
+                                   placeholder="-----BEGIN OPENSSH PRIVATE KEY-----&#10;...&#10;-----END OPENSSH PRIVATE KEY-----" />
+                    <ValidationMessage For="@(() => model.PrivateKeyContent)" />
+                    <small class="form-text">Paste your SSH private key here (will be encrypted at rest)</small>
+                </div>
+
+                @if (!string.IsNullOrEmpty(generatedPublicKey))
+                {
+                    <div class="alert alert-success">
+                        <strong>✅ Key Pair Generated!</strong>
+                        <p>Public key (add this to your server's ~/.ssh/authorized_keys):</p>
+                        <div class="key-display">
+                            <code>@generatedPublicKey</code>
+                        </div>
+                        <div style="margin-top: var(--space-md); display: flex; gap: var(--space-sm);">
+                            <button type="button" class="btn btn-outline btn-sm" @onclick="CopyPublicKey">
+                                📋 Copy Public Key
+                            </button>
+                            <button type="button" class="btn btn-outline btn-sm" @onclick="DownloadPrivateKey">
+                                💾 Download Private Key
+                            </button>
+                        </div>
+                    </div>
+                }
+            </div>
+
+            <!-- Server Type -->
+            <div class="form-section">
+                <h2>Server Type</h2>
+                
+                <div class="server-type-options">
+                    <div class="radio-card @(model.Type == ServerType.Standalone ? "selected" : "")" @onclick="@(() => SelectServerType(ServerType.Standalone))">
+                        <input type="radio" name="type" value="@ServerType.Standalone" 
+                               checked="@(model.Type == ServerType.Standalone)" />
+                        <div class="radio-card-content">
+                            <div class="radio-icon">💻</div>
+                            <div class="radio-title">Standalone</div>
+                            <div class="radio-description">Single Docker host for simple deployments</div>
+                        </div>
+                    </div>
+
+                    <div class="radio-card @(model.Type == ServerType.SwarmManager ? "selected" : "")" @onclick="@(() => SelectServerType(ServerType.SwarmManager))">
+                        <input type="radio" name="type" value="@ServerType.SwarmManager" 
+                               checked="@(model.Type == ServerType.SwarmManager)" />
+                        <div class="radio-card-content">
+                            <div class="radio-icon">👑</div>
+                            <div class="radio-title">Swarm Manager</div>
+                            <div class="radio-description">Control plane node with scheduling capabilities</div>
+                        </div>
+                    </div>
+
+                    <div class="radio-card @(model.Type == ServerType.SwarmWorker ? "selected" : "")" @onclick="@(() => SelectServerType(ServerType.SwarmWorker))">
+                        <input type="radio" name="type" value="@ServerType.SwarmWorker" 
+                               checked="@(model.Type == ServerType.SwarmWorker)" />
+                        <div class="radio-card-content">
+                            <div class="radio-icon">⚙️</div>
+                            <div class="radio-title">Swarm Worker</div>
+                            <div class="radio-description">Worker node for running containers</div>
+                        </div>
+                    </div>
+                </div>
+
+                @if (model.Type != ServerType.Standalone)
+                {
+                    <div class="info-box swarm-info">
+                        <div class="info-icon">ℹ️</div>
+                        <div>
+                            <strong>Swarm Configuration Required</strong>
+                            <p>Make sure this server is already part of a Docker Swarm. For new clusters, initialize Swarm manually first:
+                            <code>docker swarm init</code> (manager) or <code>docker swarm join</code> (worker).</p>
+                        </div>
+                    </div>
+                }
+            </div>
+
+            <!-- Proxy Configuration -->
+            <div class="form-section">
+                <h2>Reverse Proxy</h2>
+                
+                <div class="info-box">
+                    <div class="info-icon">✅</div>
+                    <div>
+                        <strong>Automatic Proxy Deployment</strong>
+                        <p>When you select a proxy type, HostCraft will automatically deploy and configure it on your server. Applications will be automatically registered with the proxy for HTTPS and routing.</p>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="proxy">Proxy Type</label>
+                    <InputSelect id="proxy" @bind-Value="model.ProxyType" class="form-control">
+                        <option value="@ProxyType.None">None - No reverse proxy</option>
+                        <option value="@ProxyType.Traefik">Traefik - Automatic service discovery & HTTPS</option>
+                        <option value="@ProxyType.Caddy">Caddy - Automatic HTTPS with zero config</option>
+                        <option value="@ProxyType.Nginx">Nginx - High-performance web server & reverse proxy</option>
+                        <option value="@ProxyType.Yarp">YARP - ASP.NET Core reverse proxy (Coming Soon)</option>
+                    </InputSelect>
+                    <small class="form-text">
+                        <strong>Traefik:</strong> Port 80, 443 (web), 8080 (dashboard)<br/>
+                        <strong>Caddy:</strong> Port 80, 443 (web), 2019 (admin API)<br/>
+                        <strong>Nginx:</strong> Port 80, 443 (web) - Use certbot for HTTPS<br/>
+                        Automatic HTTPS certificates via Let's Encrypt (Traefik/Caddy)
+                    </small>
+                </div>
+
+                @if (model.ProxyType == ProxyType.Traefik || model.ProxyType == ProxyType.Caddy)
+                {
+                    <div class="form-group" style="margin-top: 1rem;">
+                        <label for="letsencryptEmail">Let's Encrypt Email *</label>
+                        <InputText id="letsencryptEmail" @bind-Value="model.DefaultLetsEncryptEmail" type="email" class="form-control" placeholder="admin@example.com" />
+                        <small class="form-text">
+                            <strong style="color: #f59e0b;">Required for SSL certificates:</strong> Valid email address for Let's Encrypt certificate notifications and account recovery
+                        </small>
+                    </div>
+                }
+            </div>
+
+            <!-- Actions -->
+            <div class="form-actions">
+                <button type="button" class="btn btn-secondary" @onclick="GoBack" disabled="@saving">
+                    Cancel
+                </button>
+                
+                <button type="button" class="btn btn-outline" @onclick="TestConnection" disabled="@(saving || testing)">
+                    @if (testing)
+                    {
+                        <span class="spinner-sm"></span>
+                        <span>Testing...</span>
+                    }
+                    else
+                    {
+                        <span>🔍 Test Connection</span>
+                    }
+                </button>
+
+                <button type="submit" class="btn btn-primary" disabled="@saving">
+                    @if (saving)
+                    {
+                        <span class="spinner-sm"></span>
+                        <span>Saving...</span>
+                    }
+                    else
+                    {
+                        <span>@(IsEditMode ? "💾 Save Changes" : "➕ Add Server")</span>
+                    }
+                </button>
+            </div>
+
+            @if (!string.IsNullOrEmpty(errorMessage))
+            {
+                <div class="alert alert-danger">
+                    <strong>❌ Error:</strong> @errorMessage
+                </div>
+            }
+
+            @if (!string.IsNullOrEmpty(successMessage))
+            {
+                <div class="alert alert-success">
+                    <strong>✅ Success:</strong> @successMessage
+                </div>
+            }
+        </EditForm>
+    </div>
+</div>
+
+@code {
+    [Parameter]
+    public int? Id { get; set; }
+
+    private bool IsEditMode => Id.HasValue;
+    private ServerFormModel model = new();
+    private bool saving = false;
+    private bool testing = false;
+    private string? errorMessage;
+    private string? successMessage;
+    private string? generatedPublicKey;
+    private string? generatedPrivateKey;
+
+    [Inject]
+    private IJSRuntime JS { get; set; } = default!;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (IsEditMode && Id.HasValue)
+        {
+            await LoadServer(Id.Value);
+        }
+    }
+
+    private async Task LoadServer(int id)
+    {
+        try
+        {
+            var server = await Http.GetFromJsonAsync<ServerResponseDto>($"api/servers/{id}");
+            if (server != null)
+            {
+                model = new ServerFormModel
+                {
+                    Name = server.Name,
+                    Host = server.Host,
+                    Port = server.Port,
+                    User = server.Username ?? "root",
+                    Region = server.Region,
+                    Type = server.Type,
+                    ProxyType = server.ProxyType,
+                    DefaultLetsEncryptEmail = server.DefaultLetsEncryptEmail
+                };
+
+                // Show placeholder if server has a private key (don't send actual key to client for security)
+                if (server.HasPrivateKey)
+                {
+                    model.PrivateKeyContent = "*** Existing private key (hidden for security) ***\n\nLeave unchanged to keep existing key, or paste a new key to replace it.";
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to load server {ServerId} for editing", id);
+            errorMessage = "Failed to load server details";
+        }
+    }
+
+    private async Task TestConnection()
+    {
+        testing = true;
+        errorMessage = null;
+        successMessage = null;
+
+        try
+        {
+            var response = await Http.PostAsJsonAsync("api/servers/validate", model);
+            var result = await response.Content.ReadFromJsonAsync<ValidationResult>();
+            
+            if (response.IsSuccessStatusCode && result != null && result.IsValid)
+            {
+                successMessage = $"✅ {result.Message}";
+            }
+            else if (result != null)
+            {
+                errorMessage = $"❌ {result.Message}";
+            }
+            else
+            {
+                errorMessage = "❌ Connection validation failed";
+            }
+        }
+        catch (Exception ex)
+        {
+            // Try to parse error response if it's JSON
+            try
+            {
+                var errorContent = ex.Message;
+                if (errorContent.Contains("isValid"))
+                {
+                    var startIndex = errorContent.IndexOf("{");
+                    if (startIndex >= 0)
+                    {
+                        var jsonPart = errorContent.Substring(startIndex);
+                        var result = System.Text.Json.JsonSerializer.Deserialize<ValidationResult>(jsonPart, new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                        errorMessage = $"❌ {result?.Message ?? "Connection failed"}";
+                    }
+                    else
+                    {
+                        errorMessage = $"❌ Connection failed: {ex.Message}";
+                    }
+                }
+                else
+                {
+                    errorMessage = $"❌ Connection failed: {ex.Message}";
+                }
+            }
+            catch
+            {
+                errorMessage = $"❌ Connection failed: {ex.Message}";
+            }
+        }
+        finally
+        {
+            testing = false;
+        }
+    }
+
+    private class ValidationResult
+    {
+        public bool IsValid { get; set; }
+        public string Message { get; set; } = "";
+    }
+
+    private async Task HandleSubmit()
+    {
+        saving = true;
+        errorMessage = null;
+        successMessage = null;
+
+        try
+        {
+            if (IsEditMode && Id.HasValue)
+            {
+                var response = await Http.PutAsJsonAsync($"api/servers/{Id.Value}", model);
+                if (response.IsSuccessStatusCode)
+                {
+                    Navigation.NavigateTo("/servers");
+                }
+                else
+                {
+                    errorMessage = await ParseErrorResponse(response, "update");
+                }
+            }
+            else
+            {
+                var response = await Http.PostAsJsonAsync("api/servers", model);
+                if (response.IsSuccessStatusCode)
+                {
+                    Navigation.NavigateTo("/servers");
+                }
+                else
+                {
+                    errorMessage = await ParseErrorResponse(response, "add");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to save server: {ErrorMessage}", ex.Message);
+            errorMessage = $"❌ Failed to save server: {ex.Message}";
+        }
+        finally
+        {
+            saving = false;
+        }
+    }
+
+    private async Task<string> ParseErrorResponse(HttpResponseMessage response, string action)
+    {
+        try
+        {
+            var contentType = response.Content.Headers.ContentType?.MediaType;
+            var statusCode = (int)response.StatusCode;
+            
+            // Try to parse as JSON first
+            if (contentType?.Contains("application/json") == true || contentType?.Contains("application/problem+json") == true)
+            {
+                try
+                {
+                    var errorObj = await response.Content.ReadFromJsonAsync<ErrorResponse>();
+                    if (errorObj?.Error != null)
+                    {
+                        return $"❌ Failed to {action} server ({statusCode}): {errorObj.Error}";
+                    }
+                    if (errorObj?.Title != null)
+                    {
+                        var details = !string.IsNullOrEmpty(errorObj.Detail) ? $": {errorObj.Detail}" : "";
+                        return $"❌ Failed to {action} server ({statusCode}): {errorObj.Title}{details}";
+                    }
+                }
+                catch { }
+            }
+            
+            // Fall back to raw text
+            var rawError = await response.Content.ReadAsStringAsync();
+            
+            // Clean up common error patterns
+            if (string.IsNullOrWhiteSpace(rawError))
+            {
+                return $"❌ Failed to {action} server ({statusCode}): {response.ReasonPhrase}";
+            }
+            
+            // Truncate very long errors
+            if (rawError.Length > 500)
+            {
+                rawError = rawError.Substring(0, 497) + "...";
+            }
+            
+            // Remove HTML tags if present
+            if (rawError.Contains("<html") || rawError.Contains("<!DOCTYPE"))
+            {
+                return $"❌ Failed to {action} server ({statusCode}): Server returned an error. Check server logs for details.";
+            }
+            
+            return $"❌ Failed to {action} server ({statusCode}): {rawError}";
+        }
+        catch (Exception ex)
+        {
+            return $"❌ Failed to {action} server: {ex.Message}";
+        }
+    }
+
+    private class ErrorResponse
+    {
+        public string? Error { get; set; }
+        public string? Title { get; set; }
+        public string? Detail { get; set; }
+        public int? Status { get; set; }
+    }
+
+    private void GoBack()
+    {
+        Navigation.NavigateTo("/servers");
+    }
+
+    private void SelectServerType(ServerType type)
+    {
+        model.Type = type;
+    }
+
+    private void GenerateKeyPair()
+    {
+        try
+        {
+            // Generate ED25519 key pair (simulated - in production, use proper SSH library)
+            var keyPair = GenerateED25519KeyPair();
+            generatedPrivateKey = keyPair.privateKey;
+            generatedPublicKey = keyPair.publicKey;
+            model.PrivateKeyContent = generatedPrivateKey;
+            successMessage = "Key pair generated successfully!";
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Failed to generate key pair: {ex.Message}";
+        }
+    }
+
+    private (string privateKey, string publicKey) GenerateED25519KeyPair()
+    {
+        // Generate a real RSA 4096-bit key pair using .NET cryptography
+        var timestamp = DateTime.UtcNow.ToString("yyyyMMddHHmmss");
+        
+        using var rsa = System.Security.Cryptography.RSA.Create(4096);
+        
+        // Export private key in PEM format
+        var privateKeyBytes = rsa.ExportRSAPrivateKey();
+        var privateKeyBase64 = Convert.ToBase64String(privateKeyBytes);
+        var privateKey = FormatPemKey(privateKeyBase64, "RSA PRIVATE KEY");
+        
+        // Export public key in OpenSSH format
+        var parameters = rsa.ExportParameters(false);
+        using var ms = new MemoryStream();
+        using var writer = new BinaryWriter(ms);
+        
+        // Write SSH RSA public key format: algorithm name, exponent, modulus
+        WriteSSHBytes(writer, System.Text.Encoding.ASCII.GetBytes("ssh-rsa"));
+        WriteSSHBytes(writer, parameters.Exponent ?? Array.Empty<byte>());
+        WriteSSHBytes(writer, parameters.Modulus ?? Array.Empty<byte>());
+        
+        var publicKeyBase64 = Convert.ToBase64String(ms.ToArray());
+        var publicKey = $"ssh-rsa {publicKeyBase64} hostcraft-generated-{timestamp}";
+        
+        return (privateKey, publicKey);
+    }
+    
+    private string FormatPemKey(string base64Key, string keyType)
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"-----BEGIN {keyType}-----");
+        
+        // Split into 64-character lines
+        for (int i = 0; i < base64Key.Length; i += 64)
+        {
+            int length = Math.Min(64, base64Key.Length - i);
+            sb.AppendLine(base64Key.Substring(i, length));
+        }
+        
+        sb.AppendLine($"-----END {keyType}-----");
+        return sb.ToString();
+    }
+    
+    private void WriteSSHBytes(BinaryWriter writer, byte[] data)
+    {
+        // Write length as big-endian 32-bit integer
+        var lengthBytes = BitConverter.GetBytes(data.Length);
+        if (BitConverter.IsLittleEndian)
+            Array.Reverse(lengthBytes);
+        writer.Write(lengthBytes);
+        writer.Write(data);
+    }
+
+    private async Task CopyPublicKey()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", generatedPublicKey);
+            successMessage = "Public key copied to clipboard!";
+        }
+        catch
+        {
+            errorMessage = "Failed to copy to clipboard";
+        }
+    }
+
+    private async Task DownloadPrivateKey()
+    {
+        try
+        {
+            var fileName = $"hostcraft-private-key-{DateTime.UtcNow:yyyyMMddHHmmss}.pem";
+            var bytes = System.Text.Encoding.UTF8.GetBytes(generatedPrivateKey ?? "");
+            var base64 = Convert.ToBase64String(bytes);
+            
+            await JS.InvokeVoidAsync("downloadFile", fileName, base64);
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Failed to download key: {ex.Message}";
+        }
+    }
+
+    public class ServerFormModel
+    {
+        public string Name { get; set; } = "";
+        public string Host { get; set; } = "";
+        public int Port { get; set; } = 22;
+        public string User { get; set; } = "root";
+        public string? Region { get; set; }
+        public string PrivateKeyContent { get; set; } = "";
+        public ServerType Type { get; set; } = ServerType.Standalone;
+        public ProxyType ProxyType { get; set; } = ProxyType.None;
+        public string? DefaultLetsEncryptEmail { get; set; }
+    }
+
+    public class ServerResponseDto
+    {
+        public int Id { get; set; }
+        public string Name { get; set; } = "";
+        public string Host { get; set; } = "";
+        public int Port { get; set; }
+        public string Username { get; set; } = "";
+        public string? Region { get; set; }
+        public ServerType Type { get; set; }
+        public ProxyType ProxyType { get; set; }
+        public string? DefaultLetsEncryptEmail { get; set; }
+        public bool HasPrivateKey { get; set; }
+        // Note: For security, we don't return the PrivateKey from the API
+        // If editing, user must re-enter the key
+    }
+}

@@ -1,0 +1,38 @@
+@using HostCraft.Core.Enums
+
+<div class="deployment-type-card deployment-@Color">
+    <div class="card-icon">@Icon</div>
+    <div class="card-content">
+        <h3>@Type</h3>
+        <div class="card-status status-@Status">
+            @GetStatusBadge()
+        </div>
+        <p class="card-description">@Description</p>
+        <div class="card-meta">
+            <span>@ServerCount server@(ServerCount != 1 ? "s" : "")</span>
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter] public string Type { get; set; } = "";
+    [Parameter] public string Icon { get; set; } = "";
+    [Parameter] public string Color { get; set; } = "primary";
+    [Parameter] public int ServerCount { get; set; }
+    [Parameter] public string Status { get; set; } = "";
+    [Parameter] public string Description { get; set; } = "";
+
+    private string GetStatusBadge()
+    {
+        return Status switch
+        {
+            "healthy" => "✅ HEALTHY",
+            "degraded" => "⚠️ DEGRADED",
+            "critical" => "🔴 CRITICAL",
+            "online" => "🟢 ONLINE",
+            "offline" => "⚫ OFFLINE",
+            "coming-soon" => "🚧 COMING SOON",
+            _ => "❓ UNKNOWN"
+        };
+    }
+}

@@ -1,0 +1,289 @@
+@page "/stacks"
+@inject HttpClient Http
+@inject NavigationManager Navigation
+@inject ILogger<Stacks> Logger
+
+<div class="page-container">
+    <div class="page-header">
+        <div class="header-left">
+            <h1>📚 Docker Stacks</h1>
+            <p class="subtitle">Manage Docker Compose deployments across your swarm cluster</p>
+        </div>
+        <div class="header-actions">
+            <button class="btn btn-secondary" @onclick="RefreshStacks">
+                🔄 Refresh
+            </button>
+            <button class="btn btn-primary" @onclick="NavigateToDeployCompose">
+                ➕ Deploy Compose
+            </button>
+        </div>
+    </div>
+
+    @if (isLoading)
+    {
+        <div class="loading-spinner">
+            <div class="spinner"></div>
+            <p>Loading stacks...</p>
+        </div>
+    }
+    else if (error != null)
+    {
+        <div class="error-banner">
+            <span class="error-icon">⚠️</span>
+            <span>@error</span>
+        </div>
+    }
+    else if (stacks == null || !stacks.Any())
+    {
+        <div class="empty-state">
+            <div class="empty-icon">📚</div>
+            <h2>No Stacks Deployed</h2>
+            <p>Deploy your first Docker Compose application to get started</p>
+            <button class="btn btn-primary" @onclick="NavigateToDeployCompose">
+                ➕ Deploy Compose Application
+            </button>
+        </div>
+    }
+    else
+    {
+        <div class="stacks-list">
+            @foreach (var stack in stacks)
+            {
+                <div class="stack-card">
+                    <div class="stack-header">
+                        <div class="stack-info">
+                            <h3>@stack.StackName</h3>
+                            <div class="stack-meta">
+                                <span class="meta-item">
+                                    🖥️ @stack.ServerName
+                                </span>
+                                <span class="meta-item">
+                                    📦 @stack.ServiceCount service@(stack.ServiceCount != 1 ? "s" : "")
+                                </span>
+                                <span class="meta-item">
+                                    🕐 @stack.CreatedAt.ToString("MM/dd/yyyy HH:mm")
+                                </span>
+                            </div>
+                        </div>
+                        <div class="stack-actions">
+                            <button class="btn-icon" @onclick="() => InspectStack(stack)" title="Inspect Stack">
+                                👁️
+                            </button>
+                            <button class="btn-icon btn-danger" @onclick="() => ShowRemoveConfirm(stack)" title="Remove Stack">
+                                🗑️
+                            </button>
+                        </div>
+                    </div>
+
+                    @if (expandedStackName == stack.StackName && stackDetails != null)
+                    {
+                        <div class="stack-details">
+                            <h4>Services:</h4>
+                            <ul class="services-list">
+                                @foreach (var service in stackDetails.Services)
+                                {
+                                    <li>@service</li>
+                                }
+                            </ul>
+                            
+                            @if (stackDetails.Networks.Any())
+                            {
+                                <h4>Networks:</h4>
+                                <ul class="networks-list">
+                                    @foreach (var network in stackDetails.Networks)
+                                    {
+                                        <li>@network</li>
+                                    }
+                                </ul>
+                            }
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@if (showRemoveDialog)
+{
+    <div class="modal-overlay" @onclick="CancelRemove">
+        <div class="modal-content" @onclick:stopPropagation="true">
+            <div class="modal-header">
+                <h2>⚠️ Remove Stack</h2>
+            </div>
+            <div class="modal-body">
+                <p>Are you sure you want to remove stack <strong>@stackToRemove?.StackName</strong>?</p>
+                <p class="warning-text">This will stop and remove all services in this stack.</p>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" @onclick="CancelRemove">Cancel</button>
+                <button class="btn btn-danger" @onclick="ConfirmRemove" disabled="@isRemoving">
+                    @(isRemoving ? "Removing..." : "Remove Stack")
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private List<StackDto>? stacks;
+    private StackDetailsDto? stackDetails;
+    private bool isLoading = true;
+    private bool isRemoving = false;
+    private string? error;
+    private string? expandedStackName;
+    private bool showRemoveDialog;
+    private StackDto? stackToRemove;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadStacks();
+    }
+
+    private async Task LoadStacks()
+    {
+        try
+        {
+            isLoading = true;
+            error = null;
+            var response = await Http.GetFromJsonAsync<List<StackDto>>("/api/applications/stacks");
+            stacks = response ?? new List<StackDto>();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to load stacks");
+            error = $"Failed to load stacks: {ex.Message}";
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private async Task RefreshStacks()
+    {
+        await LoadStacks();
+    }
+
+    private async Task InspectStack(StackDto stack)
+    {
+        if (expandedStackName == stack.StackName)
+        {
+            // Collapse if already expanded
+            expandedStackName = null;
+            stackDetails = null;
+            return;
+        }
+
+        try
+        {
+            expandedStackName = stack.StackName;
+            
+            // Find the application ID for this stack
+            var appsResponse = await Http.GetFromJsonAsync<List<ApplicationDto>>($"/api/applications?serverId={stack.ServerId}");
+            var app = appsResponse?.FirstOrDefault(a => a.Name.Contains(stack.StackName) || (a.SwarmServiceId != null && a.SwarmServiceId.Contains(stack.StackName)));
+            
+            if (app != null)
+            {
+                // Mock stack details - in real implementation, call /api/applications/stacks/{stackName}/inspect
+                stackDetails = new StackDetailsDto
+                {
+                    Name = stack.StackName,
+                    ServiceCount = stack.ServiceCount,
+                    Services = new List<string>(), // Would be populated from API
+                    Networks = new List<string>()  // Would be populated from API
+                };
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to inspect stack {StackName}", stack.StackName);
+        }
+    }
+
+    private void ShowRemoveConfirm(StackDto stack)
+    {
+        stackToRemove = stack;
+        showRemoveDialog = true;
+    }
+
+    private void CancelRemove()
+    {
+        showRemoveDialog = false;
+        stackToRemove = null;
+    }
+
+    private async Task ConfirmRemove()
+    {
+        if (stackToRemove == null) return;
+
+        try
+        {
+            isRemoving = true;
+            
+            // Find the application for this stack
+            var appsResponse = await Http.GetFromJsonAsync<List<ApplicationDto>>($"/api/applications?serverId={stackToRemove.ServerId}");
+            var app = appsResponse?.FirstOrDefault(a => a.SwarmServiceId != null && a.SwarmServiceId.Contains(stackToRemove.StackName));
+            
+            if (app != null)
+            {
+                var response = await Http.DeleteAsync($"/api/applications/{app.Id}/stack");
+                
+                if (response.IsSuccessStatusCode)
+                {
+                    await LoadStacks();
+                    showRemoveDialog = false;
+                    stackToRemove = null;
+                }
+                else
+                {
+                    var errorContent = await response.Content.ReadAsStringAsync();
+                    error = $"Failed to remove stack: {errorContent}";
+                }
+            }
+            else
+            {
+                error = "Could not find application for this stack";
+            }
+        }
+        catch (Exception ex)
+        {
+            var stackName = stackToRemove?.StackName ?? "(unknown)";
+            Logger.LogError(ex, "Failed to remove stack {StackName}", stackName);
+            error = $"Failed to remove stack: {ex.Message}";
+        }
+        finally
+        {
+            isRemoving = false;
+        }
+    }
+
+    private void NavigateToDeployCompose()
+    {
+        Navigation.NavigateTo("/applications/create-compose");
+    }
+
+    private class StackDto
+    {
+        public int ServerId { get; set; }
+        public string ServerName { get; set; } = string.Empty;
+        public string StackName { get; set; } = string.Empty;
+        public int ServiceCount { get; set; }
+        public DateTime CreatedAt { get; set; }
+    }
+
+    private class StackDetailsDto
+    {
+        public string Name { get; set; } = string.Empty;
+        public int ServiceCount { get; set; }
+        public List<string> Services { get; set; } = new();
+        public List<string> Networks { get; set; } = new();
+    }
+
+    private class ApplicationDto
+    {
+        public int Id { get; set; }
+        public string Name { get; set; } = string.Empty;
+        public string? SwarmServiceId { get; set; }
+    }
+}

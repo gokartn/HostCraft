@@ -1,0 +1,563 @@
+@page "/deployments"
+@rendermode InteractiveServer
+@using System.Net.Http.Json
+@using HostCraft.Core.Enums
+@inject HttpClient Http
+@inject NavigationManager Navigation
+@inject ILogger<Deployments> Logger
+
+<div class="page-container">
+    <div class="page-header">
+        <div class="header-left">
+            <h1>🚢 Deployments</h1>
+            <p class="subtitle">Track deployment history and status</p>
+        </div>
+        <div class="header-actions">
+            <button class="btn btn-secondary" @onclick="RefreshDeployments">
+                🔄 Refresh
+            </button>
+        </div>
+    </div>
+
+    @if (isLoading)
+    {
+        <div class="loading-spinner">
+            <div class="spinner"></div>
+            <p>Loading deployments...</p>
+        </div>
+    }
+    else if (deployments == null || !deployments.Any())
+    {
+        <div class="empty-state">
+            <div class="empty-icon">📋</div>
+            <h2>No Deployments</h2>
+            <p>Deploy an application to see deployment history</p>
+            <button class="btn btn-primary" @onclick="NavigateToApplications">
+                🚀 View Applications
+            </button>
+        </div>
+    }
+    else
+    {
+        <div class="deployments-table">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Application</th>
+                        <th>Status</th>
+                        <th>Type</th>
+                        <th>Started</th>
+                        <th>Duration</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var deployment in deployments.OrderByDescending(d => d.StartedAt))
+                    {
+                        <tr class="deployment-row @GetStatusClass(deployment.Status)">
+                            <td>
+                                <div class="deployment-app">
+                                    <strong>@deployment.ApplicationName</strong>
+                                    @if (!string.IsNullOrEmpty(deployment.ContainerId))
+                                    {
+                                        <span class="deployment-id">Container: @deployment.ContainerId.Substring(0, 12)</span>
+                                    }
+                                    @if (!string.IsNullOrEmpty(deployment.ServiceId))
+                                    {
+                                        <span class="deployment-id">Service: @deployment.ServiceId</span>
+                                    }
+                                </div>
+                            </td>
+                            <td>
+                                <span class="status-badge @GetStatusClass(deployment.Status)">
+                                    @GetStatusIcon(deployment.Status) @deployment.Status
+                                </span>
+                            </td>
+                            <td>
+                                @if (!string.IsNullOrEmpty(deployment.ServiceId))
+                                {
+                                    <span class="type-badge">🐝 Swarm</span>
+                                }
+                                else if (!string.IsNullOrEmpty(deployment.ContainerId))
+                                {
+                                    <span class="type-badge">🐳 Container</span>
+                                }
+                                else
+                                {
+                                    <span class="type-badge">❓ Unknown</span>
+                                }
+                            </td>
+                            <td>@deployment.StartedAt.ToString("g")</td>
+                            <td>
+                                @if (deployment.FinishedAt.HasValue)
+                                {
+                                    var duration = deployment.FinishedAt.Value - deployment.StartedAt;
+                                    <span>@FormatDuration(duration)</span>
+                                }
+                                else if (deployment.Status == DeploymentStatus.Running)
+                                {
+                                    <span class="text-muted">In progress...</span>
+                                }
+                                else
+                                {
+                                    <span class="text-muted">-</span>
+                                }
+                            </td>
+                            <td>
+                                <div class="action-buttons">
+                                    <button class="btn-icon" @onclick="() => ViewApplication(deployment.ApplicationId)" title="View Application">
+                                        👁️
+                                    </button>
+                                    @if (deployment.Status == DeploymentStatus.Failed && !string.IsNullOrEmpty(deployment.ErrorMessage))
+                                    {
+                                        <button class="btn-icon btn-warning" @onclick="() => ShowError(deployment.ErrorMessage)" title="View Error">
+                                            ⚠️
+                                        </button>
+                                    }
+                                </div>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</div>
+
+@if (showErrorDialog && !string.IsNullOrEmpty(currentError))
+{
+    <div class="modal-overlay" @onclick="HideError">
+        <div class="modal-content" @onclick:stopPropagation="true">
+            <div class="modal-header">
+                <h2>⚠️ Deployment Error</h2>
+                <button class="btn-icon" @onclick="HideError">✖️</button>
+            </div>
+            <div class="modal-body">
+                <pre class="error-text">@currentError</pre>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" @onclick="HideError">Close</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private List<DeploymentListDto>? deployments;
+    private bool isLoading = true;
+    private bool showErrorDialog = false;
+    private string? currentError;
+    
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadDeployments();
+    }
+    
+    private async Task LoadDeployments()
+    {
+        isLoading = true;
+        StateHasChanged();
+        
+        try
+        {
+            deployments = await Http.GetFromJsonAsync<List<DeploymentListDto>>("api/deployments");
+            Logger.LogInformation("Loaded {Count} deployments", deployments?.Count ?? 0);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading deployments");
+            deployments = new List<DeploymentListDto>();
+        }
+        finally
+        {
+            isLoading = false;
+            StateHasChanged();
+        }
+    }
+    
+    private async Task RefreshDeployments()
+    {
+        await LoadDeployments();
+    }
+    
+    private void NavigateToApplications()
+    {
+        Navigation.NavigateTo("/applications");
+    }
+    
+    private void ViewApplication(int appId)
+    {
+        Navigation.NavigateTo($"/applications/{appId}");
+    }
+    
+    private void ShowError(string error)
+    {
+        currentError = error;
+        showErrorDialog = true;
+    }
+    
+    private void HideError()
+    {
+        showErrorDialog = false;
+        currentError = null;
+    }
+    
+    private string FormatDuration(TimeSpan duration)
+    {
+        if (duration.TotalSeconds < 60)
+            return $"{(int)duration.TotalSeconds}s";
+        if (duration.TotalMinutes < 60)
+            return $"{(int)duration.TotalMinutes}m {duration.Seconds}s";
+        return $"{(int)duration.TotalHours}h {duration.Minutes}m";
+    }
+    
+    private string GetStatusClass(DeploymentStatus status) => status switch
+    {
+        DeploymentStatus.Running => "status-running",
+        DeploymentStatus.Success => "status-success",
+        DeploymentStatus.Failed => "status-failed",
+        DeploymentStatus.Queued => "status-queued",
+        DeploymentStatus.Cancelled => "status-cancelled",
+        _ => "status-unknown"
+    };
+    
+    private string GetStatusIcon(DeploymentStatus status) => status switch
+    {
+        DeploymentStatus.Running => "🔄",
+        DeploymentStatus.Success => "✅",
+        DeploymentStatus.Failed => "❌",
+        DeploymentStatus.Queued => "⏳",
+        DeploymentStatus.Cancelled => "🚫",
+        _ => "⚪"
+    };
+    
+    private record DeploymentListDto
+    {
+        public int Id { get; init; }
+        public int ApplicationId { get; init; }
+        public string ApplicationName { get; init; } = string.Empty;
+        public string ServerName { get; init; } = string.Empty;
+        public DeploymentStatus Status { get; init; }
+        public string? ContainerId { get; init; }
+        public string? ServiceId { get; init; }
+        public DateTime StartedAt { get; init; }
+        public DateTime? FinishedAt { get; init; }
+        public string? ErrorMessage { get; init; }
+    }
+}
+
+<style>
+    .page-container {
+        padding: 2rem;
+        max-width: 1400px;
+        margin: 0 auto;
+    }
+
+    .page-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        margin-bottom: 2rem;
+        gap: 1rem;
+        flex-wrap: wrap;
+    }
+
+    .header-left h1 {
+        font-size: 2rem;
+        font-weight: 700;
+        color: #fff;
+        margin: 0;
+    }
+
+    .subtitle {
+        color: #94a3b8;
+        font-size: 0.95rem;
+        margin-top: 0.5rem;
+    }
+
+    .btn {
+        padding: 0.5rem 1.25rem;
+        border-radius: 0.5rem;
+        font-weight: 500;
+        font-size: 0.95rem;
+        border: none;
+        cursor: pointer;
+        transition: all 0.2s;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+
+    .btn-primary {
+        background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+        color: #fff;
+    }
+
+    .btn-secondary {
+        background: #334155;
+        color: #fff;
+    }
+
+    .btn-secondary:hover {
+        background: #475569;
+    }
+
+    .loading-spinner, .empty-state {
+        text-align: center;
+        padding: 4rem 2rem;
+        background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+        border-radius: 1rem;
+        border: 1px solid #334155;
+    }
+
+    .spinner {
+        border: 3px solid #334155;
+        border-top-color: #6366f1;
+        border-radius: 50%;
+        width: 40px;
+        height: 40px;
+        animation: spin 1s linear infinite;
+        margin: 0 auto 1rem;
+    }
+
+    @@keyframes spin {
+        to { transform: rotate(360deg); }
+    }
+
+    .empty-icon {
+        font-size: 4rem;
+        margin-bottom: 1rem;
+        opacity: 0.5;
+    }
+
+    .empty-state h2 {
+        color: #fff;
+        font-size: 1.5rem;
+        margin-bottom: 0.5rem;
+    }
+
+    .empty-state p {
+        color: #94a3b8;
+        margin-bottom: 1.5rem;
+    }
+
+    .deployments-table {
+        background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+        border: 1px solid #334155;
+        border-radius: 1rem;
+        overflow: hidden;
+    }
+
+    table {
+        width: 100%;
+        border-collapse: collapse;
+    }
+
+    thead {
+        background: #0f172a;
+        border-bottom: 2px solid #334155;
+    }
+
+    th {
+        padding: 1rem;
+        text-align: left;
+        color: #94a3b8;
+        font-size: 0.85rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+
+    .deployment-row {
+        border-bottom: 1px solid #334155;
+        transition: all 0.2s;
+    }
+
+    .deployment-row:hover {
+        background: rgba(99, 102, 241, 0.05);
+    }
+
+    .deployment-row:last-child {
+        border-bottom: none;
+    }
+
+    td {
+        padding: 1rem;
+        color: #fff;
+        font-size: 0.9rem;
+    }
+
+    .deployment-app strong {
+        display: block;
+        margin-bottom: 0.25rem;
+    }
+
+    .deployment-id {
+        display: block;
+        color: #94a3b8;
+        font-size: 0.85rem;
+        font-family: monospace;
+    }
+
+    .status-badge {
+        padding: 0.4rem 0.9rem;
+        border-radius: 0.5rem;
+        font-size: 0.85rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        display: inline-block;
+        white-space: nowrap;
+    }
+
+    .status-badge.status-running {
+        background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+        color: #fff;
+    }
+
+    .status-badge.status-success {
+        background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+        color: #fff;
+    }
+
+    .status-badge.status-failed {
+        background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+        color: #fff;
+    }
+
+    .status-badge.status-queued {
+        background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+        color: #fff;
+    }
+
+    .status-badge.status-cancelled {
+        background: linear-gradient(135deg, #64748b 0%, #475569 100%);
+        color: #fff;
+    }
+
+    .type-badge {
+        padding: 0.25rem 0.75rem;
+        border-radius: 0.375rem;
+        font-size: 0.8rem;
+        background: #334155;
+        color: #94a3b8;
+        display: inline-block;
+    }
+
+    .text-muted {
+        color: #64748b;
+        font-style: italic;
+    }
+
+    .action-buttons {
+        display: flex;
+        gap: 0.5rem;
+    }
+
+    .btn-icon {
+        width: 36px;
+        height: 36px;
+        border-radius: 0.5rem;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1.1rem;
+        border: 1px solid #334155;
+        background: #1e293b;
+        color: #fff;
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+
+    .btn-icon:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    }
+
+    .btn-icon.btn-warning {
+        background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+        border-color: #f59e0b;
+    }
+
+    .modal-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.8);
+        backdrop-filter: blur(4px);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 1000;
+        padding: 1rem;
+    }
+
+    .modal-content {
+        background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+        border: 1px solid #334155;
+        border-radius: 1rem;
+        max-width: 700px;
+        width: 100%;
+        max-height: 90vh;
+        overflow-y: auto;
+        box-shadow: 0 25px 50px rgba(0, 0, 0, 0.5);
+    }
+
+    .modal-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 1.5rem;
+        border-bottom: 1px solid #334155;
+    }
+
+    .modal-header h2 {
+        color: #fff;
+        font-size: 1.5rem;
+        margin: 0;
+    }
+
+    .modal-body {
+        padding: 1.5rem;
+    }
+
+    .modal-footer {
+        padding: 1.5rem;
+        border-top: 1px solid #334155;
+        display: flex;
+        justify-content: flex-end;
+    }
+
+    .error-text {
+        background: #0f172a;
+        padding: 1rem;
+        border-radius: 0.5rem;
+        color: #ef4444;
+        font-family: 'Courier New', monospace;
+        font-size: 0.9rem;
+        overflow-x: auto;
+        white-space: pre-wrap;
+        word-break: break-all;
+    }
+
+    @@media (max-width: 768px) {
+        .page-container {
+            padding: 1rem;
+        }
+
+        .page-header {
+            flex-direction: column;
+            align-items: stretch;
+        }
+
+        .deployments-table {
+            overflow-x: auto;
+        }
+
+        table {
+            min-width: 600px;
+        }
+    }
+</style>

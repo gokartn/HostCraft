@@ -1,0 +1,601 @@
+@page "/servers/{id:int}"
+@rendermode InteractiveServer
+@using HostCraft.Core.Enums
+@inject HttpClient Http
+@inject NavigationManager Navigation
+@inject IJSRuntime JSRuntime
+@inject ILogger<ServerDetails> Logger
+
+<PageTitle>@(server?.Name ?? "Server") - HostCraft</PageTitle>
+
+<div class="server-details-page">
+    <div class="page-header">
+        <button class="btn-back" @onclick="GoBack">← Back to Servers</button>
+        @if (server != null)
+        {
+            <div class="header-content">
+                <div class="header-info">
+                    <h1>@server.Name</h1>
+                    <div class="header-badges">
+                        <span class="badge badge-@GetTypeBadgeClass(server.Type)">
+                            @GetTypeIcon(server.Type) @server.Type
+                        </span>
+                        <span class="status-badge @GetStatusClass(server.Status)">
+                            @GetStatusIcon(server.Status) @server.Status
+                        </span>
+                    </div>
+                </div>
+                <div class="header-actions">
+                    <button class="btn btn-outline" @onclick="ValidateServer" disabled="@validating">
+                        @(validating ? "🔄 Validating..." : "🔄 Re-validate")
+                    </button>
+                    <button class="btn btn-outline" @onclick="@(() => Navigation.NavigateTo($"/servers/{Id}/edit"))">
+                        ✏️ Edit
+                    </button>
+                </div>
+            </div>
+        }
+    </div>
+
+    @if (loading)
+    {
+        <div class="loading-state">
+            <div class="spinner"></div>
+            <p>Loading server details...</p>
+        </div>
+    }
+    else if (server == null)
+    {
+        <div class="error-state">
+            <div class="error-icon">❌</div>
+            <h2>Server Not Found</h2>
+            <p>The server you're looking for doesn't exist or has been removed.</p>
+        </div>
+    }
+    else
+    {
+        <div class="details-container">
+            <!-- Server Information Card -->
+            <div class="info-card">
+                <h2>Server Information</h2>
+                <div class="info-grid">
+                    <div class="info-item">
+                        <span class="label">Host</span>
+                        <span class="value">@server.Host:@server.Port</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="label">User</span>
+                        <span class="value">@(server.Username ?? "root")</span>
+                    </div>
+                    @if (!string.IsNullOrEmpty(server.Region))
+                    {
+                        <div class="info-item">
+                            <span class="label">Region</span>
+                            <span class="value">@server.Region</span>
+                        </div>
+                    }
+                    <div class="info-item">
+                        <span class="label">Proxy</span>
+                        <span class="value">@server.ProxyType</span>
+                    </div>
+                    @if (server.IsSwarm && !string.IsNullOrEmpty(server.SwarmId))
+                    {
+                        <div class="info-item">
+                            <span class="label">Swarm ID</span>
+                            <span class="value"><code>@server.SwarmId.Substring(0, 12)</code></span>
+                        </div>
+                    }
+                    <div class="info-item">
+                        <span class="label">Added</span>
+                        <span class="value">@server.CreatedAt.ToString("MMM dd, yyyy HH:mm")</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Terminal Section -->
+            <div class="terminal-card">
+                <div class="terminal-header">
+                    <h2>🖥️ SSH Terminal</h2>
+                    <div class="terminal-controls">
+                        <button class="btn btn-primary btn-sm" @onclick="OpenTerminal">
+                            🖥️ Open Full Terminal
+                        </button>
+                    </div>
+                </div>
+
+                <div class="terminal-container">
+                    <div class="terminal-placeholder">
+                        <div class="placeholder-icon">🖥️</div>
+                        <p>js-powered SSH terminal available</p>
+                        <button class="btn btn-primary btn-lg" @onclick="OpenTerminal">
+                            ▶️ Open Terminal
+                        </button>
+                        <small>Interactive shell with full ANSI color support and command history</small>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Quick Actions -->
+            <div class="actions-card">
+                <h2>Quick Actions</h2>
+                <div class="action-buttons">
+                    @if (server.Status == ServerStatus.Offline || server.Host != "localhost")
+                    {
+                        <button class="action-btn action-btn-primary" @onclick="AutoConfigureServer" disabled="@configuring">
+                            <span class="action-icon">@(configuring ? "🔄" : "⚙️")</span>
+                            <span class="action-text">@(configuring ? "Configuring..." : "Auto Configure")</span>
+                        </button>
+                    }
+                    <button class="action-btn" @onclick="ShowPublicKey">
+                        <span class="action-icon">🔑</span>
+                        <span class="action-text">Show Public Key</span>
+                    </button>
+                    <button class="action-btn" @onclick="GetDockerInfo">
+                        <span class="action-icon">🐳</span>
+                        <span class="action-text">Docker Info</span>
+                    </button>
+                    <button class="action-btn" @onclick="ViewContainers">
+                        <span class="action-icon">📦</span>
+                        <span class="action-text">Containers</span>
+                    </button>
+                    @if (server.IsSwarm)
+                    {
+                        <button class="action-btn" @onclick="ViewServices">
+                            <span class="action-icon">🐝</span>
+                            <span class="action-text">Services</span>
+                        </button>
+                    }
+                    <button class="action-btn" @onclick="ViewNetworks">
+                        <span class="action-icon">🌐</span>
+                        <span class="action-text">Networks</span>
+                    </button>
+                    <button class="action-btn" @onclick="ViewImages">
+                        <span class="action-icon">🖼️</span>
+                        <span class="action-text">Images</span>
+                    </button>
+                    <button class="action-btn" @onclick="ViewSystemLoad">
+                        <span class="action-icon">📊</span>
+                        <span class="action-text">System Load</span>
+                    </button>
+                    <button class="action-btn" @onclick="RestartDocker">
+                        <span class="action-icon">🔄</span>
+                        <span class="action-text">Restart Docker</span>
+                    </button>
+                    
+                    @* Swarm Manager Operations *@
+                    @if (server.Type == ServerType.Standalone && HasActiveSwarmManager())
+                    {
+                        <button class="action-btn action-btn-highlight" @onclick="JoinAsManager" disabled="@joiningSwarm">
+                            <span class="action-icon">@(joiningSwarm ? "🔄" : "👑")</span>
+                            <span class="action-text">@(joiningSwarm ? "Joining..." : "Join as Manager")</span>
+                        </button>
+                    }
+                    
+                    @if (server.Type == ServerType.SwarmWorker)
+                    {
+                        <button class="action-btn action-btn-highlight" @onclick="PromoteToManager" disabled="@promotingToManager">
+                            <span class="action-icon">@(promotingToManager ? "🔄" : "⬆️")</span>
+                            <span class="action-text">@(promotingToManager ? "Promoting..." : "Promote to Manager")</span>
+                        </button>
+                    }
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter]
+    public int Id { get; set; }
+
+    private ServerDto? server;
+    private bool loading = true;
+    private bool validating = false;
+    private bool configuring = false;
+    private string? publicKeyInfo;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadServer();
+        await LoadAllServers();
+    }
+
+    private async Task LoadServer()
+    {
+        loading = true;
+        try
+        {
+            server = await Http.GetFromJsonAsync<ServerDto>($"api/servers/{Id}");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to load server {ServerId} details", Id);
+            server = null;
+        }
+        finally
+        {
+            loading = false;
+        }
+    }
+    
+    private async Task LoadAllServers()
+    {
+        try
+        {
+            allServers = await Http.GetFromJsonAsync<List<ServerDto>>("api/servers");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to load servers list");
+        }
+    }
+
+    private void OpenTerminal() => Navigation.NavigateTo($"/servers/{Id}/terminal");
+
+    private async Task ValidateServer()
+    {
+        validating = true;
+        try
+        {
+            var response = await Http.PostAsync($"api/servers/{Id}/validate", null);
+            if (response.IsSuccessStatusCode)
+            {
+                await JSRuntime.InvokeVoidAsync("alert", "✅ Server validated successfully! Swarm mode detection completed.");
+                await LoadServer(); // Reload to show updated type
+            }
+            else
+            {
+                var error = await response.Content.ReadAsStringAsync();
+                await JSRuntime.InvokeVoidAsync("alert", $"❌ Validation failed: {error}");
+            }
+        }
+        catch (Exception ex)
+        {
+            await JSRuntime.InvokeVoidAsync("alert", $"❌ Error validating server: {ex.Message}");
+        }
+        finally
+        {
+            validating = false;
+        }
+    }
+
+    private async Task AutoConfigureServer()
+    {
+        if (!await JSRuntime.InvokeAsync<bool>("confirm", 
+            "This will install Docker and required tools on the server. This may take 5-10 minutes. Continue?"))
+        {
+            return;
+        }
+        
+        configuring = true;
+        try
+        {
+            var response = await Http.PostAsync($"api/servers/{Id}/auto-configure", null);
+            if (response.IsSuccessStatusCode)
+            {
+                await JSRuntime.InvokeVoidAsync("alert", 
+                    "✅ Auto-configuration started!\n\n" +
+                    "Docker is being installed on the server. This will take 5-10 minutes.\n\n" +
+                    "The page will refresh automatically when complete. You can also check the server status manually.");
+                
+                // Poll for completion (check every 15 seconds for 10 minutes)
+                for (int i = 0; i < 40; i++)
+                {
+                    await Task.Delay(15000);
+                    await LoadServer();
+                    
+                    if (server?.Status == ServerStatus.Online)
+                    {
+                        await JSRuntime.InvokeVoidAsync("alert", 
+                            "🎉 Auto-configuration complete!\n\n" +
+                            "Docker has been successfully installed and the server is now online.");
+                        break;
+                    }
+                }
+            }
+            else
+            {
+                var error = await response.Content.ReadAsStringAsync();
+                await JSRuntime.InvokeVoidAsync("alert", $"❌ Configuration failed: {error}");
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to auto-configure server {ServerId}", Id);
+            await JSRuntime.InvokeVoidAsync("alert", $"❌ Error: {ex.Message}");
+        }
+        finally
+        {
+            configuring = false;
+        }
+    }
+    
+    private async Task ShowPublicKey()
+    {
+        try
+        {
+            var response = await Http.GetFromJsonAsync<PublicKeyResponse>($"api/servers/{Id}/public-key");
+            if (response != null)
+            {
+                publicKeyInfo = $"Public Key:\n{response.PublicKey}\n\n{response.Instruction}\n\nManual Commands:\n{response.ManualCommand}";
+                StateHasChanged();
+                
+                // Show alert
+                await JSRuntime.InvokeVoidAsync("alert", publicKeyInfo);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to retrieve public key for server {ServerId}", Id);
+            await JSRuntime.InvokeVoidAsync("alert", $"❌ Error getting public key: {ex.Message}");
+        }
+    }
+
+    // Quick action methods
+    private void GetDockerInfo() => OpenTerminal();
+    private void ViewContainers() => Navigation.NavigateTo($"/servers/{Id}/containers");
+    private void ViewServices() => Navigation.NavigateTo($"/servers/{Id}/services");
+    private void ViewNetworks() => Navigation.NavigateTo($"/servers/{Id}/networks");
+    private void ViewImages() => Navigation.NavigateTo($"/servers/{Id}/images");
+    private void CheckDiskSpace() => OpenTerminal();
+    private void ViewSystemLoad() => OpenTerminal();
+    private void RestartDocker() => OpenTerminal();
+
+    private void GoBack() => Navigation.NavigateTo("/servers");
+    
+    // Manager join and promote functionality
+    private bool joiningSwarm = false;
+    private bool promotingToManager = false;
+    private List<ServerDto>? allServers;
+    
+    private bool HasActiveSwarmManager()
+    {
+        // Will be checked when servers are loaded
+        return allServers?.Any(s => s.Type == ServerType.SwarmManager && s.Status == ServerStatus.Online) == true;
+    }
+    
+    private async Task JoinAsManager()
+    {
+        try
+        {
+            // Load all servers to find active manager
+            allServers = await Http.GetFromJsonAsync<List<ServerDto>>("api/servers");
+            var activeManager = allServers?.FirstOrDefault(s => 
+                s.Type == ServerType.SwarmManager && s.Status == ServerStatus.Online);
+            
+            if (activeManager == null)
+            {
+                await JSRuntime.InvokeVoidAsync("alert", "❌ No active swarm manager found.\n\nPlease ensure at least one manager is online.");
+                return;
+            }
+            
+            if (!await JSRuntime.InvokeAsync<bool>("confirm", 
+                $"Join this server as a Manager to the existing Docker Swarm?\n\n" +
+                $"Target Swarm: {activeManager.Name} ({activeManager.Host})\n\n" +
+                $"⚠️ IMPORTANT:\n" +
+                $"• This will make it part of the manager quorum\n" +
+                $"• It will be able to manage the cluster and deploy services\n" +
+                $"• The join process may take a few seconds\n\n" +
+                $"Continue?"))
+            {
+                return;
+            }
+            
+            joiningSwarm = true;
+            StateHasChanged();
+            
+            var request = new { serverIdToJoin = Id };
+            var response = await Http.PostAsJsonAsync(
+                $"api/servers/{activeManager.Id}/swarm/join-manager", request);
+            
+            if (response.IsSuccessStatusCode)
+            {
+                var result = await response.Content.ReadFromJsonAsync<JoinManagerResponse>();
+                
+                var message = $"✅ Successfully joined swarm as manager!\n\n" +
+                             $"Server: {server?.Name}\n" +
+                             $"Manager Count: {result?.ManagerCount ?? 0}\n" +
+                             $"Swarm ID: {result?.SwarmId?.Substring(0, 12) ?? "N/A"}";
+                
+                if (!string.IsNullOrEmpty(result?.QuorumWarning))
+                {
+                    message += $"\n\n⚠️ {result.QuorumWarning}";
+                }
+                
+                await JSRuntime.InvokeVoidAsync("alert", message);
+                await LoadServer(); // Reload to show updated type
+            }
+            else
+            {
+                var error = await response.Content.ReadAsStringAsync();
+                await JSRuntime.InvokeVoidAsync("alert", $"❌ Failed to join as manager:\n\n{error}");
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error joining server {ServerId} as manager", Id);
+            await JSRuntime.InvokeVoidAsync("alert", $"❌ Error: {ex.Message}");
+        }
+        finally
+        {
+            joiningSwarm = false;
+            StateHasChanged();
+        }
+    }
+    
+    private async Task PromoteToManager()
+    {
+        if (!await JSRuntime.InvokeAsync<bool>("confirm",
+            $"Promote this worker to Manager?\n\n" +
+            $"Server: {server?.Name}\n\n" +
+            $"⚠️ IMPORTANT:\n" +
+            $"• Worker will become a manager node\n" +
+            $"• It will join the manager quorum\n" +
+            $"• It will be able to manage the cluster and deploy services\n" +
+            $"• This operation cannot be easily reversed\n\n" +
+            $"Continue?"))
+        {
+            return;
+        }
+        
+        promotingToManager = true;
+        StateHasChanged();
+        
+        try
+        {
+            var response = await Http.PostAsync($"api/servers/{Id}/swarm/promote-to-manager", null);
+            
+            if (response.IsSuccessStatusCode)
+            {
+                var result = await response.Content.ReadFromJsonAsync<PromoteManagerResponse>();
+                
+                var message = $"✅ Successfully promoted to manager!\n\n" +
+                             $"Server: {result?.ServerName ?? server?.Name}\n" +
+                             $"Manager Count: {result?.ManagerCount ?? 0}";
+                
+                if (!string.IsNullOrEmpty(result?.QuorumWarning))
+                {
+                    message += $"\n\n⚠️ {result.QuorumWarning}";
+                }
+                
+                await JSRuntime.InvokeVoidAsync("alert", message);
+                await LoadServer(); // Reload to show updated type
+            }
+            else
+            {
+                var error = await response.Content.ReadAsStringAsync();
+                await JSRuntime.InvokeVoidAsync("alert", $"❌ Failed to promote:\n\n{error}");
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error promoting server {ServerId} to manager", Id);
+            await JSRuntime.InvokeVoidAsync("alert", $"❌ Error: {ex.Message}");
+        }
+        finally
+        {
+            promotingToManager = false;
+            StateHasChanged();
+        }
+    }
+    
+    private string GetStatusClass(ServerStatus status) => status switch
+    {
+        ServerStatus.Online => "online",
+        ServerStatus.Offline => "offline",
+        _ => "error"
+    };
+
+    private string GetStatusIcon(ServerStatus status) => status switch
+    {
+        ServerStatus.Online => "🟢",
+        ServerStatus.Offline => "🔴",
+        ServerStatus.Error => "⚠️",
+        _ => "🔄"
+    };
+
+    private string GetTypeBadgeClass(ServerType type) => type switch
+    {
+        ServerType.SwarmManager => "manager",
+        ServerType.SwarmWorker => "worker",
+        _ => "standalone"
+    };
+
+    private string GetTypeIcon(ServerType type) => type switch
+    {
+        ServerType.SwarmManager => "👑",
+        ServerType.SwarmWorker => "⚙️",
+        _ => "💻"
+    };
+
+    public class ServerDto
+    {
+        public int Id { get; set; }
+        public string Name { get; set; } = "";
+        public string Host { get; set; } = "";
+        public int Port { get; set; }
+        public string Username { get; set; } = "";
+        public ServerType Type { get; set; }
+        public ServerStatus Status { get; set; }
+        public string? Region { get; set; }
+        public ProxyType ProxyType { get; set; }
+        public string? SwarmId { get; set; }
+        public DateTime CreatedAt { get; set; }
+        public DateTime? LastSeenAt { get; set; }
+        public bool IsSwarm => Type == ServerType.SwarmManager || Type == ServerType.SwarmWorker;
+    }
+
+    public class PublicKeyResponse
+    {
+        public string PublicKey { get; set; } = "";
+        public string Instruction { get; set; } = "";
+        public string ManualCommand { get; set; } = "";
+    }
+    
+    public class JoinManagerResponse
+    {
+        public string Message { get; set; } = "";
+        public string? ServerName { get; set; }
+        public string? ManagerAddress { get; set; }
+        public string? SwarmId { get; set; }
+        public int ManagerCount { get; set; }
+        public string? QuorumWarning { get; set; }
+    }
+    
+    public class PromoteManagerResponse
+    {
+        public string Message { get; set; } = "";
+        public string? ServerName { get; set; }
+        public string? NodeId { get; set; }
+        public int ManagerCount { get; set; }
+        public string? QuorumWarning { get; set; }
+    }
+}
+
+<style>
+    .action-btn-primary {
+        background: linear-gradient(135deg, #10b981 0%, #059669 100%) !important;
+        border: 2px solid #10b981 !important;
+        box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3) !important;
+        animation: pulse 2s infinite;
+    }
+    
+    .action-btn-primary:hover:not(:disabled) {
+        transform: translateY(-2px) scale(1.02);
+        box-shadow: 0 8px 20px rgba(16, 185, 129, 0.4) !important;
+    }
+    
+    .action-btn-highlight {
+        background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%) !important;
+        border: 2px solid #8b5cf6 !important;
+        box-shadow: 0 4px 12px rgba(139, 92, 246, 0.3) !important;
+        color: white !important;
+        font-weight: 600;
+    }
+    
+    .action-btn-highlight:hover:not(:disabled) {
+        transform: translateY(-2px) scale(1.02);
+        box-shadow: 0 8px 20px rgba(139, 92, 246, 0.4) !important;
+        background: linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%) !important;
+    }
+    
+    .action-btn-highlight:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+    }
+    
+    .action-btn-primary:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+        animation: none;
+    }
+    
+    @@keyframes pulse {
+        0%, 100% {
+            box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+        }
+        50% {
+            box-shadow: 0 4px 20px rgba(16, 185, 129, 0.5);
+        }
+    }
+</style>

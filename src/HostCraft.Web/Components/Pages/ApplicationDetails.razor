@@ -1,0 +1,2431 @@
+@page "/applications/{Id:int}"
+@rendermode InteractiveServer
+@using System.Net.Http.Json
+@using System.Linq
+@using System.Text
+@using HostCraft.Core.Enums
+@using HostCraft.Core.Models
+@using System.Timers
+@using Microsoft.JSInterop
+@using System.Threading
+@inject HttpClient Http
+@inject NavigationManager Navigation
+@inject ILogger<ApplicationDetails> Logger
+@inject IJSRuntime Js
+@implements IDisposable
+
+<div class="page-container">
+    @if (isLoading)
+    {
+        <div class="loading-spinner">
+            <div class="spinner"></div>
+            <p>Loading application...</p>
+        </div>
+    }
+    else if (app == null)
+    {
+        <div class="empty-state">
+            <div class="empty-icon">❌</div>
+            <h2>Application Not Found</h2>
+            <button class="btn btn-primary" @onclick="BackToApplications">
+                Back to Projects
+            </button>
+        </div>
+    }
+    else
+    {
+        <div class="page-header">
+            <div class="header-left">
+                <div class="breadcrumb">
+                    <a href="/projects">Projects</a>
+                    <span>/</span>
+                    <a href="/projects/@app.ProjectId">@app.ProjectName</a>
+                    <span>/</span>
+                    <span>@app.Name</span>
+                </div>
+                <h1>@app.Name</h1>
+                <p class="subtitle">@app.Description</p>
+            </div>
+            <div class="header-actions">
+                <span class="status-badge @GetStatusClass(app.Status)">
+                    @GetStatusIcon(app.Status) @app.Status
+                </span>
+            </div>
+        </div>
+
+        @* Tab Navigation *@
+        <div class="tabs-container">
+            <button class="tab @(activeTab == "General" ? "active" : string.Empty)" @onclick="NavigateToGeneral">General</button>
+            <button class="tab" @onclick="NavigateToEdit">Edit</button>
+            <button class="tab" @onclick="NavigateToDomains">Domains</button>
+            <button class="tab @(activeTab == "Advanced" ? "active" : string.Empty)" @onclick="NavigateToAdvanced">Advanced</button>
+            <button class="tab" @onclick="NavigateToLogs">Logs</button>
+        </div>
+        
+        <div class="details-grid">
+            <div class="details-main">
+                @if (!string.IsNullOrEmpty(copyMessage))
+                {
+                    <div class="copy-toast">@copyMessage</div>
+                }
+
+                @if (CanScale())
+                {
+                    <div class="card compact-card scale-card" id="replica-scale">
+                        <div class="card-header scale-header">
+                            <div>
+                                <h3>Replicas</h3>
+                                <p class="card-subtitle">Adjust how many instances run in your cluster.</p>
+                            </div>
+                            <div class="scale-controls">
+                                <button class="btn btn-secondary btn-icon" @onclick="DecrementScale" disabled="@isScaling || scaleReplicas <= 0">-</button>
+                                <input type="number" min="0" max="100" class="scale-input" @bind="scaleReplicas" />
+                                <button class="btn btn-secondary btn-icon" @onclick="IncrementScale" disabled="@isScaling">+</button>
+                                <button class="btn btn-primary btn-sm" @onclick="ApplyScaleAsync" disabled="@isScaling">@(isScaling ? "Scaling..." : "Apply")</button>
+                            </div>
+                        </div>
+                        <div class="scale-meta">
+                            <span class="pill">Current: @app.Replicas</span>
+                            <span class="pill pill-accent">Swarm service</span>
+                        </div>
+                        @if (!string.IsNullOrEmpty(scaleError))
+                        {
+                            <div class="error-chip">@scaleError</div>
+                        }
+                        else if (!string.IsNullOrEmpty(scaleSuccess))
+                        {
+                            <div class="success-chip">@scaleSuccess</div>
+                        }
+                    </div>
+                }
+
+                @if (HasRuntimeTarget())
+                {
+                    <div class="card compact-card monitoring-card" id="monitoring">
+                        <div class="card-header monitoring-header">
+                            <div class="monitoring-title">
+                                <h3>Runtime Monitoring</h3>
+                                <span class="live-pill @(metricsStreamingEnabled ? "live" : "paused")">@(metricsStreamingEnabled ? "Live" : "Paused")</span>
+                                <span class="pill">@GetRuntimeModeLabel()</span>
+                            </div>
+                            <div class="monitoring-actions">
+                                <button class="btn btn-secondary btn-sm" @onclick="ToggleMetricsStreaming">
+                                    @(metricsStreamingEnabled ? "Pause" : "Resume")
+                                </button>
+                                <button class="btn btn-secondary btn-sm" @onclick="RefreshMetricsAsync" disabled="@isMetricsLoading">↻ Refresh</button>
+                            </div>
+                        </div>
+                        @if (!string.IsNullOrEmpty(metricsError))
+                        {
+                            <div class="error-chip">@metricsError</div>
+                        }
+                        else if (runtimeMetrics is null)
+                        {
+                            <p class="text-muted" style="margin: 0;">Collecting live metrics...</p>
+                        }
+                        else
+                        {
+                            var metrics = runtimeMetrics!;
+                            var containers = metrics.Containers;
+                            var containerCount = containers.Count;
+                            var cpuWidth = Math.Clamp(metrics.TotalCpuPercent, 0, 100);
+                            var memWidth = Math.Clamp(metrics.TotalMemoryPercent, 0, 100);
+
+                            <div class="monitoring-summary-grid">
+                                <div class="monitoring-stat-card accent-cpu">
+                                    <div class="stat-top">
+                                        <span class="stat-icon">🔥</span>
+                                        <span class="stat-chip">@containerCount container@(containerCount == 1 ? string.Empty : "s")</span>
+                                    </div>
+                                    <div class="stat-main">@metrics.TotalCpuPercent.ToString("0.0")%</div>
+                                    <div class="stat-sub">CPU across all containers</div>
+                                    <div class="stat-meter">
+                                        <div class="stat-meter-fill" style=$"width: {cpuWidth:0.#}%"></div>
+                                    </div>
+                                </div>
+
+                                <div class="monitoring-stat-card accent-memory">
+                                    <div class="stat-top">
+                                        <span class="stat-icon">💾</span>
+                                        <span class="stat-chip">@FormatBytes(metrics.TotalMemoryUsageBytes)</span>
+                                    </div>
+                                    <div class="stat-main">@metrics.TotalMemoryPercent.ToString("0.0")%</div>
+                                    <div class="stat-sub">of @FormatBytes(metrics.TotalMemoryLimitBytes)</div>
+                                    <div class="stat-meter">
+                                        <div class="stat-meter-fill" style=$"width: {memWidth:0.#}%"></div>
+                                    </div>
+                                </div>
+
+                                <div class="monitoring-stat-card accent-network">
+                                    <div class="stat-top">
+                                        <span class="stat-icon">🌐</span>
+                                        <span class="stat-chip">live</span>
+                                    </div>
+                                    <div class="stat-main">@FormatBytes(metrics.NetworkRxBytes) ↓</div>
+                                    <div class="stat-sub">@FormatBytes(metrics.NetworkTxBytes) ↑</div>
+                                    <div class="stat-micro">Totals since last sample</div>
+                                </div>
+
+                                <div class="monitoring-stat-card accent-io">
+                                    <div class="stat-top">
+                                        <span class="stat-icon">💽</span>
+                                        <span class="stat-chip">storage</span>
+                                    </div>
+                                    <div class="stat-main">@FormatBytes(metrics.BlockReadBytes) ⬇</div>
+                                    <div class="stat-sub">@FormatBytes(metrics.BlockWriteBytes) ⬆</div>
+                                    <div class="stat-micro">Block I/O across nodes</div>
+                                </div>
+                            </div>
+
+                            <div class="monitoring-containers-grid">
+                                @foreach (var container in containers.OrderByDescending(c => c.CpuPercent))
+                                {
+                                    var nodeLabel = string.IsNullOrWhiteSpace(container.NodeName) ? "Unknown node" : container.NodeName;
+                                    var containerCpuWidth = Math.Clamp(container.CpuPercent, 0, 100);
+                                    var containerMemWidth = Math.Clamp(container.MemoryPercent, 0, 100);
+                                    var displayName = string.IsNullOrWhiteSpace(container.Name) ? container.ContainerId : container.Name;
+                                    var shortName = displayName.Split('-').Last();
+                                    <div class="container-card">
+                                        <div class="container-card-header">
+                                            <div>
+                                                <div class="container-name">@displayName</div>
+                                                <div class="container-meta">Node: @nodeLabel</div>
+                                            </div>
+                                            <span class="container-chip">@shortName</span>
+                                        </div>
+                                        <div class="container-metrics-grid">
+                                            <div class="mini-stat">
+                                                <div class="mini-label">CPU</div>
+                                                <div class="mini-value">@container.CpuPercent.ToString("0.0")%</div>
+                                                <div class="mini-meter"><div style=$"width: {containerCpuWidth:0.#}%"></div></div>
+                                            </div>
+                                            <div class="mini-stat">
+                                                <div class="mini-label">Memory</div>
+                                                <div class="mini-value">@container.MemoryPercent.ToString("0.0")%</div>
+                                                <div class="mini-sub">@FormatBytes(container.MemoryUsageBytes) / @FormatBytes(container.MemoryLimitBytes)</div>
+                                                <div class="mini-meter"><div style=$"width: {containerMemWidth:0.#}%"></div></div>
+                                            </div>
+                                            <div class="mini-stat">
+                                                <div class="mini-label">Network</div>
+                                                <div class="mini-sub">@FormatBytes(container.NetworkRxBytes) ↓</div>
+                                                <div class="mini-sub">@FormatBytes(container.NetworkTxBytes) ↑</div>
+                                            </div>
+                                            <div class="mini-stat">
+                                                <div class="mini-label">Block I/O</div>
+                                                <div class="mini-sub">@FormatBytes(container.BlockReadBytes) ⬇</div>
+                                                <div class="mini-sub">@FormatBytes(container.BlockWriteBytes) ⬆</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                }
+                            </div>
+                        }
+                    </div>
+                }
+
+                <div class="card compact-card" id="traefik-advanced">
+                    <div class="card-header">
+                        <h3>Configuration</h3>
+                    </div>
+                    <div class="info-grid compact">
+                        <div class="info-item">
+                            <span class="label">Docker Image</span>
+                            <span class="value">@app.DockerImage</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="label">Server</span>
+                            <span class="value">@app.ServerName</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="label">Project</span>
+                            <span class="value">@app.ProjectName</span>
+                        </div>
+                        @if (app.Port.HasValue)
+                        {
+                            <div class="info-item">
+                                <span class="label">Port</span>
+                                <span class="value">@app.Port</span>
+                            </div>
+                        }
+                        <div class="info-item">
+                            <span class="label">Replicas</span>
+                            <span class="value">@app.Replicas</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="label">Created</span>
+                            <span class="value">@app.CreatedAt.ToString("g")</span>
+                        </div>
+                        @if (app.LastDeployedAt.HasValue)
+                        {
+                            <div class="info-item">
+                                <span class="label">Last Deployed</span>
+                                <span class="value">@app.LastDeployedAt.Value.ToString("g")</span>
+                            </div>
+                        }
+                    </div>
+                </div>
+                
+                @if (TryBuildDatabaseCredentials(out var dbCredentials))
+                {
+                    <div class="card compact-card credential-card">
+                        <div class="card-header">
+                            <h3>Database Access</h3>
+                            <p class="card-subtitle">Generated connection details for @app.DatabaseType</p>
+                        </div>
+                        <div class="credential-sections">
+                            <div class="credential-section">
+                                <h4>Internal Credentials</h4>
+                                <p class="section-hint">Use inside the HostCraft overlay network.</p>
+                                @foreach (var entry in dbCredentials.InternalEntries)
+                                {
+                                    <div class="credential-row">
+                                        <div class="credential-label">@entry.Label</div>
+                                        <div class="credential-actions">
+                                            <span class="credential-value">@FormatDisplayValue(entry.Key, entry.Value)</span>
+                                            @if (AllowReveal(entry.Key) && !string.IsNullOrEmpty(entry.Value))
+                                            {
+                                                <button class="btn btn-icon" title="Toggle visibility" @onclick="() => ToggleSecret(entry.Key)">
+                                                    @(IsValueMasked(entry.Key, entry.Value) ? "👁️" : "🙈")
+                                                </button>
+                                            }
+                                            @if (!string.IsNullOrEmpty(entry.Value))
+                                            {
+                                                <button class="btn btn-icon" title="Copy value" @onclick="async () => await CopyValueAsync(entry.Value, entry.Label)">
+                                                    📋
+                                                </button>
+                                            }
+                                        </div>
+                                    </div>
+                                }
+                            </div>
+
+                            @if (dbCredentials.ExternalEntries.Any())
+                            {
+                                <div class="credential-section">
+                                    <h4>External Credentials</h4>
+                                    <p class="section-hint">Reach the database from outside the cluster.</p>
+                                    @foreach (var entry in dbCredentials.ExternalEntries)
+                                    {
+                                        <div class="credential-row">
+                                            <div class="credential-label">@entry.Label</div>
+                                            <div class="credential-actions">
+                                                <span class="credential-value">@FormatDisplayValue(entry.Key, entry.Value)</span>
+                                                @if (AllowReveal(entry.Key) && !string.IsNullOrEmpty(entry.Value))
+                                                {
+                                                    <button class="btn btn-icon" title="Toggle visibility" @onclick="() => ToggleSecret(entry.Key)">
+                                                        @(IsValueMasked(entry.Key, entry.Value) ? "👁️" : "🙈")
+                                                    </button>
+                                                }
+                                                @if (!string.IsNullOrEmpty(entry.Value))
+                                                {
+                                                    <button class="btn btn-icon" title="Copy value" @onclick="async () => await CopyValueAsync(entry.Value, entry.Label)">
+                                                        📋
+                                                    </button>
+                                                }
+                                            </div>
+                                        </div>
+                                    }
+                                </div>
+                            }
+                        </div>
+                    </div>
+                }
+
+                @if (!string.IsNullOrEmpty(app.Domain))
+                {
+                    <div class="card compact-card">
+                        <div class="card-header">
+                            <h3>🌐 Domain & SSL</h3>
+                        </div>
+                        <div class="info-grid compact">
+                            <div class="info-item">
+                                <span class="label">Primary Domain</span>
+                                <span class="value">
+                                    <a href="@(app.EnableHttps ? "https" : "http")://@app.Domain" target="_blank" style="color: #6366f1; text-decoration: none;">
+                                        @app.Domain
+                                    </a>
+                                </span>
+                            </div>
+                            @if (!string.IsNullOrEmpty(app.AdditionalDomains))
+                            {
+                                <div class="info-item">
+                                    <span class="label">Additional Domains</span>
+                                    <span class="value">@app.AdditionalDomains</span>
+                                </div>
+                            }
+                            <div class="info-item">
+                                <span class="label">HTTPS Enabled</span>
+                                <span class="value">@(app.EnableHttps ? "✅ Yes" : "❌ No")</span>
+                            </div>
+                            @if (app.EnableHttps)
+                            {
+                                <div class="info-item">
+                                    <span class="label">Force HTTPS</span>
+                                    <span class="value">@(app.ForceHttps ? "✅ Yes" : "❌ No")</span>
+                                </div>
+                                <div class="info-item">
+                                    <span class="label">SSL Certificate</span>
+                                    <span class="value">🔒 Let's Encrypt</span>
+                                </div>
+                                @if (!string.IsNullOrEmpty(app.LetsEncryptEmail))
+                                {
+                                    <div class="info-item">
+                                        <span class="label">Certificate Email</span>
+                                        <span class="value">@app.LetsEncryptEmail</span>
+                                    </div>
+                                }
+                            }
+                        </div>
+                    </div>
+                }
+                
+                <div class="card compact-card traefik-card">
+                    <div class="card-header traefik-header">
+                        <div class="header-stack">
+                            <h3>🌀 Traefik Config</h3>
+                            <p class="card-subtitle">Preview the HA-ready labels and layer overrides without breaking routing.</p>
+                        </div>
+                        <span class="pill pill-ghost">HA-first</span>
+                    </div>
+                    <div class="traefik-grid upgraded">
+                        <div class="traefik-preview">
+                            <div class="preview-header">
+                                <div class="preview-title">Generated labels</div>
+                                <span class="pill">Base</span>
+                            </div>
+                            <pre class="code-block code-block-lined">@RenderLabels(traefikPreview?.BaseLabels)</pre>
+                            <div class="preview-header">
+                                <div class="preview-title">Merged with overrides</div>
+                                <span class="pill pill-accent">Final</span>
+                            </div>
+                            <div class="merge-note">Base + overrides → what Traefik actually receives on Swarm.</div>
+                            <pre class="code-block code-block-lined code-accent">@RenderLabels(traefikPreview?.MergedLabels)</pre>
+                        </div>
+                        <div class="traefik-editor">
+                            <div class="editor-heading">
+                                <div>
+                                    <label class="editor-label">Overrides (JSON object)</label>
+                                    <p class="editor-hint">One flat JSON with Traefik label keys. Use for edge cases like headers, priorities, middlewares.</p>
+                                </div>
+                                <span class="pill pill-accent">Advanced</span>
+                            </div>
+                            <textarea class="code-textarea" rows="13" @bind="overridesInput" @bind:after="OnOverridesChanged" placeholder='{
+  "traefik.http.routers.app.priority": "10",
+  "traefik.http.middlewares.app.headers.customrequestheaders.X-Frame-Options": "SAMEORIGIN"
+}'></textarea>
+                            <div class="traefik-actions">
+                                <button class="btn btn-secondary btn-sm" @onclick="PreviewOverridesAsync" disabled="@isPreviewLoading">🔎 Preview</button>
+                                <button class="btn btn-primary btn-sm" @onclick="SaveOverridesAsync" disabled="@isSavingOverrides">💾 Save Overrides</button>
+                                <button class="btn btn-secondary btn-sm" @onclick="ResetOverridesToSaved" disabled="@isPreviewLoading || isSavingOverrides">↩️ Reset</button>
+                            </div>
+                            <p class="editor-footnote">Preview checks JSON validity and highlights warnings before saving.</p>
+                            @if (!string.IsNullOrEmpty(previewError))
+                            {
+                                <div class="error-chip">@previewError</div>
+                            }
+                            @if (previewWarnings.Any())
+                            {
+                                <ul class="warning-list">
+                                    @foreach (var warning in previewWarnings)
+                                    {
+                                        <li>⚠️ @warning</li>
+                                    }
+                                </ul>
+                            }
+                        </div>
+                    </div>
+                </div>
+                
+                @if (app.EnvironmentVariables != null && app.EnvironmentVariables.Any())
+                {
+                    <div class="card compact-card">
+                        <div class="card-header">
+                            <h3>Environment Variables</h3>
+                        </div>
+                        <div class="env-vars enhanced">
+                            @foreach (var env in app.EnvironmentVariables.OrderBy(kvp => kvp.Key))
+                            {
+                                var key = env.Key;
+                                var value = env.Value ?? string.Empty;
+                                <div class="env-var enhanced">
+                                    <div class="env-var-info">
+                                        <span class="env-key">@key</span>
+                                    </div>
+                                    <div class="env-var-actions">
+                                        <span class="env-value">@FormatDisplayValue(key, value)</span>
+                                        @if (AllowReveal(key) && !string.IsNullOrEmpty(value))
+                                        {
+                                            <button class="btn btn-icon" title="Toggle visibility" @onclick="() => ToggleSecret(key)">
+                                                @(IsValueMasked(key, value) ? "👁️" : "🙈")
+                                            </button>
+                                        }
+                                        @if (!string.IsNullOrEmpty(value))
+                                        {
+                                            <button class="btn btn-icon" title="Copy value" @onclick="async () => await CopyValueAsync(value, key)">
+                                                📋
+                                            </button>
+                                        }
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    </div>
+                }
+
+                <div class="card compact-card">
+                    <div class="card-header">
+                        <h3>Project Network</h3>
+                        <span class="card-subtitle">HA-ready overlay for app-to-app calls</span>
+                    </div>
+                    <div class="card-body">
+                        @{
+                            var networkName = $"{app.ProjectName}-network";
+                            var internalHost = ResolveInternalHost(app);
+                            var internalPort = ResolveInternalPort(app);
+                            var internalAddress = internalPort.HasValue
+                                ? $"http://{internalHost}:{internalPort}"
+                                : $"http://{internalHost}";
+                            var peerPattern = "http://<other-app>:<their-port>";
+                        }
+                        <p class="text-muted" style="margin-bottom: 0.75rem;">
+                            Every app in this project is auto-attached to <code>@networkName</code>. Drop these into env vars for instant service discovery.
+                        </p>
+
+                        <div class="env-vars enhanced">
+                            <div class="env-var enhanced">
+                                <div class="env-var-info">
+                                    <span class="env-key">Project network</span>
+                                    <span class="env-value">@networkName</span>
+                                </div>
+                                <div class="env-var-actions">
+                                    <button class="btn btn-icon copy-pill" title="Copy network" @onclick='() => CopyValueAsync(networkName, "Project network")'>📋</button>
+                                </div>
+                            </div>
+
+                            <div class="env-var enhanced">
+                                <div class="env-var-info">
+                                    <span class="env-key">Reach this app</span>
+                                    <span class="env-value">@internalAddress</span>
+                                </div>
+                                <div class="env-var-actions">
+                                    <button class="btn btn-icon copy-pill" title="Copy internal URL" @onclick='() => CopyValueAsync(internalAddress, "Internal URL")'>📋</button>
+                                </div>
+                            </div>
+
+                            <div class="env-var enhanced">
+                                <div class="env-var-info">
+                                    <span class="env-key">Peer pattern</span>
+                                    <span class="env-value">@peerPattern</span>
+                                </div>
+                                <div class="env-var-actions">
+                                    <button class="btn btn-icon copy-pill" title="Copy pattern" @onclick='() => CopyValueAsync(peerPattern, "Peer pattern")'>📋</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="card compact-card">
+                    <div class="card-header">
+                        <h3>Deployment History</h3>
+                    </div>
+                    @if (app.Deployments != null && app.Deployments.Any())
+                    {
+                        <div class="deployments-list compact">
+                            @foreach (var deployment in app.Deployments)
+                            {
+                                <div class="deployment-item @GetStatusClass(deployment.Status)" @onclick="() => SelectDeployment(deployment)">
+                                    <div class="deployment-row">
+                                        <div class="deployment-status">
+                                            <span class="status-icon @GetStatusClass(deployment.Status)">@GetStatusIcon(deployment.Status)</span>
+                                            <span class="deployment-time">@deployment.StartedAt.ToString("MM/dd HH:mm")</span>
+                                        </div>
+                                        <div class="deployment-info">
+                                            @if (!string.IsNullOrEmpty(deployment.ContainerId))
+                                            {
+                                                <span class="deployment-id">@deployment.ContainerId.Substring(0, 12)</span>
+                                            }
+                                            @if (!string.IsNullOrEmpty(deployment.ServiceId))
+                                            {
+                                                <span class="deployment-id">@deployment.ServiceId</span>
+                                            }
+                                            @if (deployment.FinishedAt.HasValue)
+                                            {
+                                                var duration = deployment.FinishedAt.Value - deployment.StartedAt;
+                                                <span class="deployment-duration">@FormatDuration(duration)</span>
+                                            }
+                                            else if (deployment.Status == DeploymentStatus.Running || deployment.Status == DeploymentStatus.Queued)
+                                            {
+                                                <span class="deployment-duration building">Building...</span>
+                                            }
+                                        </div>
+                                    </div>
+                                    @if (deployment.Status == DeploymentStatus.Failed && !string.IsNullOrEmpty(deployment.ErrorMessage))
+                                    {
+                                        <div class="deployment-error">@deployment.ErrorMessage</div>
+                                    }
+                                </div>
+                            }
+                        </div>
+                    }
+                    else
+                    {
+                        <p class="text-muted">No deployments yet</p>
+                    }
+                </div>
+
+                @* Build Logs Panel - Shows when deployment is in progress or selected *@
+                @if (selectedDeployment != null || activeDeployment != null)
+                {
+                    var displayDeployment = selectedDeployment ?? activeDeployment;
+                    <div class="card compact-card build-logs-card">
+                        <div class="card-header">
+                            <h3>
+                                @if (displayDeployment!.Status == DeploymentStatus.Running || displayDeployment.Status == DeploymentStatus.Queued)
+                                {
+                                    <span class="building-indicator"></span>
+                                }
+                                Build Logs
+                                @if (displayDeployment.Status == DeploymentStatus.Running)
+                                {
+                                    <span class="status-badge status-running" style="margin-left: 0.5rem; font-size: 0.75rem;">Live</span>
+                                }
+                            </h3>
+                            <div class="logs-actions">
+                                @if (selectedDeployment != null)
+                                {
+                                    <button class="btn btn-sm btn-secondary" @onclick="ClearSelectedDeployment">Close</button>
+                                }
+                            </div>
+                        </div>
+                        <div class="build-logs-container">
+                            @if (buildLogs.Count == 0)
+                            {
+                                <div class="logs-empty">
+                                    @if (displayDeployment.Status == DeploymentStatus.Queued)
+                                    {
+                                        <span>Waiting for build to start...</span>
+                                    }
+                                    else
+                                    {
+                                        <span>No logs available</span>
+                                    }
+                                </div>
+                            }
+                            else
+                            {
+                                <pre class="build-logs-content">@foreach (var log in buildLogs)
+{<span class="log-line @GetLogLevelClass(log.LogLevel)">[@log.Timestamp.ToString("HH:mm:ss")] @log.Message</span>
+}</pre>
+                            }
+                        </div>
+                    </div>
+                }
+            </div>
+            
+            <div class="details-sidebar">
+                <div class="card compact-card">
+                    <div class="card-header">
+                        <h3>Actions</h3>
+                    </div>
+                    <div class="actions-grid">
+                        <button class="btn btn-primary btn-sm" @onclick="Redeploy" disabled="@isRedeploying">
+                            @if (isRedeploying)
+                            {
+                                <span>🔄</span>
+                            }
+                            else
+                            {
+                                <span>🚀 Redeploy</span>
+                            }
+                        </button>
+                        <button class="btn btn-secondary btn-sm" @onclick="ViewLogs" disabled="@(!CanViewLogs())">
+                            📄 Logs
+                        </button>
+                        <button class="btn btn-secondary btn-sm" @onclick="EditApplication">
+                            ✏️ Edit
+                        </button>
+                        <button class="btn btn-danger btn-sm" @onclick="DeleteApplication" disabled="@isDeleting">
+                            @if (isDeleting)
+                            {
+                                <span>🗑️</span>
+                            }
+                            else
+                            {
+                                <span>🗑️ Delete</span>
+                            }
+                        </button>
+                    </div>
+                </div>
+                
+                @if (!string.IsNullOrEmpty(app.ContainerId) || !string.IsNullOrEmpty(app.ServiceId))
+                {
+                    <div class="card compact-card">
+                        <div class="card-header">
+                            <h3>Runtime</h3>
+                        </div>
+                        <div class="info-grid compact">
+                            @if (!string.IsNullOrEmpty(app.ServiceId))
+                            {
+                                <div class="info-item">
+                                    <span class="label">Type</span>
+                                    <span class="value">🐝 Swarm Service</span>
+                                </div>
+                                <div class="info-item">
+                                    <span class="label">Service ID</span>
+                                    <span class="value">@app.ServiceId</span>
+                                </div>
+                            }
+                            @if (!string.IsNullOrEmpty(app.ContainerId))
+                            {
+                                <div class="info-item">
+                                    <span class="label">Type</span>
+                                    <span class="value">🐳 Container</span>
+                                </div>
+                                <div class="info-item">
+                                    <span class="label">Container ID</span>
+                                    <span class="value">@app.ContainerId.Substring(0, 12)</span>
+                                </div>
+                            }
+                        </div>
+                    </div>
+                }
+            </div>
+        </div>
+    }
+</div>
+
+<style>
+    .monitoring-card {
+        margin-bottom: 1rem;
+        border: 1px solid #1f2937;
+        background: linear-gradient(145deg, #0b1220 0%, #0f172a 100%);
+        box-shadow: 0 12px 30px rgba(0, 0, 0, 0.35);
+    }
+
+    .scale-card {
+        border: 1px solid #1f2937;
+        background: #0c1424;
+    }
+
+    .scale-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 0.75rem;
+        flex-wrap: wrap;
+    }
+
+    .scale-controls {
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+    }
+
+    .scale-input {
+        width: 90px;
+        text-align: center;
+        background: #0f172a;
+        color: #e5e7eb;
+        border: 1px solid #1f2937;
+        border-radius: 8px;
+        padding: 0.35rem 0.5rem;
+    }
+
+    .scale-meta {
+        display: flex;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+        margin-top: 0.5rem;
+    }
+
+    .monitoring-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 0.75rem;
+        flex-wrap: wrap;
+        padding-bottom: 0.5rem;
+        border-bottom: 1px solid #1f2937;
+    }
+
+    .monitoring-title {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+
+    .live-pill {
+        padding: 0.25rem 0.65rem;
+        border-radius: 999px;
+        font-size: 0.8rem;
+        font-weight: 600;
+        background: #16a34a;
+        color: #0b1725;
+        border: 1px solid #15803d;
+        box-shadow: 0 0 0 6px rgba(22, 163, 74, 0.1);
+    }
+
+    .live-pill.paused {
+        background: #475569;
+        border-color: #334155;
+        color: #e5e7eb;
+        box-shadow: none;
+    }
+
+    .monitoring-actions {
+        display: flex;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+    }
+
+    .monitoring-summary-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 0.85rem;
+        margin-top: 1rem;
+    }
+
+    .monitoring-stat-card {
+        padding: 1rem;
+        border-radius: 14px;
+        border: 1px solid #1f2937;
+        background: #0d1728;
+        position: relative;
+        overflow: hidden;
+    }
+
+    .monitoring-stat-card::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background: radial-gradient(circle at 20% 20%, rgba(255, 255, 255, 0.05), transparent 40%);
+        pointer-events: none;
+    }
+
+    .monitoring-stat-card .stat-top {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 0.5rem;
+    }
+
+    .stat-icon {
+        font-size: 1.1rem;
+    }
+
+    .stat-chip {
+        padding: 0.2rem 0.6rem;
+        border-radius: 999px;
+        background: rgba(148, 163, 184, 0.12);
+        color: #cbd5e1;
+        font-size: 0.85rem;
+        border: 1px solid rgba(148, 163, 184, 0.25);
+    }
+
+    .stat-main {
+        font-size: 1.6rem;
+        font-weight: 700;
+        margin-bottom: 0.25rem;
+    }
+
+    .stat-sub {
+        color: #9ca3af;
+        margin-bottom: 0.5rem;
+    }
+
+    .stat-micro {
+        color: #6b7280;
+        font-size: 0.85rem;
+    }
+
+    .stat-meter {
+        width: 100%;
+        height: 6px;
+        background: #111827;
+        border-radius: 999px;
+        overflow: hidden;
+        border: 1px solid #1f2937;
+    }
+
+    .stat-meter-fill {
+        height: 100%;
+        background: linear-gradient(90deg, #38bdf8, #a855f7);
+        border-radius: inherit;
+    }
+
+    .accent-cpu .stat-meter-fill {
+        background: linear-gradient(90deg, #22d3ee, #6366f1);
+    }
+
+    .accent-memory .stat-meter-fill {
+        background: linear-gradient(90deg, #34d399, #16a34a);
+    }
+
+    .monitoring-containers-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+        gap: 0.85rem;
+        margin-top: 1rem;
+    }
+
+    .container-card {
+        padding: 1rem;
+        border-radius: 14px;
+        border: 1px solid #1f2937;
+        background: #0c1424;
+        box-shadow: 0 8px 20px rgba(0, 0, 0, 0.28);
+    }
+
+    .container-card-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.5rem;
+        margin-bottom: 0.75rem;
+    }
+
+    .container-name {
+        font-weight: 700;
+    }
+
+    .container-meta {
+        color: #9ca3af;
+        font-size: 0.9rem;
+    }
+
+    .container-chip {
+        padding: 0.2rem 0.6rem;
+        border-radius: 999px;
+        background: rgba(99, 102, 241, 0.16);
+        border: 1px solid rgba(99, 102, 241, 0.35);
+        font-size: 0.85rem;
+    }
+
+    .container-metrics-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+        gap: 0.65rem;
+    }
+
+    .mini-stat {
+        padding: 0.65rem 0.75rem;
+        border-radius: 12px;
+        background: #0f1b2e;
+        border: 1px solid #1f2937;
+        display: flex;
+        flex-direction: column;
+        gap: 0.15rem;
+        height: 100%;
+    }
+
+    .mini-label {
+        color: #9ca3af;
+        font-size: 0.9rem;
+        margin-bottom: 0.1rem;
+    }
+
+    .mini-value {
+        font-weight: 700;
+        margin-bottom: 0.25rem;
+    }
+
+    .mini-sub {
+        color: #9ca3af;
+        font-size: 0.9rem;
+    }
+
+    .mini-meter {
+        margin-top: auto;
+        height: 5px;
+        background: #111827;
+        border-radius: 999px;
+        overflow: hidden;
+        border: 1px solid #1f2937;
+    }
+
+    .mini-meter div {
+        height: 100%;
+        background: linear-gradient(90deg, #f59e0b, #f97316);
+    }
+
+    .credential-card {
+        margin-top: 1.5rem;
+    }
+
+    .credential-card .credential-sections {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 1.25rem;
+    }
+
+    .credential-card .credential-section {
+        flex: 1 1 320px;
+        background: #1f2937;
+        border-radius: 12px;
+        padding: 1.25rem;
+        border: 1px solid #374151;
+    }
+
+    .credential-card .credential-section h4 {
+        margin: 0 0 0.35rem 0;
+        color: #f9fafb;
+    }
+
+    .credential-card .section-hint {
+        margin: 0;
+        color: #9ca3af;
+        font-size: 0.85rem;
+    }
+
+    .credential-card .credential-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.75rem;
+        margin-top: 0.85rem;
+        padding-top: 0.75rem;
+        border-top: 1px solid #374151;
+    }
+
+    .credential-card .credential-row:first-of-type {
+        border-top: none;
+        padding-top: 0;
+    }
+
+    .credential-card .credential-label {
+        flex: 0 0 160px;
+        font-weight: 600;
+        color: #f9fafb;
+    }
+
+    .credential-card .credential-actions {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        justify-content: flex-end;
+        flex: 1;
+    }
+
+    .credential-card .credential-value {
+        font-family: "JetBrains Mono", Menlo, Consolas, monospace;
+        font-size: 0.95rem;
+        color: #e5e7eb;
+        word-break: break-all;
+    }
+
+    .credential-card .btn.btn-icon {
+        background: #374151;
+        border: none;
+        color: #f9fafb;
+        padding: 0.35rem 0.55rem;
+        border-radius: 8px;
+        cursor: pointer;
+        transition: background 0.2s ease-in-out;
+    }
+
+    .copy-pill {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 36px;
+        height: 36px;
+        border-radius: 50%;
+        background: linear-gradient(135deg, rgba(59,130,246,0.12), rgba(99,102,241,0.12));
+        border: 1px solid rgba(148,163,184,0.35);
+        color: #e5e7eb;
+        box-shadow: inset 0 1px 0 rgba(255,255,255,0.06);
+        padding: 0;
+    }
+
+    .credential-card .btn.btn-icon:hover {
+        background: #4b5563;
+    }
+
+    .credential-card .btn.btn-icon:active {
+        transform: translateY(1px);
+    }
+
+    .traefik-card {
+        background: linear-gradient(135deg, rgba(79,70,229,0.06), rgba(14,165,233,0.04));
+        border: 1px solid #1f2937;
+    }
+
+    .traefik-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.75rem;
+    }
+
+    .header-stack h3 {
+        margin: 0;
+    }
+
+    .header-stack .card-subtitle {
+        margin: 0.15rem 0 0;
+    }
+
+    .traefik-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+        gap: 1rem;
+        margin-top: 0.5rem;
+    }
+
+    .traefik-grid.upgraded {
+        gap: 1.25rem;
+    }
+
+    .traefik-preview {
+        background: #0b1220;
+        border: 1px solid #1f2937;
+        border-radius: 14px;
+        padding: 1rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.85rem;
+        box-shadow: inset 0 1px 0 #1f2937;
+    }
+
+    .traefik-editor {
+        background: #0b1220;
+        border: 1px solid #1f2937;
+        border-radius: 14px;
+        padding: 1rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.85rem;
+        box-shadow: inset 0 1px 0 #1f2937;
+    }
+
+    .preview-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        color: #e5e7eb;
+        font-weight: 600;
+    }
+
+    .preview-title {
+        font-weight: 700;
+        letter-spacing: 0.01em;
+    }
+
+    .pill {
+        background: #1f2937;
+        padding: 0.2rem 0.55rem;
+        border-radius: 999px;
+        font-size: 0.75rem;
+        color: #cbd5e1;
+        border: 1px solid #334155;
+        letter-spacing: 0.01em;
+    }
+
+    .pill-ghost {
+        background: rgba(255,255,255,0.05);
+        color: #e5e7eb;
+        border-color: #334155;
+    }
+
+    .pill-accent {
+        background: linear-gradient(120deg, #0ea5e9, #6366f1);
+        color: #0b1725;
+        border-color: #0ea5e9;
+    }
+
+    .code-block {
+        background: #0a0f1c;
+        border: 1px solid #1f2937;
+        border-radius: 12px;
+        padding: 0.85rem;
+        min-height: 140px;
+        color: #e5e7eb;
+        font-family: "JetBrains Mono", Menlo, Consolas, monospace;
+        font-size: 0.9rem;
+        white-space: pre-wrap;
+        overflow: auto;
+    }
+
+    .code-block-lined {
+        position: relative;
+    }
+
+    .code-block-lined::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        border-left: 3px solid #0ea5e9;
+        border-radius: 12px;
+        opacity: 0.4;
+        pointer-events: none;
+    }
+
+    .code-accent::before {
+        border-left-color: #6366f1;
+        opacity: 0.5;
+    }
+
+    .code-textarea {
+        width: 100%;
+        background: #050915;
+        color: #e5e7eb;
+        border: 1px solid #1f2937;
+        border-radius: 12px;
+        padding: 0.9rem;
+        font-family: "JetBrains Mono", Menlo, Consolas, monospace;
+        font-size: 0.9rem;
+        resize: vertical;
+        min-height: 160px;
+        line-height: 1.4;
+        box-shadow: inset 0 1px 0 #111827;
+    }
+
+    .editor-heading {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 0.5rem;
+    }
+
+    .editor-label {
+        font-weight: 700;
+        color: #e5e7eb;
+        display: block;
+    }
+
+    .editor-hint {
+        margin: 0.2rem 0 0;
+        color: #94a3b8;
+        font-size: 0.9rem;
+    }
+
+    .traefik-actions {
+        display: flex;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+    }
+
+    .merge-note {
+        color: #a5b4fc;
+        font-size: 0.9rem;
+        margin-top: -0.2rem;
+    }
+
+    .editor-footnote {
+        margin: 0;
+        color: #94a3b8;
+        font-size: 0.88rem;
+    }
+
+    .error-chip {
+        margin-top: 0.5rem;
+        background: #7f1d1d;
+        color: #fecdd3;
+        padding: 0.5rem 0.75rem;
+        border-radius: 10px;
+        border: 1px solid #991b1b;
+        font-size: 0.9rem;
+    }
+
+    .warning-list {
+        margin: 0.5rem 0 0 0;
+        padding-left: 1rem;
+        color: #fbbf24;
+    }
+
+    .warning-list li {
+        margin-bottom: 0.25rem;
+    }
+
+    .credential-card .btn.btn-icon:focus {
+        outline: 2px solid #6366f1;
+        outline-offset: 2px;
+    }
+</style>
+
+@code {
+    [Parameter]
+    public int Id { get; set; }
+
+    private ApplicationWithDeploymentsDto? app;
+    private bool isLoading = true;
+    private bool isRedeploying = false;
+    private bool isDeleting = false;
+    private bool isScaling = false;
+    private int scaleReplicas = 1;
+    private string activeTab = "General";
+    private string? scaleError;
+    private string? scaleSuccess;
+    private readonly HashSet<string> revealedKeys = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, bool> secretOverrides = new(StringComparer.OrdinalIgnoreCase);
+    private string? copyMessage;
+    private CancellationTokenSource? copyMessageCts;
+
+    // Traefik advanced config state
+    private TraefikPreviewResponse? traefikPreview;
+    private string overridesInput = string.Empty;
+    private bool isPreviewLoading;
+    private bool isSavingOverrides;
+    private string? previewError;
+    private List<string> previewWarnings = new();
+
+    // Build logs state
+    private DeploymentInfo? selectedDeployment;
+    private DeploymentInfo? activeDeployment;
+    private List<DeploymentLogDto> buildLogs = new();
+    private int lastLogId = 0;
+    private System.Timers.Timer? logPollingTimer;
+
+    // Runtime monitoring state
+    private ApplicationMetricsDto? runtimeMetrics;
+    private bool isMetricsLoading;
+    private string? metricsError;
+    private bool metricsStreamingEnabled = true;
+    private System.Timers.Timer? metricsTimer;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadApplication();
+        CheckForActiveDeployment();
+        if (HasRuntimeTarget())
+        {
+            StartMetricsPolling();
+        }
+    }
+
+    protected override void OnParametersSet()
+    {
+        SyncActiveTabWithFragment();
+    }
+
+    private void CheckForActiveDeployment()
+    {
+        // Find any running or queued deployment
+        activeDeployment = app?.Deployments?.FirstOrDefault(d =>
+            d.Status == DeploymentStatus.Running || d.Status == DeploymentStatus.Queued);
+
+        if (activeDeployment != null)
+        {
+            StartLogPolling(activeDeployment.Id);
+        }
+    }
+
+    private void StartLogPolling(int deploymentId)
+    {
+        StopLogPolling();
+        lastLogId = 0;
+        buildLogs.Clear();
+
+        logPollingTimer = new System.Timers.Timer(1000); // Poll every second
+        logPollingTimer.Elapsed += async (sender, e) => await PollBuildLogs(deploymentId);
+        logPollingTimer.AutoReset = true;
+        logPollingTimer.Start();
+
+        // Initial fetch
+        _ = PollBuildLogs(deploymentId);
+    }
+
+    private void StopLogPolling()
+    {
+        logPollingTimer?.Stop();
+        logPollingTimer?.Dispose();
+        logPollingTimer = null;
+    }
+
+    private async Task PollBuildLogs(int deploymentId)
+    {
+        try
+        {
+            // Fetch new logs
+            var logs = await Http.GetFromJsonAsync<List<DeploymentLogDto>>($"api/deployments/{deploymentId}/logs?afterId={lastLogId}");
+            if (logs != null && logs.Count > 0)
+            {
+                foreach (var log in logs)
+                {
+                    buildLogs.Add(log);
+                    if (log.Id > lastLogId) lastLogId = log.Id;
+                }
+                await InvokeAsync(StateHasChanged);
+            }
+
+            // Check deployment status
+            var status = await Http.GetFromJsonAsync<DeploymentStatusDto>($"api/deployments/{deploymentId}/status");
+            if (status != null && (status.Status == "Success" || status.Status == "Failed" || status.Status == "Cancelled"))
+            {
+                StopLogPolling();
+                await LoadApplication(); // Refresh the app state
+                activeDeployment = null;
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error polling build logs");
+        }
+    }
+
+    private bool HasRuntimeTarget()
+    {
+        return !string.IsNullOrWhiteSpace(app?.ContainerId) || !string.IsNullOrWhiteSpace(app?.ServiceId);
+    }
+
+    private void StartMetricsPolling()
+    {
+        if (!metricsStreamingEnabled || !HasRuntimeTarget())
+        {
+            return;
+        }
+
+        StopMetricsPolling();
+
+        metricsTimer = new System.Timers.Timer(2000);
+        metricsTimer.Elapsed += async (_, _) => await LoadMetricsAsync();
+        metricsTimer.AutoReset = true;
+        metricsTimer.Start();
+
+        _ = LoadMetricsAsync();
+    }
+
+    private void StopMetricsPolling()
+    {
+        metricsTimer?.Stop();
+        metricsTimer?.Dispose();
+        metricsTimer = null;
+    }
+
+    private async Task LoadMetricsAsync()
+    {
+        if (!metricsStreamingEnabled || isMetricsLoading)
+        {
+            return;
+        }
+
+        isMetricsLoading = true;
+
+        try
+        {
+            var metrics = await Http.GetFromJsonAsync<ApplicationMetricsDto>($"api/applications/{Id}/metrics");
+            if (metrics != null)
+            {
+                runtimeMetrics = metrics;
+                metricsError = null;
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (Exception ex)
+        {
+            metricsError = "Live metrics temporarily unavailable";
+            Logger.LogWarning(ex, "Failed to load runtime metrics for application {ApplicationId}", Id);
+        }
+        finally
+        {
+            isMetricsLoading = false;
+        }
+    }
+
+    private async Task RefreshMetricsAsync()
+    {
+        await LoadMetricsAsync();
+    }
+
+    private void ToggleMetricsStreaming()
+    {
+        metricsStreamingEnabled = !metricsStreamingEnabled;
+        if (metricsStreamingEnabled)
+        {
+            StartMetricsPolling();
+        }
+        else
+        {
+            StopMetricsPolling();
+        }
+    }
+
+    private async Task SelectDeployment(DeploymentInfo deployment)
+    {
+        if (selectedDeployment?.Id == deployment.Id)
+        {
+            // Toggle off if clicking the same one
+            ClearSelectedDeployment();
+            return;
+        }
+
+        selectedDeployment = deployment;
+        buildLogs.Clear();
+        lastLogId = 0;
+
+        // If it's an active deployment, start polling
+        if (deployment.Status == DeploymentStatus.Running || deployment.Status == DeploymentStatus.Queued)
+        {
+            StartLogPolling(deployment.Id);
+        }
+        else
+        {
+            // Load all logs at once for completed deployments
+            StopLogPolling();
+            try
+            {
+                var logs = await Http.GetFromJsonAsync<List<DeploymentLogDto>>($"api/deployments/{deployment.Id}/logs");
+                if (logs != null)
+                {
+                    buildLogs = logs;
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Error loading deployment logs");
+            }
+        }
+        StateHasChanged();
+    }
+
+    private void ClearSelectedDeployment()
+    {
+        selectedDeployment = null;
+        if (activeDeployment == null)
+        {
+            StopLogPolling();
+            buildLogs.Clear();
+        }
+        StateHasChanged();
+    }
+
+    private void BackToApplications()
+    {
+        if (app != null)
+        {
+            Navigation.NavigateTo($"/projects/{app.ProjectId}");
+        }
+        else
+        {
+            Navigation.NavigateTo("/projects");
+        }
+    }
+
+    private void NavigateToGeneral()
+    {
+        activeTab = "General";
+        Navigation.NavigateTo($"/applications/{Id}");
+    }
+
+    private void NavigateToEdit()
+    {
+        Navigation.NavigateTo($"/applications/{Id}/edit");
+    }
+
+    private void NavigateToDomains()
+    {
+        Navigation.NavigateTo($"/applications/{Id}/domains");
+    }
+
+    private void NavigateToAdvanced()
+    {
+        activeTab = "Advanced";
+        Navigation.NavigateTo($"/applications/{Id}#traefik-advanced");
+    }
+
+    private void NavigateToLogs()
+    {
+        Navigation.NavigateTo($"/applications/{Id}/logs");
+    }
+
+    private void IncrementScale()
+    {
+        scaleReplicas = Math.Clamp(scaleReplicas + 1, 0, 100);
+    }
+
+    private void DecrementScale()
+    {
+        scaleReplicas = Math.Clamp(scaleReplicas - 1, 0, 100);
+    }
+
+    private void SyncActiveTabWithFragment()
+    {
+        var fragment = Navigation.ToAbsoluteUri(Navigation.Uri).Fragment;
+        if (!string.IsNullOrWhiteSpace(fragment))
+        {
+            var frag = fragment.TrimStart('#');
+            if (string.Equals(frag, "traefik-advanced", StringComparison.OrdinalIgnoreCase))
+            {
+                activeTab = "Advanced";
+                return;
+            }
+        }
+
+        activeTab = "General";
+    }
+
+    private bool CanScale()
+    {
+        return !string.IsNullOrWhiteSpace(app?.ServiceId);
+    }
+
+    private async Task ApplyScaleAsync()
+    {
+        if (app == null)
+        {
+            return;
+        }
+
+        if (!CanScale())
+        {
+            scaleError = "Scaling is only available for swarm services.";
+            return;
+        }
+
+        isScaling = true;
+        scaleError = null;
+        scaleSuccess = null;
+        StateHasChanged();
+
+        try
+        {
+            var target = Math.Clamp(scaleReplicas, 0, 100);
+            var response = await Http.PostAsync($"api/applications/{Id}/scale?replicas={target}", null);
+            if (response.IsSuccessStatusCode)
+            {
+                scaleSuccess = $"Scaling to {target} replica{(target == 1 ? string.Empty : "s")} requested.";
+                await LoadApplication();
+            }
+            else
+            {
+                var err = await response.Content.ReadAsStringAsync();
+                scaleError = string.IsNullOrWhiteSpace(err) ? "Failed to scale application." : err;
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error scaling application {Id}", Id);
+            scaleError = "Scaling failed. Check connection and try again.";
+        }
+        finally
+        {
+            isScaling = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task LoadApplication()
+    {
+        isLoading = true;
+        StateHasChanged();
+
+        try
+        {
+            app = await Http.GetFromJsonAsync<ApplicationWithDeploymentsDto>($"api/applications/{Id}");
+            runtimeMetrics = null;
+            scaleReplicas = Math.Max(0, app?.Replicas ?? 1);
+            scaleError = null;
+            scaleSuccess = null;
+            overridesInput = app?.TraefikLabelOverrides ?? string.Empty;
+            await LoadTraefikPreviewAsync(useEditorInput: false);
+            if (metricsStreamingEnabled && HasRuntimeTarget())
+            {
+                StartMetricsPolling();
+            }
+            secretOverrides.Clear();
+            revealedKeys.Clear();
+            copyMessage = null;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading application");
+        }
+        finally
+        {
+            isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task Redeploy()
+    {
+        isRedeploying = true;
+        StateHasChanged();
+
+        try
+        {
+            var response = await Http.PostAsync($"api/applications/{Id}/deploy", null);
+            if (response.IsSuccessStatusCode)
+            {
+                // Some responses are empty (204). Only parse JSON when present.
+                DeployResponse? result = null;
+                var content = await response.Content.ReadAsStringAsync();
+                if (!string.IsNullOrWhiteSpace(content))
+                {
+                    try
+                    {
+                        result = System.Text.Json.JsonSerializer.Deserialize<DeployResponse>(content);
+                    }
+                    catch (System.Text.Json.JsonException jsonEx)
+                    {
+                        Logger.LogWarning(jsonEx, "Deploy response was not valid JSON; proceeding without id");
+                    }
+                }
+
+                await Task.Delay(500);
+                await LoadApplication();
+                CheckForActiveDeployment();
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error redeploying application");
+        }
+        finally
+        {
+            isRedeploying = false;
+            StateHasChanged();
+        }
+    }
+
+    private void ViewLogs()
+    {
+        Navigation.NavigateTo($"/applications/{Id}/logs");
+    }
+
+    private bool CanViewLogs()
+    {
+        return !string.IsNullOrEmpty(app?.ContainerId) || !string.IsNullOrEmpty(app?.ServiceId);
+    }
+
+    private void EditApplication()
+    {
+        Navigation.NavigateTo($"/applications/{Id}/edit");
+    }
+
+    private async Task DeleteApplication()
+    {
+        isDeleting = true;
+        StateHasChanged();
+
+        try
+        {
+            var response = await Http.DeleteAsync($"api/applications/{Id}");
+            if (response.IsSuccessStatusCode)
+            {
+                Navigation.NavigateTo("/applications");
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error deleting application");
+        }
+        finally
+        {
+            isDeleting = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task LoadTraefikPreviewAsync(bool useEditorInput)
+    {
+        if (app == null)
+        {
+            return;
+        }
+
+        isPreviewLoading = true;
+        previewError = null;
+        previewWarnings.Clear();
+        StateHasChanged();
+
+        try
+        {
+            HttpResponseMessage response;
+
+            if (useEditorInput)
+            {
+                var payload = new TraefikOverridesRequest { Overrides = NormalizeOverridesInput(overridesInput) };
+                response = await Http.PostAsJsonAsync($"api/applications/{Id}/traefik/preview", payload);
+            }
+            else
+            {
+                response = await Http.GetAsync($"api/applications/{Id}/traefik/preview");
+            }
+
+            if (response.IsSuccessStatusCode)
+            {
+                traefikPreview = await response.Content.ReadFromJsonAsync<TraefikPreviewResponse>();
+                previewWarnings = traefikPreview?.Warnings ?? new List<string>();
+            }
+            else
+            {
+                previewError = await response.Content.ReadAsStringAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading Traefik preview");
+            previewError = "Unable to load Traefik preview";
+        }
+        finally
+        {
+            isPreviewLoading = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private Task PreviewOverridesAsync() => LoadTraefikPreviewAsync(useEditorInput: true);
+
+    private async Task SaveOverridesAsync()
+    {
+        isSavingOverrides = true;
+        previewError = null;
+        StateHasChanged();
+
+        try
+        {
+            var payload = new TraefikOverridesRequest { Overrides = NormalizeOverridesInput(overridesInput) };
+            var response = await Http.PutAsJsonAsync($"api/applications/{Id}/traefik/overrides", payload);
+
+            if (response.IsSuccessStatusCode)
+            {
+                await LoadApplication();
+            }
+            else
+            {
+                previewError = await response.Content.ReadAsStringAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error saving Traefik overrides");
+            previewError = "Unable to save overrides";
+        }
+        finally
+        {
+            isSavingOverrides = false;
+            await LoadTraefikPreviewAsync(useEditorInput: false);
+        }
+    }
+
+    private void ResetOverridesToSaved()
+    {
+        overridesInput = app?.TraefikLabelOverrides ?? string.Empty;
+        previewError = null;
+        previewWarnings.Clear();
+    }
+
+    private void OnOverridesChanged()
+    {
+        previewError = null;
+    }
+
+    private static string? NormalizeOverridesInput(string? raw)
+    {
+        return string.IsNullOrWhiteSpace(raw) ? null : raw.Trim();
+    }
+
+    private string FormatDuration(TimeSpan duration)
+    {
+        if (duration.TotalSeconds < 60)
+            return $"{(int)duration.TotalSeconds}s";
+        if (duration.TotalMinutes < 60)
+            return $"{(int)duration.TotalMinutes}m {duration.Seconds}s";
+        return $"{(int)duration.TotalHours}h {duration.Minutes}m";
+    }
+
+    private string GetRuntimeModeLabel() => string.IsNullOrWhiteSpace(app?.ServiceId) ? "Container" : "Service";
+
+    private static string FormatBytes(long bytes)
+    {
+        if (bytes <= 0)
+        {
+            return "0 B";
+        }
+
+        string[] units = { "B", "KB", "MB", "GB", "TB" };
+        double value = bytes;
+        var unitIndex = 0;
+
+        while (value >= 1024 && unitIndex < units.Length - 1)
+        {
+            value /= 1024;
+            unitIndex++;
+        }
+
+        return $"{value:0.0} {units[unitIndex]}";
+    }
+
+    private static string RenderLabels(Dictionary<string, string>? labels)
+    {
+        if (labels == null || labels.Count == 0)
+        {
+            return "No labels generated.";
+        }
+
+        var builder = new StringBuilder();
+        foreach (var kvp in labels.OrderBy(static kvp => kvp.Key))
+        {
+            builder.AppendLine($"{kvp.Key} = {kvp.Value}");
+        }
+
+        return builder.ToString().TrimEnd();
+    }
+
+    private string GetStatusClass(DeploymentStatus status) => status switch
+    {
+        DeploymentStatus.Running => "status-running",
+        DeploymentStatus.Success => "status-success",
+        DeploymentStatus.Failed => "status-failed",
+        DeploymentStatus.Queued => "status-queued",
+        DeploymentStatus.Cancelled => "status-cancelled",
+        _ => "status-unknown"
+    };
+
+    private string GetStatusIcon(DeploymentStatus status) => status switch
+    {
+        DeploymentStatus.Running => "🔄",
+        DeploymentStatus.Success => "✅",
+        DeploymentStatus.Failed => "❌",
+        DeploymentStatus.Queued => "⏳",
+        DeploymentStatus.Cancelled => "🚫",
+        _ => "⚪"
+    };
+
+    private string GetLogLevelClass(string level) => level.ToLower() switch
+    {
+        "error" => "log-error",
+        "warning" => "log-warning",
+        "success" => "log-success",
+        _ => "log-info"
+    };
+
+    private bool TryBuildDatabaseCredentials(out DatabaseCredentialSummary summary)
+    {
+        summary = default!;
+        if (app == null || app.SourceType != ApplicationSourceType.DatabaseTemplate || app.EnvironmentVariables == null)
+        {
+            return false;
+        }
+
+        var internalEntries = new List<CredentialEntry>();
+        var externalEntries = new List<CredentialEntry>();
+        var env = new Dictionary<string, string>(app.EnvironmentVariables, StringComparer.OrdinalIgnoreCase);
+
+        var scheme = GetDatabaseScheme(app.DatabaseType);
+        var internalHost = ResolveInternalHost(app);
+        var internalPort = ResolveInternalPort(app);
+        var externalHost = ResolveExternalHost(app);
+        var externalPort = ResolveExternalPort(app, internalPort);
+
+        var hints = ResolveDatabaseKeyHints(app.DatabaseType);
+        var user = TryGetAny(env, hints.UserKeys);
+        var password = TryGetAny(env, hints.PasswordKeys);
+        var databaseName = TryGetAny(env, hints.DatabaseKeys);
+
+        if (app.DatabaseType.HasValue)
+        {
+            foreach (var definition in DatabaseTemplateBestPractices.GetDefinitions(app.DatabaseType.Value))
+            {
+                if (!ShouldDisplayDefinition(definition))
+                {
+                    continue;
+                }
+
+                env.TryGetValue(definition.Key, out var value);
+                AddCredentialEntry(internalEntries, definition.Label, definition.Key, value, definition.IsSecret, skipIfEmpty: false);
+            }
+        }
+
+        AddCredentialEntry(internalEntries, "Internal Host", "__internal_host", internalHost, false);
+        if (internalPort.HasValue)
+        {
+            AddCredentialEntry(internalEntries, "Internal Port", "__internal_port", internalPort.Value.ToString(), false);
+        }
+
+        var internalUrl = BuildConnectionString(scheme, internalHost, internalPort, user, password, databaseName);
+        AddCredentialEntry(internalEntries, "Internal Connection URL", "__internal_connection_url", internalUrl, true);
+
+        AddCredentialEntry(externalEntries, "External Host", "__external_host", externalHost, false);
+        if (externalPort.HasValue)
+        {
+            AddCredentialEntry(externalEntries, "External Port", "__external_port", externalPort.Value.ToString(), false);
+        }
+
+        var externalUrl = BuildConnectionString(scheme, externalHost, externalPort, user, password, databaseName);
+        AddCredentialEntry(externalEntries, "External Connection URL", "__external_connection_url", externalUrl, true);
+
+        summary = new DatabaseCredentialSummary(internalEntries, externalEntries);
+        return internalEntries.Any() || externalEntries.Any();
+    }
+
+    private void AddCredentialEntry(List<CredentialEntry> list, string label, string key, string? value, bool isSecret, bool skipIfEmpty = true)
+    {
+        if (skipIfEmpty && string.IsNullOrWhiteSpace(value))
+        {
+            return;
+        }
+
+        var normalizedValue = value ?? string.Empty;
+        SetExplicitSecretFlag(key, isSecret);
+        list.Add(new CredentialEntry(label, key, normalizedValue, isSecret));
+    }
+
+    private static string ResolveInternalHost(ApplicationWithDeploymentsDto application)
+    {
+        return !string.IsNullOrWhiteSpace(application.ServiceName) ? application.ServiceName : NormalizeResourceName(application.Name);
+    }
+
+    private static int? ResolveInternalPort(ApplicationWithDeploymentsDto application)
+    {
+        if (application.Port.HasValue && application.Port > 0)
+        {
+            return application.Port;
+        }
+
+        var fallbackPort = GetDefaultDatabasePort(application.DatabaseType);
+        return fallbackPort > 0 ? fallbackPort : null;
+    }
+
+    private static string? ResolveExternalHost(ApplicationWithDeploymentsDto application)
+    {
+        if (!string.IsNullOrWhiteSpace(application.Domain))
+        {
+            return application.Domain;
+        }
+
+        var additional = ExtractFirstAdditionalDomain(application.AdditionalDomains);
+        if (!string.IsNullOrWhiteSpace(additional))
+        {
+            return additional;
+        }
+
+        return string.IsNullOrWhiteSpace(application.ServerHost) ? null : application.ServerHost;
+    }
+
+    private static int? ResolveExternalPort(ApplicationWithDeploymentsDto application, int? internalPort)
+    {
+        if (application.PublishedPort.HasValue && application.PublishedPort > 0)
+        {
+            return application.PublishedPort;
+        }
+
+        return internalPort;
+    }
+
+    private static string? ExtractFirstAdditionalDomain(string? additionalDomains)
+    {
+        if (string.IsNullOrWhiteSpace(additionalDomains))
+        {
+            return null;
+        }
+
+        var segments = additionalDomains
+            .Split(new[] { ',', ';', '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries)
+            .Select(static segment => segment.Trim())
+            .Where(static segment => !string.IsNullOrWhiteSpace(segment));
+
+        return segments.FirstOrDefault();
+    }
+
+    private static DatabaseKeyHints ResolveDatabaseKeyHints(DatabaseType? type)
+    {
+        if (type.HasValue && DatabaseKeyHintMap.TryGetValue(type.Value, out var hints))
+        {
+            return hints;
+        }
+
+        return GenericDatabaseKeyHints;
+    }
+
+    private static bool ShouldDisplayDefinition(TemplateEnvironmentVariableDefinition definition)
+    {
+        return definition.DisplayInWizard || definition.IsSecret;
+    }
+
+    private static string? TryGetAny(IReadOnlyDictionary<string, string> env, IReadOnlyList<string> keys)
+    {
+        foreach (var key in keys)
+        {
+            if (env.TryGetValue(key, out var value) && !string.IsNullOrWhiteSpace(value))
+            {
+                return value;
+            }
+        }
+
+        return null;
+    }
+
+    private void SetExplicitSecretFlag(string key, bool isSecret)
+    {
+        secretOverrides[key] = isSecret;
+    }
+
+    private bool AllowReveal(string key)
+    {
+        if (secretOverrides.TryGetValue(key, out var explicitSecret))
+        {
+            return explicitSecret;
+        }
+
+        return LooksSensitiveKey(key);
+    }
+
+    private bool IsValueMasked(string key, string value)
+    {
+        if (!AllowReveal(key))
+        {
+            return false;
+        }
+
+        return !revealedKeys.Contains(key);
+    }
+
+    private string FormatDisplayValue(string key, string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return "(empty)";
+        }
+
+        return IsValueMasked(key, value) ? MaskValue(value) : value;
+    }
+
+    private static string MaskValue(string value)
+    {
+        var length = Math.Max(value.Length, 8);
+        return new string('•', length);
+    }
+
+    private static bool LooksSensitiveKey(string key)
+    {
+        return key.Contains("PASSWORD", StringComparison.OrdinalIgnoreCase)
+               || key.Contains("SECRET", StringComparison.OrdinalIgnoreCase)
+               || key.Contains("TOKEN", StringComparison.OrdinalIgnoreCase)
+               || key.Contains("KEY", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private void ToggleSecret(string key)
+    {
+        if (!revealedKeys.Remove(key))
+        {
+            revealedKeys.Add(key);
+        }
+        StateHasChanged();
+    }
+
+    private async Task CopyValueAsync(string value, string label)
+    {
+        try
+        {
+            await Js.InvokeVoidAsync("navigator.clipboard.writeText", value);
+            await ShowCopyMessageAsync($"{label} copied to clipboard");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to copy value for {Label}", label);
+            await ShowCopyMessageAsync("Copy failed");
+        }
+    }
+
+    private async Task ShowCopyMessageAsync(string message)
+    {
+        var previousCts = copyMessageCts;
+        previousCts?.Cancel();
+
+        var cts = new CancellationTokenSource();
+        copyMessageCts = cts;
+        previousCts?.Dispose();
+        copyMessage = message;
+        await InvokeAsync(StateHasChanged);
+
+        try
+        {
+            await Task.Delay(TimeSpan.FromSeconds(2), cts.Token);
+            copyMessage = null;
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (TaskCanceledException)
+        {
+        }
+        finally
+        {
+            if (ReferenceEquals(copyMessageCts, cts))
+            {
+                copyMessageCts = null;
+            }
+            cts.Dispose();
+        }
+    }
+
+    private static string NormalizeResourceName(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return "hostcraft-db";
+        }
+
+        var builder = new StringBuilder();
+        char previous = '\0';
+        foreach (var ch in name.ToLowerInvariant())
+        {
+            if (char.IsLetterOrDigit(ch))
+            {
+                builder.Append(ch);
+                previous = ch;
+            }
+            else if (previous != '-')
+            {
+                builder.Append('-');
+                previous = '-';
+            }
+        }
+
+        var result = builder.ToString().Trim('-');
+        return string.IsNullOrEmpty(result) ? "hostcraft-db" : result;
+    }
+
+    private static int GetDefaultDatabasePort(DatabaseType? type) => type switch
+    {
+        DatabaseType.PostgreSQL => 5432,
+        DatabaseType.MySQL => 3306,
+        DatabaseType.MariaDB => 3306,
+        DatabaseType.MongoDB => 27017,
+        DatabaseType.Redis => 6379,
+        DatabaseType.DragonFly => 6379,
+        DatabaseType.KeyDB => 6379,
+        DatabaseType.Clickhouse => 9000,
+        _ => 0
+    };
+
+    private static string GetDatabaseScheme(DatabaseType? type) => type switch
+    {
+        DatabaseType.PostgreSQL => "postgresql",
+        DatabaseType.MySQL => "mysql",
+        DatabaseType.MariaDB => "mariadb",
+        DatabaseType.MongoDB => "mongodb",
+        DatabaseType.Redis => "redis",
+        DatabaseType.DragonFly => "redis",
+        DatabaseType.KeyDB => "redis",
+        DatabaseType.Clickhouse => "clickhouse",
+        _ => string.Empty
+    };
+
+    private static string? BuildConnectionString(string scheme, string? host, int? port, string? user, string? password, string? database)
+    {
+        if (string.IsNullOrWhiteSpace(scheme) || string.IsNullOrWhiteSpace(host) || !port.HasValue)
+        {
+            return null;
+        }
+
+        var hasUser = !string.IsNullOrWhiteSpace(user);
+        var hasPassword = !string.IsNullOrWhiteSpace(password);
+        var userInfo = string.Empty;
+
+        if (hasUser || hasPassword)
+        {
+            if (hasUser)
+            {
+                var escapedUser = Uri.EscapeDataString(user!);
+                var passwordSegment = hasPassword ? $":{Uri.EscapeDataString(password!)}" : string.Empty;
+                userInfo = $"{escapedUser}{passwordSegment}@";
+            }
+            else if (hasPassword)
+            {
+                userInfo = $":{Uri.EscapeDataString(password!)}@";
+            }
+        }
+
+        var databasePart = string.IsNullOrWhiteSpace(database) ? string.Empty : $"/{Uri.EscapeDataString(database)}";
+
+        return $"{scheme}://{userInfo}{host}:{port.Value}{databasePart}";
+    }
+
+    private static readonly Dictionary<DatabaseType, DatabaseKeyHints> DatabaseKeyHintMap = new()
+    {
+        [DatabaseType.PostgreSQL] = new(
+            new[] { "POSTGRES_USER" },
+            new[] { "POSTGRES_PASSWORD" },
+            new[] { "POSTGRES_DB" }
+        ),
+        [DatabaseType.MySQL] = new(
+            new[] { "MYSQL_USER", "MYSQL_ROOT_USER" },
+            new[] { "MYSQL_PASSWORD", "MYSQL_ROOT_PASSWORD" },
+            new[] { "MYSQL_DATABASE" }
+        ),
+        [DatabaseType.MariaDB] = new(
+            new[] { "MARIADB_USER", "MARIADB_ROOT_USER" },
+            new[] { "MARIADB_PASSWORD", "MARIADB_ROOT_PASSWORD" },
+            new[] { "MARIADB_DATABASE" }
+        ),
+        [DatabaseType.MongoDB] = new(
+            new[] { "MONGO_INITDB_ROOT_USERNAME", "MONGO_INITDB_USERNAME" },
+            new[] { "MONGO_INITDB_ROOT_PASSWORD", "MONGO_INITDB_PASSWORD" },
+            new[] { "MONGO_INITDB_DATABASE" }
+        ),
+        [DatabaseType.Redis] = new(
+            new[] { "REDIS_USER" },
+            new[] { "REDIS_PASSWORD" },
+            Array.Empty<string>()
+        ),
+        [DatabaseType.DragonFly] = new(
+            Array.Empty<string>(),
+            new[] { "DRAGONFLY_PASSWORD" },
+            Array.Empty<string>()
+        ),
+        [DatabaseType.KeyDB] = new(
+            new[] { "KEYDB_USER" },
+            new[] { "KEYDB_PASSWORD" },
+            Array.Empty<string>()
+        ),
+        [DatabaseType.Clickhouse] = new(
+            new[] { "CLICKHOUSE_USER" },
+            new[] { "CLICKHOUSE_PASSWORD" },
+            new[] { "CLICKHOUSE_DB" }
+        )
+    };
+
+    private static readonly DatabaseKeyHints GenericDatabaseKeyHints = new(
+        new[] { "DB_USER", "DATABASE_USER", "APP_USER", "USER" },
+        new[] { "DB_PASSWORD", "DATABASE_PASSWORD", "APP_PASSWORD", "PASSWORD" },
+        new[] { "DB_NAME", "DATABASE_NAME", "DATABASE" }
+    );
+
+    private sealed record CredentialEntry(string Label, string Key, string Value, bool IsSecret);
+
+    private sealed record DatabaseCredentialSummary(
+        IReadOnlyList<CredentialEntry> InternalEntries,
+        IReadOnlyList<CredentialEntry> ExternalEntries
+    );
+
+    private sealed record DatabaseKeyHints(
+        IReadOnlyList<string> UserKeys,
+        IReadOnlyList<string> PasswordKeys,
+        IReadOnlyList<string> DatabaseKeys
+    );
+
+    public void Dispose()
+    {
+        StopLogPolling();
+        StopMetricsPolling();
+        copyMessageCts?.Cancel();
+    }
+
+    private record ApplicationWithDeploymentsDto(
+        int Id,
+        string Name,
+        string? Description,
+        int ServerId,
+        string ServerName,
+        string? ServerHost,
+        int ProjectId,
+        string ProjectName,
+        ApplicationSourceType SourceType,
+        DatabaseType? DatabaseType,
+        string? DockerImage,
+        bool UsePrivateRegistry,
+        string? RegistryServer,
+        string? RegistryUsername,
+        bool HasRegistryPassword,
+        int? GitProviderId,
+        string? GitRepository,
+        string? GitBranch,
+        string? GitOwner,
+        string? GitRepoName,
+        string? Dockerfile,
+        string? BuildContext,
+        string? DockerBuildTarget,
+        string? BuildArgs,
+        bool CloneSubmodules,
+        bool EnableGitLfs,
+        bool AutoDeployOnPush,
+        bool EnablePreviewDeployments,
+        string? PreviewUrlTemplate,
+        int? Port,
+        int? PublishedPort,
+        int Replicas,
+        Dictionary<string, string>? EnvironmentVariables,
+        string? Domain,
+        string? AdditionalDomains,
+        string? TraefikLabelOverrides,
+        bool EnableHttps,
+        bool ForceHttps,
+        string? LetsEncryptEmail,
+        DeploymentStatus Status,
+        string? ContainerId,
+        string? ServiceId,
+        DateTime? LastDeployedAt,
+        DateTime CreatedAt,
+        string? ServiceName,
+        List<DeploymentInfo> Deployments
+    );
+    private record DeploymentInfo(
+        int Id,
+        DeploymentStatus Status,
+        string? ContainerId,
+        string? ServiceId,
+        DateTime StartedAt,
+        DateTime? FinishedAt,
+        string? ErrorMessage
+    );
+
+    private record DeploymentLogDto(
+        int Id,
+        string Message,
+        string LogLevel,
+        DateTime Timestamp
+    );
+
+    private record DeploymentStatusDto(
+        int Id,
+        string Status,
+        DateTime StartedAt,
+        DateTime? FinishedAt,
+        string? ErrorMessage
+    );
+
+    private record TraefikOverridesRequest
+    {
+        public string? Overrides { get; init; }
+
+        public TraefikOverridesRequest()
+        {
+        }
+
+        public TraefikOverridesRequest(string? overrides)
+        {
+            Overrides = overrides;
+        }
+    }
+
+    private record TraefikPreviewResponse(
+        Dictionary<string, string> BaseLabels,
+        Dictionary<string, string> Overrides,
+        Dictionary<string, string> MergedLabels,
+        List<string> Warnings
+    );
+
+    private record DeployResponse(int DeploymentId, string Message);
+
+    private record ApplicationMetricsDto(
+        string Mode,
+        double TotalCpuPercent,
+        double TotalMemoryPercent,
+        long TotalMemoryUsageBytes,
+        long TotalMemoryLimitBytes,
+        long NetworkRxBytes,
+        long NetworkTxBytes,
+        long BlockReadBytes,
+        long BlockWriteBytes,
+        DateTime Timestamp,
+        IReadOnlyList<ApplicationContainerMetricsDto> Containers
+    );
+
+    private record ApplicationContainerMetricsDto(
+        string ContainerId,
+        string? Name,
+        string? NodeName,
+        double CpuPercent,
+        long MemoryUsageBytes,
+        long MemoryLimitBytes,
+        double MemoryPercent,
+        long NetworkRxBytes,
+        long NetworkTxBytes,
+        long BlockReadBytes,
+        long BlockWriteBytes,
+        DateTime Timestamp
+    );
+}

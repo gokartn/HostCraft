@@ -1,0 +1,266 @@
+@page "/applications/{Id:int}/logs"
+@rendermode InteractiveServer
+@using System.Net.Http
+@using System.Text
+@using HostCraft.Core.Enums
+@using HostCraft.Core.Interfaces
+@inject HttpClient Http
+@inject NavigationManager Navigation
+@inject ILogger<ApplicationLogs> Logger
+
+<div class="page-container logs-page">
+    <div class="page-header">
+        <div class="header-left">
+            <button class="btn-icon" @onclick="BackToApplication">←</button>
+            <div>
+                <h1>📄 Application Logs</h1>
+                <p class="subtitle">@(applicationName ?? "Loading...")</p>
+            </div>
+        </div>
+        <div class="header-actions">
+            <button class="btn btn-secondary" @onclick="RefreshLogs" disabled="@isLoading">
+                🔄 Refresh
+            </button>
+            <button class="btn btn-secondary" @onclick="ClearLogs">
+                🗑️ Clear
+            </button>
+        </div>
+    </div>
+
+    @* Tab Navigation *@
+    <div class="tabs-container">
+        <button class="tab" @onclick="NavigateToDetails">General</button>
+        <button class="tab" @onclick="NavigateToEdit">Edit</button>
+        <button class="tab" @onclick="NavigateToDomains">Domains</button>
+        <button class="tab" @onclick="NavigateToAdvanced">Advanced</button>
+        <button class="tab active">Logs</button>
+    </div>
+
+    @if (isLoading && string.IsNullOrEmpty(logs))
+    {
+        <div class="loading-spinner">
+            <div class="spinner"></div>
+            <p>Loading logs...</p>
+        </div>
+    }
+    else if (!string.IsNullOrEmpty(errorMessage))
+    {
+        <div class="error-state">
+            <div class="error-icon">⚠️</div>
+            <h2>Error Loading Logs</h2>
+            <p>@errorMessage</p>
+            <button class="btn btn-primary" @onclick="RefreshLogs">
+                Try Again
+            </button>
+        </div>
+    }
+    else
+    {
+        @if (isSwarmService && tasks != null && tasks.Any())
+        {
+            <div class="task-selector">
+                <label>View logs for:</label>
+                <select @bind="selectedTaskId" @bind:after="OnTaskSelectionChanged">
+                    <option value="">All Service Logs (Combined)</option>
+                    @foreach (var task in tasks)
+                    {
+                        <option value="@task.TaskId">
+                            Task @task.Slot - @task.NodeName (@task.CurrentState)
+                        </option>
+                    }
+                </select>
+            </div>
+        }
+        
+        <div class="logs-container">
+            <div class="logs-header">
+                <span class="logs-count">@GetLogLineCount() lines</span>
+                <div class="logs-controls">
+                    <label class="checkbox-label">
+                        <input type="checkbox" @bind="autoScroll" />
+                        Auto-scroll
+                    </label>
+                    <label class="checkbox-label">
+                        <input type="checkbox" @bind="wrapLines" />
+                        Wrap lines
+                    </label>
+                </div>
+            </div>
+            <pre class="logs-content @(wrapLines ? "wrap" : "")" @ref="logsElement">@logs</pre>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter]
+    public int Id { get; set; }
+    
+    private string? logs;
+    private string? errorMessage;
+    private string? applicationName;
+    private bool isLoading = true;
+    private bool autoScroll = true;
+    private bool wrapLines = false;
+    private ElementReference logsElement;
+    private bool isSwarmService = false;
+    private List<ServiceTaskContainerRef>? tasks;
+    private string selectedTaskId = "";
+    
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadApplicationInfo();
+        await LoadServiceTasks();
+        await LoadLogs();
+    }
+    
+    private async Task LoadApplicationInfo()
+    {
+        try
+        {
+            var app = await Http.GetFromJsonAsync<ApplicationDto>($"api/applications/{Id}");
+            applicationName = app?.Name;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading application info");
+        }
+    }
+    
+    private async Task LoadServiceTasks()
+    {
+        try
+        {
+            var response = await Http.GetAsync($"api/applications/{Id}/tasks");
+            
+            if (response.IsSuccessStatusCode)
+            {
+                tasks = await response.Content.ReadFromJsonAsync<List<ServiceTaskContainerRef>>();
+                isSwarmService = tasks != null && tasks.Any();
+            }
+        }
+        catch (Exception ex)
+        {
+            // Not a swarm service or error - that's okay
+            Logger.LogDebug(ex, "Could not load service tasks - likely not a swarm service");
+            isSwarmService = false;
+        }
+    }
+    
+    private async Task LoadLogs()
+    {
+        isLoading = true;
+        errorMessage = null;
+        StateHasChanged();
+        
+        try
+        {
+            string endpoint;
+            if (string.IsNullOrEmpty(selectedTaskId))
+            {
+                // All service logs
+                endpoint = $"api/applications/{Id}/logs";
+            }
+            else
+            {
+                // Specific task logs
+                endpoint = $"api/applications/{Id}/tasks/{selectedTaskId}/logs";
+            }
+            
+            var response = await Http.GetAsync(endpoint);
+            
+            if (response.IsSuccessStatusCode)
+            {
+                logs = await response.Content.ReadAsStringAsync();
+                
+                // If logs are empty, show a message
+                if (string.IsNullOrWhiteSpace(logs))
+                {
+                    logs = "No logs available yet. The container may still be starting or has not produced any output.";
+                }
+            }
+            else
+            {
+                var error = await response.Content.ReadAsStringAsync();
+                errorMessage = $"Failed to load logs: {error}";
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading logs");
+            errorMessage = $"Error loading logs: {ex.Message}";
+        }
+        finally
+        {
+            isLoading = false;
+            StateHasChanged();
+        }
+    }
+    
+    private async Task OnTaskSelectionChanged()
+    {
+        await LoadLogs();
+    }
+    
+    private async Task RefreshLogs()
+    {
+        await LoadLogs();
+    }
+    
+    private void ClearLogs()
+    {
+        logs = "";
+    }
+    
+    private void BackToApplication()
+    {
+        Navigation.NavigateTo($"/applications/{Id}");
+    }
+
+    private void NavigateToDetails()
+    {
+        Navigation.NavigateTo($"/applications/{Id}");
+    }
+
+    private void NavigateToEdit()
+    {
+        Navigation.NavigateTo($"/applications/{Id}/edit");
+    }
+
+    private void NavigateToDomains()
+    {
+        Navigation.NavigateTo($"/applications/{Id}/domains");
+    }
+
+    private void NavigateToAdvanced()
+    {
+        Navigation.NavigateTo($"/applications/{Id}#traefik-advanced");
+    }
+    
+    private int GetLogLineCount()
+    {
+        if (string.IsNullOrEmpty(logs))
+            return 0;
+        return logs.Split('\n').Length;
+    }
+    
+    private record ApplicationDto(
+        int Id,
+        string Name,
+        string? Description,
+        bool UsePrivateRegistry,
+        string? RegistryServer,
+        string? RegistryUsername,
+        bool HasRegistryPassword
+    );
+    
+    private record ServiceTaskContainerRef(
+        string TaskId,
+        string? ContainerId,
+        string NodeId,
+        string? NodeName,
+        string? DesiredState,
+        string? CurrentState,
+        int Slot,
+        DateTime? UpdatedAt
+    );
+}
