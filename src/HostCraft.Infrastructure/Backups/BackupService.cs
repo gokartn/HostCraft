@@ -968,9 +968,15 @@ public class BackupService : IBackupService
         var backup = await _context.Backups
             .FirstOrDefaultAsync(b => b.Id == backupId, cancellationToken);
 
-        if (backup == null || string.IsNullOrEmpty(backup.ManifestJson))
+        if (backup == null)
         {
-            throw new InvalidOperationException($"Backup {backupId} not found or has no manifest");
+            throw new InvalidOperationException($"Backup {backupId} not found");
+        }
+
+        // If no manifest, return empty requirements (uploaded backups may lack manifests)
+        if (string.IsNullOrEmpty(backup.ManifestJson))
+        {
+            return new RestoreRequiredInput();
         }
 
         var manifest = JsonSerializer.Deserialize<BackupManifest>(backup.ManifestJson);
@@ -2047,14 +2053,14 @@ public class BackupService : IBackupService
             BackupManifest? manifest = null;
             try
             {
-                var manifestResult = await _sshService.ExecuteCommandAsync(
+                var (exitCode, output, _) = await ExecuteCommandAsync(
                     server,
                     $"tar -xzf '{uploadedFilePath}' -O manifest.json 2>/dev/null || echo ''",
                     cancellationToken);
 
-                if (manifestResult.ExitCode == 0 && !string.IsNullOrWhiteSpace(manifestResult.Output))
+                if (exitCode == 0 && !string.IsNullOrWhiteSpace(output))
                 {
-                    manifest = JsonSerializer.Deserialize<BackupManifest>(manifestResult.Output);
+                    manifest = JsonSerializer.Deserialize<BackupManifest>(output);
                 }
             }
             catch (Exception ex)
@@ -2090,16 +2096,23 @@ public class BackupService : IBackupService
             // Ensure backup directory exists
             await EnsureBackupDirectoryAsync(server, BackupBasePath, cancellationToken);
 
-            // Upload the backup file to the server
-            var uploadSuccess = await _sshService.UploadFileAsync(
-                server,
-                uploadedFilePath,
-                backupPath,
-                cancellationToken);
-
-            if (!uploadSuccess)
+            // Copy/upload the backup file to the storage path
+            if (IsLocalhostServer(server))
             {
-                throw new Exception("Failed to upload backup file to server");
+                File.Copy(uploadedFilePath, backupPath, overwrite: true);
+            }
+            else
+            {
+                var uploadSuccess = await _sshService.UploadFileAsync(
+                    server,
+                    uploadedFilePath,
+                    backupPath,
+                    cancellationToken);
+
+                if (!uploadSuccess)
+                {
+                    throw new Exception("Failed to upload backup file to server");
+                }
             }
 
             // Get file size
