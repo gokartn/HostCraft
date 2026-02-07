@@ -769,7 +769,7 @@ public class BackupService : IBackupService
         CancellationToken cancellationToken = default)
     {
         var backup = await _context.Backups.FindAsync(new object[] { backupId }, cancellationToken);
-        if (backup == null || backup.Application == null || string.IsNullOrEmpty(backup.StoragePath))
+        if (backup == null || string.IsNullOrEmpty(backup.StoragePath))
         {
             _logger.LogWarning("Backup {BackupId} not found or has no storage path", backupId);
             return false;
@@ -1939,10 +1939,7 @@ public class BackupService : IBackupService
         }
 
         // Check if this is a localhost/local server
-        bool isLocalhost = server.Host == "localhost" ||
-                          server.Host == "127.0.0.1" ||
-                          server.Host == "::1" ||
-                          string.IsNullOrEmpty(server.Host);
+        bool isLocalhost = IsLocalhostServer(server) || string.IsNullOrEmpty(server.Host);
 
         if (isLocalhost)
         {
