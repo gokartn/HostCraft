@@ -597,6 +597,56 @@ public class BackupService : IBackupService
         return deletedCount;
     }
 
+    public async Task<bool> DeleteBackupAsync(int backupId, CancellationToken cancellationToken = default)
+    {
+        var backup = await _context.Backups
+            .Include(b => b.Application)
+            .ThenInclude(a => a!.Server)
+            .ThenInclude(s => s!.PrivateKey)
+            .FirstOrDefaultAsync(b => b.Id == backupId, cancellationToken);
+
+        if (backup == null)
+        {
+            return false;
+        }
+
+        // Delete the backup file from disk
+        if (!string.IsNullOrEmpty(backup.StoragePath))
+        {
+            try
+            {
+                // Determine which server has the file
+                Server? server;
+                if (backup.Application?.Server != null)
+                {
+                    server = backup.Application.Server;
+                }
+                else
+                {
+                    server = await _context.Servers
+                        .Include(s => s.PrivateKey)
+                        .Where(s => s.Status == ServerStatus.Online)
+                        .FirstOrDefaultAsync(cancellationToken);
+                }
+
+                if (server != null)
+                {
+                    await ExecuteCommandAsync(server, $"rm -f '{backup.StoragePath}'", cancellationToken);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to delete backup file at {Path}, proceeding with database removal", backup.StoragePath);
+            }
+        }
+
+        _context.Backups.Remove(backup);
+        await _context.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Deleted backup {BackupId}", backupId);
+        return true;
+    }
+
     public async Task<IEnumerable<Core.Entities.Backup>> GetBackupsAsync(int applicationId, CancellationToken cancellationToken = default)
     {
         return await _context.Backups
@@ -769,7 +819,7 @@ public class BackupService : IBackupService
         CancellationToken cancellationToken = default)
     {
         var backup = await _context.Backups.FindAsync(new object[] { backupId }, cancellationToken);
-        if (backup == null || backup.Application == null || string.IsNullOrEmpty(backup.StoragePath))
+        if (backup == null || string.IsNullOrEmpty(backup.StoragePath))
         {
             _logger.LogWarning("Backup {BackupId} not found or has no storage path", backupId);
             return false;
@@ -968,9 +1018,15 @@ public class BackupService : IBackupService
         var backup = await _context.Backups
             .FirstOrDefaultAsync(b => b.Id == backupId, cancellationToken);
 
-        if (backup == null || string.IsNullOrEmpty(backup.ManifestJson))
+        if (backup == null)
         {
-            throw new InvalidOperationException($"Backup {backupId} not found or has no manifest");
+            throw new InvalidOperationException($"Backup {backupId} not found");
+        }
+
+        // If no manifest, return empty requirements (uploaded backups may lack manifests)
+        if (string.IsNullOrEmpty(backup.ManifestJson))
+        {
+            return new RestoreRequiredInput();
         }
 
         var manifest = JsonSerializer.Deserialize<BackupManifest>(backup.ManifestJson);
@@ -1939,10 +1995,7 @@ public class BackupService : IBackupService
         }
 
         // Check if this is a localhost/local server
-        bool isLocalhost = server.Host == "localhost" ||
-                          server.Host == "127.0.0.1" ||
-                          server.Host == "::1" ||
-                          string.IsNullOrEmpty(server.Host);
+        bool isLocalhost = IsLocalhostServer(server) || string.IsNullOrEmpty(server.Host);
 
         if (isLocalhost)
         {
@@ -2050,14 +2103,14 @@ public class BackupService : IBackupService
             BackupManifest? manifest = null;
             try
             {
-                var manifestResult = await _sshService.ExecuteCommandAsync(
+                var (exitCode, output, _) = await ExecuteCommandAsync(
                     server,
                     $"tar -xzf '{uploadedFilePath}' -O manifest.json 2>/dev/null || echo ''",
                     cancellationToken);
 
-                if (manifestResult.ExitCode == 0 && !string.IsNullOrWhiteSpace(manifestResult.Output))
+                if (exitCode == 0 && !string.IsNullOrWhiteSpace(output))
                 {
-                    manifest = JsonSerializer.Deserialize<BackupManifest>(manifestResult.Output);
+                    manifest = JsonSerializer.Deserialize<BackupManifest>(output);
                 }
             }
             catch (Exception ex)
@@ -2093,16 +2146,23 @@ public class BackupService : IBackupService
             // Ensure backup directory exists
             await EnsureBackupDirectoryAsync(server, BackupBasePath, cancellationToken);
 
-            // Upload the backup file to the server
-            var uploadSuccess = await _sshService.UploadFileAsync(
-                server,
-                uploadedFilePath,
-                backupPath,
-                cancellationToken);
-
-            if (!uploadSuccess)
+            // Copy/upload the backup file to the storage path
+            if (IsLocalhostServer(server))
             {
-                throw new Exception("Failed to upload backup file to server");
+                File.Copy(uploadedFilePath, backupPath, overwrite: true);
+            }
+            else
+            {
+                var uploadSuccess = await _sshService.UploadFileAsync(
+                    server,
+                    uploadedFilePath,
+                    backupPath,
+                    cancellationToken);
+
+                if (!uploadSuccess)
+                {
+                    throw new Exception("Failed to upload backup file to server");
+                }
             }
 
             // Get file size

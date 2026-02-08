@@ -122,6 +122,28 @@
                             <button class="btn btn-icon btn-sm" title="Restore" @onclick="() => NavigateToRestore(backup.Id)" disabled="@(backup.Status != "Success")">
                                 <span>♻️</span>
                             </button>
+                            @if (confirmDeleteId == backup.Id)
+                            {
+                                <button class="btn btn-icon btn-sm btn-danger-icon" title="Confirm Delete" @onclick="() => ConfirmDeleteBackup(backup.Id)">
+                                    <span>✔️</span>
+                                </button>
+                                <button class="btn btn-icon btn-sm" title="Cancel" @onclick="CancelDelete">
+                                    <span>✖️</span>
+                                </button>
+                            }
+                            else
+                            {
+                                <button class="btn btn-icon btn-sm btn-danger-icon" title="Delete" @onclick="() => RequestDeleteBackup(backup.Id)" disabled="@(deletingId == backup.Id)">
+                                    @if (deletingId == backup.Id)
+                                    {
+                                        <span class="spinner-tiny"></span>
+                                    }
+                                    else
+                                    {
+                                        <span>🗑️</span>
+                                    }
+                                </button>
+                            }
                         </div>
                     </div>
                 }
@@ -919,6 +941,48 @@
         {
             Logger.LogError(ex, "Error downloading backup");
             testResult = new TestResult { Success = false, Message = $"Download failed: {ex.Message}" };
+        }
+    }
+
+    private int? confirmDeleteId;
+    private int? deletingId;
+
+    private void RequestDeleteBackup(int backupId)
+    {
+        confirmDeleteId = backupId;
+    }
+
+    private void CancelDelete()
+    {
+        confirmDeleteId = null;
+    }
+
+    private async Task ConfirmDeleteBackup(int backupId)
+    {
+        confirmDeleteId = null;
+        deletingId = backupId;
+
+        try
+        {
+            var response = await Http.DeleteAsync($"api/Backups/{backupId}");
+            if (response.IsSuccessStatusCode)
+            {
+                backups.RemoveAll(b => b.Id == backupId);
+                testResult = new TestResult { Success = true, Message = "Backup deleted successfully" };
+            }
+            else
+            {
+                testResult = new TestResult { Success = false, Message = "Failed to delete backup" };
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error deleting backup {BackupId}", backupId);
+            testResult = new TestResult { Success = false, Message = $"Delete failed: {ex.Message}" };
+        }
+        finally
+        {
+            deletingId = null;
         }
     }
 
@@ -1917,10 +1981,21 @@
         cursor: pointer;
     }
     
-    .btn.btn-icon.btn-danger {
+    .btn.btn-icon.btn-danger,
+    .btn.btn-icon.btn-danger-icon {
         background: rgba(239, 68, 68, 0.15);
         border-color: rgba(239, 68, 68, 0.3);
         color: #fca5a5;
+    }
+
+    .spinner-tiny {
+        display: inline-block;
+        width: 14px;
+        height: 14px;
+        border: 2px solid rgba(252, 165, 165, 0.3);
+        border-top-color: #fca5a5;
+        border-radius: 50%;
+        animation: spin 0.8s linear infinite;
     }
 
     .provider-config-section {
