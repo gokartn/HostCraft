@@ -171,6 +171,11 @@ public interface IBackupService
     // Maintenance operations
 
     /// <summary>
+    /// Deletes a backup and its associated file from disk.
+    /// </summary>
+    Task<bool> DeleteBackupAsync(int backupId, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Deletes expired backups based on retention policy.
     /// </summary>
     Task<int> PruneExpiredBackupsAsync(CancellationToken cancellationToken = default);

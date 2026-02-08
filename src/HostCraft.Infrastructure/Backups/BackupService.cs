@@ -597,6 +597,56 @@ public class BackupService : IBackupService
         return deletedCount;
     }
 
+    public async Task<bool> DeleteBackupAsync(int backupId, CancellationToken cancellationToken = default)
+    {
+        var backup = await _context.Backups
+            .Include(b => b.Application)
+            .ThenInclude(a => a!.Server)
+            .ThenInclude(s => s!.PrivateKey)
+            .FirstOrDefaultAsync(b => b.Id == backupId, cancellationToken);
+
+        if (backup == null)
+        {
+            return false;
+        }
+
+        // Delete the backup file from disk
+        if (!string.IsNullOrEmpty(backup.StoragePath))
+        {
+            try
+            {
+                // Determine which server has the file
+                Server? server;
+                if (backup.Application?.Server != null)
+                {
+                    server = backup.Application.Server;
+                }
+                else
+                {
+                    server = await _context.Servers
+                        .Include(s => s.PrivateKey)
+                        .Where(s => s.Status == ServerStatus.Online)
+                        .FirstOrDefaultAsync(cancellationToken);
+                }
+
+                if (server != null)
+                {
+                    await ExecuteCommandAsync(server, $"rm -f '{backup.StoragePath}'", cancellationToken);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to delete backup file at {Path}, proceeding with database removal", backup.StoragePath);
+            }
+        }
+
+        _context.Backups.Remove(backup);
+        await _context.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Deleted backup {BackupId}", backupId);
+        return true;
+    }
+
     public async Task<IEnumerable<Core.Entities.Backup>> GetBackupsAsync(int applicationId, CancellationToken cancellationToken = default)
     {
         return await _context.Backups

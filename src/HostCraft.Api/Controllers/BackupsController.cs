@@ -384,6 +384,20 @@ public class BackupsController : ControllerBase
     #region Maintenance Operations
 
     /// <summary>
+    /// Delete a specific backup and its file from disk.
+    /// </summary>
+    [HttpDelete("{backupId}")]
+    public async Task<IActionResult> DeleteBackup(int backupId, CancellationToken cancellationToken)
+    {
+        var deleted = await _backupService.DeleteBackupAsync(backupId, cancellationToken);
+        if (!deleted)
+        {
+            return NotFound(new { error = "Backup not found" });
+        }
+        return Ok(new { message = "Backup deleted successfully" });
+    }
+
+    /// <summary>
     /// Prune expired backups based on retention policy.
     /// </summary>
     [HttpPost("prune")]
