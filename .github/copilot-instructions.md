@@ -47,29 +47,45 @@ HostCraft's fundamental purpose is to make HA/DR deployment as easy as possible 
 
 ---
 
-## ALPHA DEVELOPMENT GUIDELINES
+## DEVELOPMENT GUIDELINES
 
-**HostCraft is in ALPHA state with a single user. This means:**
+### 1. **NO BREAKING CHANGES BETWEEN DEPLOYMENTS**
 
-### 1. **No Backward Compatibility**
-- ❌ Do NOT keep deprecated code paths "for backward compatibility"
-- ❌ Do NOT add migration scripts - append to InitialCreate only
-- ✅ Refactor aggressively for clean, optimal architecture
-- ✅ Break things if needed - deployment is reinstalled every time
-- ✅ Go for INITIAL PERFECTION, not incremental evolution
+HostCraft is updated in production via GitHub Releases (rolling Docker image updates). Existing deployments MUST continue to work after every update.
+
+- ❌ NEVER introduce changes that break existing deployments
+- ❌ NEVER remove or rename API endpoints without a deprecation period
+- ❌ NEVER change database schema in ways that lose existing data
+- ❌ NEVER remove configuration keys that existing .env files rely on
+- ❌ NEVER change Docker volume mount paths or service names
+- ✅ DO add new EF Core migrations for schema changes (additive migrations)
+- ✅ DO ensure database migrations run automatically on startup and are backward-compatible
+- ✅ DO keep API contracts stable - new fields are optional, old fields remain
+- ✅ DO use rolling updates (start-first) so old and new versions coexist briefly
+- ✅ DO test that the update path works: old version → new version without data loss
+- ✅ DO version any breaking API changes behind new endpoints (e.g., /api/v2/...)
+
+**Update Flow (Production):**
+1. User clicks "Update Now" in Settings UI
+2. New Docker images are pulled from ghcr.io (GitHub Container Registry)
+3. Swarm performs rolling update (start-first, one replica at a time)
+4. EF Core migrations run automatically on new container startup
+5. Zero downtime - old replica serves traffic until new replica is healthy
 
 ### 2. **Database Migration Strategy**
-- ❌ NEVER create new migration files (Add*, Update*, etc.)
-- ✅ ALWAYS modify `20251218130443_InitialCreate.cs` directly
-- ✅ Goal: ONE clean migration that creates perfect schema
+- ✅ Create proper EF Core migrations for every schema change (`dotnet ef migrations add <Name>`)
+- ✅ Migrations MUST be additive and non-destructive (add columns, don't drop them)
+- ✅ Migrations run automatically on application startup (`context.Database.MigrateAsync()`)
+- ✅ New columns must have sensible defaults so existing rows aren't broken
 - ✅ Update `HostCraftDbContextModelSnapshot.cs` to match
-- ⚠️ This approach works because deployment is fresh installed each time
+- ❌ NEVER use `DROP COLUMN`, `DROP TABLE`, or destructive operations without explicit user request
+- ❌ NEVER modify existing migration files that have already been deployed
 
 ### 3. **Build Verification is MANDATORY**
 - ✅ Run `dotnet build` after EVERY code change
-- ✅ Show full build output proving all 6 projects compile
+- ✅ Show full build output proving all 7 projects compile
 - ✅ Verify 0 errors before stating work is complete
-- ⚠️ No exceptions - Alpha means we catch issues immediately
+- ⚠️ No exceptions - catch issues immediately
 
 ## CRITICAL BUILD VERIFICATION RULE
 
@@ -100,8 +116,8 @@ HostCraft's fundamental purpose is to make HA/DR deployment as easy as possible 
 
 ### Quality Expectations (always)
 - Every change should include performance and/or code-quality improvements, not just feature wiring
-- Avoid backward-compatibility shims; refactor forward (fresh reinstall workflow)
-- If any database DTO/entity shape changes, update InitialCreate migration and the model snapshot directly
+- Never introduce breaking changes - all changes must be backward-compatible with existing deployments
+- Database schema changes require proper EF Core migrations (additive, non-destructive)
 - Enforce separation of concerns: thin controllers, services for logic, repositories for persistence
 - Keep best-practice folder structure (Controllers, Models/DTOs, Validators, Services, Repositories) and prefer one class/record per file (except truly cohesive small enums/DTOs)
 - Avoid anti-patterns such as god classes, hidden static state, tight coupling to infrastructure, and inline DTOs in controllers

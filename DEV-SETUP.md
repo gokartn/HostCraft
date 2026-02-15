@@ -73,16 +73,23 @@ dotnet ef migrations add YourMigrationName --startup-project ../HostCraft.Api
 # Migrations will apply automatically when you restart the API
 ```
 
-### Schema Change Checklist (Alpha)
+### Schema Change Checklist
 
-HostCraft is still in alpha, so we keep a single canonical migration. Whenever you add or modify persisted entities:
+HostCraft is deployed via GitHub Releases and updated in-place. Existing deployments must continue to work after every update.
+
+Whenever you add or modify persisted entities:
 
 1. Update the entity or DbContext model.
-2. Edit `src/HostCraft.Infrastructure/Migrations/20251218130443_InitialCreate.cs` so fresh installs receive the new column/index defaults.
-3. Update `src/HostCraft.Infrastructure/Migrations/HostCraftDbContextModelSnapshot.cs` to mirror the schema.
-4. Run `dotnet build` from the solution root and confirm all six projects succeed.
+2. Create a **new** EF Core migration: `dotnet ef migrations add <DescriptiveName> --startup-project ../HostCraft.Api`
+3. Ensure the migration is **additive and non-destructive** (add columns with defaults, don't drop anything).
+4. Update `src/HostCraft.Infrastructure/Migrations/HostCraftDbContextModelSnapshot.cs` to mirror the schema.
+5. Run `dotnet build` from the solution root and confirm all seven projects succeed.
 
-Do **not** create incremental migrations until we exit the alpha phase.
+**Rules:**
+- **NEVER** modify existing migration files that have already been deployed.
+- **NEVER** use `DROP COLUMN`, `DROP TABLE`, or other destructive operations.
+- New columns **MUST** have sensible defaults so existing rows aren't broken.
+- Migrations run automatically on application startup via `context.Database.MigrateAsync()`.
 
 ### Resetting the Database
 

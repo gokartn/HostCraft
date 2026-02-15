@@ -395,8 +395,8 @@ docker-compose logs -f # View logs
 
 ### Quality Expectations (always)
 - Every change should improve performance and/or code clarity; avoid pure plumbing with no quality gain
-- Do not add backward-compatibility shims; refactor forward (fresh reinstall workflow)
-- If any database DTO/entity shape changes, update InitialCreate migration and the model snapshot directly
+- Never introduce breaking changes - all changes must be backward-compatible with existing deployments
+- Database schema changes require proper EF Core migrations (additive, non-destructive)
 - Uphold separation of concerns: controllers stay thin, services handle logic, repositories handle persistence
 - Follow best-practice folder structure (Controllers, Models/DTOs, Validators, Services, Repositories) and keep one class/record per file (small enums/DTOs may share when genuinely cohesive)
 - Avoid anti-patterns: god classes, tight coupling to infrastructure, hidden static state, and inline DTOs in controllers
@@ -408,8 +408,7 @@ docker-compose logs -f # View logs
 - **NEVER use dramatic discovery phrases** such as "I found the root cause", "I discovered the issue", "I identified the problem" - instead state findings directly and objectively
 - **NEVER use superlatives or emotional language** - maintain technical objectivity at all times
 - **NEVER suggest workarounds** - always fix the root cause in the code or install.sh
-- **NEVER consider backwards compatibility** - refactor forward, fresh reinstall workflow is expected
-- **NEVER create new migrations** - always update the InitialCreate migration directly
+- **NEVER introduce breaking changes** - existing deployments must continue to work after every update
 
 **Always:**
 - State findings directly and objectively (e.g., "The issue is..." not "I found the root cause...")
@@ -417,8 +416,8 @@ docker-compose logs -f # View logs
 - Be concise and professional in all communications
 - Disagree respectfully when necessary - honesty is more valuable than false agreement
 - Fix the actual problem in the codebase rather than suggesting workarounds
-- Update existing migrations directly rather than creating new ones
-- Assume fresh install workflow - no need to maintain compatibility with old versions
+- Create proper EF Core migrations for schema changes (additive, non-destructive)
+- Ensure all changes are backward-compatible with existing deployments
 
 ---
 
