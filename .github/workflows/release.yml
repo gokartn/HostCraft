@@ -219,7 +219,7 @@ jobs:
             uninstall.sh
             cleanup.sh
             docker-compose.yml
-            docker-compose.prod.yml
+            docker-compose.release.yml
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

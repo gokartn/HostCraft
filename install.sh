@@ -723,17 +723,40 @@ else
     echo "   [Image] Web: $WEB_IMAGE (will pull)"
     echo "   [Image] API: $API_IMAGE (will pull)"
 
-    # Download required files if not present
-    RELEASE_BASE_URL="https://github.com/gokartn/HostCraft/releases/download/v0.0.1-alpha"
+    # Determine latest release version from GitHub API
+    echo "   [Info] Fetching latest release version..."
+    LATEST_VERSION=$(curl -fsSL "https://api.github.com/repos/gokartn/HostCraft/releases/latest" 2>/dev/null | grep -oP '"tag_name"\s*:\s*"\K[^"]+' || true)
+
+    # Fall back to all releases (includes pre-releases) if no stable release exists
+    if [ -z "$LATEST_VERSION" ]; then
+        LATEST_VERSION=$(curl -fsSL "https://api.github.com/repos/gokartn/HostCraft/releases" 2>/dev/null | grep -oP '"tag_name"\s*:\s*"\K[^"]+' | head -1 || true)
+    fi
+
+    if [ -n "$LATEST_VERSION" ]; then
+        echo "   [OK] Latest release: $LATEST_VERSION"
+        RELEASE_BASE_URL="https://github.com/gokartn/HostCraft/releases/download/$LATEST_VERSION"
+        # Set versioned images
+        VERSION_TAG="${LATEST_VERSION#v}"  # Strip leading 'v'
+        WEB_IMAGE="ghcr.io/gokartn/hostcraft-web:${VERSION_TAG}"
+        API_IMAGE="ghcr.io/gokartn/hostcraft-api:${VERSION_TAG}"
+        echo "   [Image] Web: $WEB_IMAGE"
+        echo "   [Image] API: $API_IMAGE"
+    else
+        echo "   [Warn] Could not determine latest release - using 'latest' tag"
+        RELEASE_BASE_URL="https://github.com/gokartn/HostCraft/releases/latest/download"
+    fi
 
     if [ ! -f "docker-compose.yml" ]; then
         echo "   [Download] docker-compose.yml..."
-        # Download release-specific compose file (no build sections)
-        if curl -fsSL -o docker-compose.yml "$RELEASE_BASE_URL/docker-compose.release.yml"; then
-            echo "   [OK] docker-compose.yml downloaded"
+        # Try downloading from release assets first (release compose has no build sections)
+        if curl -fsSL -o docker-compose.yml "$RELEASE_BASE_URL/docker-compose.release.yml" 2>/dev/null; then
+            echo "   [OK] docker-compose.yml downloaded from release"
+        # Fall back to raw file from main branch
+        elif curl -fsSL -o docker-compose.yml "https://raw.githubusercontent.com/gokartn/HostCraft/main/docker-compose.release.yml" 2>/dev/null; then
+            echo "   [OK] docker-compose.yml downloaded from repository"
         else
             echo "   [Error] Failed to download docker-compose.yml"
-            echo "   [Error] Please download manually from: $RELEASE_BASE_URL/docker-compose.release.yml"
+            echo "   [Error] Please download manually from: https://github.com/gokartn/HostCraft"
             exit 1
         fi
     fi
