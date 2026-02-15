@@ -12,13 +12,13 @@ public class UpdateController : ControllerBase
 {
     private readonly IUpdateService _updateService;
     private readonly ILogger<UpdateController> _logger;
-    
+
     public UpdateController(IUpdateService updateService, ILogger<UpdateController> logger)
     {
         _updateService = updateService;
         _logger = logger;
     }
-    
+
     [HttpGet("check")]
     public async Task<ActionResult<UpdateInfo>> CheckForUpdates()
     {
@@ -33,7 +33,7 @@ public class UpdateController : ControllerBase
             return StatusCode(500, new { error = "Failed to check for updates" });
         }
     }
-    
+
     [HttpGet("version")]
     public ActionResult<VersionInfo> GetVersion()
     {
@@ -52,28 +52,48 @@ public class UpdateController : ControllerBase
             return StatusCode(500, new { error = "Failed to get version" });
         }
     }
-    
+
     [HttpPost("trigger")]
-    public async Task<ActionResult> TriggerUpdate([FromBody] TriggerUpdateRequest request)
+    public async Task<ActionResult<UpdateTriggerResult>> TriggerUpdate([FromBody] TriggerUpdateRequest request)
     {
         try
         {
-            var success = await _updateService.TriggerUpdateAsync(request.Version);
-            
-            if (success)
+            _logger.LogInformation("Update to version {Version} requested", request.Version);
+            var result = await _updateService.TriggerUpdateAsync(request.Version);
+
+            if (result.Success)
             {
-                return Ok(new { message = "Update triggered successfully" });
+                return Ok(result);
             }
-            
-            return BadRequest(new { error = "Update trigger not implemented or failed" });
+
+            return BadRequest(result);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to trigger update");
-            return StatusCode(500, new { error = "Failed to trigger update" });
+            return StatusCode(500, new UpdateTriggerResult
+            {
+                Success = false,
+                Message = $"Failed to trigger update: {ex.Message}"
+            });
         }
     }
-    
+
+    [HttpGet("progress")]
+    public ActionResult<UpdateProgress> GetUpdateProgress()
+    {
+        try
+        {
+            var progress = _updateService.GetUpdateProgress();
+            return Ok(progress);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to get update progress");
+            return StatusCode(500, new { error = "Failed to get update progress" });
+        }
+    }
+
     private DateTime GetBuildDate()
     {
         try
