@@ -1,4 +1,5 @@
 using System.Linq;
+using System.Security.Cryptography;
 using System.Text.Json;
 using HostCraft.Core.Entities;
 using HostCraft.Core.Enums;
@@ -22,6 +23,8 @@ public class ApplicationManagementService : IApplicationManagementService
         private readonly IDeploymentRepository _deploymentRepository;
     private readonly IDockerService _dockerService;
     private readonly IDeploymentJobQueue _deploymentJobQueue;
+    private readonly IGitProviderService _gitProviderService;
+    private readonly ISystemSettingsService _systemSettingsService;
     private readonly ILogger<ApplicationManagementService> _logger;
 
     public ApplicationManagementService(
@@ -32,6 +35,8 @@ public class ApplicationManagementService : IApplicationManagementService
             IDeploymentRepository deploymentRepository,
             IDockerService dockerService,
         IDeploymentJobQueue deploymentJobQueue,
+        IGitProviderService gitProviderService,
+        ISystemSettingsService systemSettingsService,
         ILogger<ApplicationManagementService> logger)
     {
             _applicationRepository = applicationRepository;
@@ -41,6 +46,8 @@ public class ApplicationManagementService : IApplicationManagementService
             _deploymentRepository = deploymentRepository;
         _dockerService = dockerService;
         _deploymentJobQueue = deploymentJobQueue;
+        _gitProviderService = gitProviderService;
+        _systemSettingsService = systemSettingsService;
         _logger = logger;
     }
 
@@ -220,6 +227,12 @@ public class ApplicationManagementService : IApplicationManagementService
             // Queue deployment for background processing with retries and logging
             await _deploymentJobQueue.EnqueueAsync(new HostCraft.Core.Models.DeploymentJob(HostCraft.Core.Models.DeploymentJobType.Deploy, deployment.Id), cancellationToken);
 
+            // Register webhook on GitHub if auto-deploy is enabled for Git deployments
+            if (isGitDeployment && request.AutoDeployOnPush && request.GitProviderId.HasValue)
+            {
+                await RegisterWebhookForApplicationAsync(app, cancellationToken);
+            }
+
             _logger.LogInformation("Created application {AppName} (ID: {AppId}) with deployment {DeploymentId}",
                 app.Name, app.Id, deployment.Id);
 
@@ -234,7 +247,7 @@ public class ApplicationManagementService : IApplicationManagementService
 
     public async Task<ApplicationUpdateResult> UpdateApplicationAsync(int applicationId, ApplicationUpdateRequest request, CancellationToken cancellationToken = default)
     {
-        var app = await _applicationRepository.GetByIdWithServerAndEnvironmentAsync(applicationId, cancellationToken);
+        var app = await _applicationRepository.GetByIdWithAllRelationsAsync(applicationId, cancellationToken);
 
         if (app == null)
             return new ApplicationUpdateResult(false, "Application not found");
@@ -248,6 +261,9 @@ public class ApplicationManagementService : IApplicationManagementService
 
         try
         {
+            // Track AutoDeployOnPush change for webhook lifecycle
+            var previousAutoDeployOnPush = app.AutoDeployOnPush;
+
             // Update basic fields
             if (request.Name != null)
                 app.Name = request.Name;
@@ -315,6 +331,10 @@ public class ApplicationManagementService : IApplicationManagementService
                 app.BuildArgs = request.BuildArgs;
             if (request.AutoDeployOnPush.HasValue)
                 app.AutoDeployOnPush = request.AutoDeployOnPush.Value;
+            if (request.CloneSubmodules.HasValue)
+                app.CloneSubmodules = request.CloneSubmodules.Value;
+            if (request.EnableGitLfs.HasValue)
+                app.EnableGitLfs = request.EnableGitLfs.Value;
             if (request.EnablePreviewDeployments.HasValue)
                 app.EnablePreviewDeployments = request.EnablePreviewDeployments.Value;
             if (request.PreviewUrlTemplate != null)
@@ -343,6 +363,21 @@ public class ApplicationManagementService : IApplicationManagementService
 
             await _applicationRepository.UpdateAsync(app, cancellationToken);
 
+            // Handle webhook lifecycle when AutoDeployOnPush is toggled
+            if (request.AutoDeployOnPush.HasValue && app.SourceType == ApplicationSourceType.Git && app.GitProviderId.HasValue)
+            {
+                if (app.AutoDeployOnPush && !previousAutoDeployOnPush)
+                {
+                    // Toggled ON - register webhook
+                    await RegisterWebhookForApplicationAsync(app, cancellationToken);
+                }
+                else if (!app.AutoDeployOnPush && previousAutoDeployOnPush)
+                {
+                    // Toggled OFF - unregister webhook
+                    await UnregisterWebhookForApplicationAsync(app, cancellationToken);
+                }
+            }
+
             _logger.LogInformation("Updated application {AppId} - {AppName}", app.Id, app.Name);
 
             return new ApplicationUpdateResult(true, "Application updated successfully");
@@ -356,13 +391,19 @@ public class ApplicationManagementService : IApplicationManagementService
 
     public async Task<ApplicationDeletionResult> DeleteApplicationAsync(int applicationId, CancellationToken cancellationToken = default)
     {
-        var app = await _applicationRepository.GetByIdWithServerAndDeploymentsAsync(applicationId, cancellationToken);
+        var app = await _applicationRepository.GetByIdWithAllRelationsAsync(applicationId, cancellationToken);
 
         if (app == null)
             return new ApplicationDeletionResult(false, "Application not found");
 
         try
         {
+            // Unregister webhook from Git provider before deleting
+            if (app.SourceType == ApplicationSourceType.Git && app.GitProviderId.HasValue && app.AutoDeployOnPush)
+            {
+                await UnregisterWebhookForApplicationAsync(app, cancellationToken);
+            }
+
             // Remove running containers/services
             var latestDeployment = app.Deployments.OrderByDescending(d => d.StartedAt).FirstOrDefault();
             if (latestDeployment != null)
@@ -447,5 +488,93 @@ public class ApplicationManagementService : IApplicationManagementService
             _logger.LogError(ex, "Error scaling application {AppId} to {Replicas} replicas", applicationId, replicas);
             return new ApplicationScaleResult(false, "Failed to scale application", ErrorDetails: ex.Message);
         }
+    }
+
+    /// <summary>
+    /// Generate a webhook secret, construct the callback URL, register the webhook on the Git provider,
+    /// and persist the secret on the application entity.
+    /// </summary>
+    private async Task RegisterWebhookForApplicationAsync(Application app, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var webhookBaseUrl = await GetWebhookBaseUrlAsync(cancellationToken);
+            if (webhookBaseUrl == null)
+            {
+                _logger.LogWarning(
+                    "Cannot register webhook for application {AppName}: HostCraft domain is not configured in System Settings. " +
+                    "Configure a domain in Settings so GitHub can deliver push events.",
+                    app.Name);
+                return;
+            }
+
+            // Generate a cryptographically secure webhook secret
+            var webhookSecret = Convert.ToHexString(RandomNumberGenerator.GetBytes(32)).ToLowerInvariant();
+            var webhookUrl = $"{webhookBaseUrl}/api/webhooks/github/{app.Uuid}";
+
+            var registered = await _gitProviderService.RegisterWebhookAsync(app, webhookUrl, webhookSecret);
+            if (registered)
+            {
+                app.WebhookSecret = webhookSecret;
+                await _applicationRepository.UpdateAsync(app, cancellationToken);
+                _logger.LogInformation("Registered webhook for application {AppName} at {WebhookUrl}", app.Name, webhookUrl);
+            }
+            else
+            {
+                _logger.LogWarning("Failed to register webhook for application {AppName}. Auto-deploy on push will not work until the webhook is registered.", app.Name);
+            }
+        }
+        catch (Exception ex)
+        {
+            // Webhook registration failure should not block app creation/update
+            _logger.LogError(ex, "Error registering webhook for application {AppName}. Auto-deploy on push will not work until the webhook is registered.", app.Name);
+        }
+    }
+
+    /// <summary>
+    /// Unregister the webhook from the Git provider and clear the secret.
+    /// </summary>
+    private async Task UnregisterWebhookForApplicationAsync(Application app, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _gitProviderService.UnregisterWebhookAsync(app);
+            app.WebhookSecret = null;
+            await _applicationRepository.UpdateAsync(app, cancellationToken);
+            _logger.LogInformation("Unregistered webhook for application {AppName}", app.Name);
+        }
+        catch (Exception ex)
+        {
+            // Webhook unregistration failure should not block app update/deletion
+            _logger.LogError(ex, "Error unregistering webhook for application {AppName}", app.Name);
+        }
+    }
+
+    /// <summary>
+    /// Get the external base URL for HostCraft from system settings.
+    /// Returns null if no domain is configured.
+    /// </summary>
+    private async Task<string?> GetWebhookBaseUrlAsync(CancellationToken cancellationToken)
+    {
+        var settings = await _systemSettingsService.GetSettingsAsync(cancellationToken);
+        if (settings == null)
+            return null;
+
+        // Prefer the API domain if configured, otherwise use the main HostCraft domain
+        // (the Web UI proxies /api/* to the API via YARP)
+        var domain = settings.HostCraftApiDomain ?? settings.HostCraftDomain;
+        if (string.IsNullOrWhiteSpace(domain))
+            return null;
+
+        var scheme = settings.HostCraftEnableHttps ? "https" : "http";
+
+        // Handle domains that already include scheme
+        if (domain.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+            domain.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+        {
+            return domain.TrimEnd('/');
+        }
+
+        return $"{scheme}://{domain.TrimEnd('/')}";
     }
 }

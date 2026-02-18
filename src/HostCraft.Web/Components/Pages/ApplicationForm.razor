@@ -1038,6 +1038,10 @@
                     GitBranch = model.GitBranch,
                     GitProviderId = model.GitProviderId,
                     AutoDeployOnPush = model.AutoDeployOnPush,
+                    CloneSubmodules = model.CloneSubmodules,
+                    EnableGitLfs = model.EnableGitLfs,
+                    EnablePreviewDeployments = model.EnablePreviewDeployments,
+                    PreviewUrlTemplate = model.PreviewUrlTemplate,
                     EnvironmentVariables = envVars.Where(e => !string.IsNullOrWhiteSpace(e.Key)).ToDictionary(e => e.Key, e => e.Value)
                 };
 
@@ -1410,6 +1414,10 @@
         public string? GitBranch { get; set; }
         public int? GitProviderId { get; set; }
         public bool? AutoDeployOnPush { get; set; }
+        public bool? CloneSubmodules { get; set; }
+        public bool? EnableGitLfs { get; set; }
+        public bool? EnablePreviewDeployments { get; set; }
+        public string? PreviewUrlTemplate { get; set; }
         public Dictionary<string, string>? EnvironmentVariables { get; set; }
         public string? TraefikLabelOverrides { get; set; }
     }

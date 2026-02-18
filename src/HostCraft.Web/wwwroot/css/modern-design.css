@@ -2250,6 +2250,10 @@ body {
     border-left-color: var(--accent-primary);
 }
 
+.deployments-list.compact .deployment-item.status-queued {
+    border-left-color: var(--accent-warning, #f59e0b);
+}
+
 .deployment-row {
     display: flex;
     align-items: center;

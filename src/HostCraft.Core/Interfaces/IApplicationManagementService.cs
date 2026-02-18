@@ -92,6 +92,8 @@ public record ApplicationUpdateRequest(
     string? RegistryUsername,
     string? RegistryPassword,
     bool? AutoDeployOnPush,
+    bool? CloneSubmodules,
+    bool? EnableGitLfs,
     bool? EnablePreviewDeployments,
     string? PreviewUrlTemplate,
     int? MemoryLimitMb,

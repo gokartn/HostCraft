@@ -99,6 +99,51 @@
                     </div>
                 }
 
+                @* Active Deployment Progress - shown at top when a deployment is in progress *@
+                @if (activeDeployment != null)
+                {
+                    <div class="card compact-card active-deployment-card">
+                        <div class="card-header active-deployment-header">
+                            <div class="active-deployment-title">
+                                <span class="building-indicator"></span>
+                                <h3>Deployment In Progress</h3>
+                                <span class="status-badge status-running" style="font-size: 0.75rem;">Live</span>
+                            </div>
+                            <div class="active-deployment-meta">
+                                <span class="pill">Started @activeDeployment.StartedAt.ToString("HH:mm:ss")</span>
+                            </div>
+                        </div>
+                        <div class="active-deployment-logs">
+                            <div class="build-logs-container" id="active-deployment-logs-container">
+                                @if (buildLogs.Count == 0)
+                                {
+                                    <div class="logs-empty">
+                                        @if (activeDeployment.Status == DeploymentStatus.Queued)
+                                        {
+                                            <span>Waiting for build to start...</span>
+                                        }
+                                        else
+                                        {
+                                            <span>Fetching logs...</span>
+                                        }
+                                    </div>
+                                }
+                                else
+                                {
+                                    <pre class="build-logs-content">@foreach (var log in buildLogs)
+{<span class="log-line @GetLogLevelClass(log.LogLevel)">[@log.Timestamp.ToString("HH:mm:ss")] @log.Message</span>
+}</pre>
+                                }
+                            </div>
+                            <div class="logs-toolbar">
+                                <button class="btn btn-sm btn-secondary" @onclick="ToggleAutoScroll">
+                                    @(autoScrollEnabled ? "Disable Auto-scroll" : "Enable Auto-scroll")
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                }
+
                 @if (HasRuntimeTarget())
                 {
                     <div class="card compact-card monitoring-card" id="monitoring">
@@ -574,35 +619,37 @@
                     }
                 </div>
 
-                @* Build Logs Panel - Shows when deployment is in progress or selected *@
-                @if (selectedDeployment != null || activeDeployment != null)
+                @* Build Logs Panel - Shows when a deployment from history is selected *@
+                @if (selectedDeployment != null)
                 {
-                    var displayDeployment = selectedDeployment ?? activeDeployment;
                     <div class="card compact-card build-logs-card">
                         <div class="card-header">
                             <h3>
-                                @if (displayDeployment!.Status == DeploymentStatus.Running || displayDeployment.Status == DeploymentStatus.Queued)
+                                @if (selectedDeployment.Status == DeploymentStatus.Running || selectedDeployment.Status == DeploymentStatus.Queued)
                                 {
                                     <span class="building-indicator"></span>
                                 }
                                 Build Logs
-                                @if (displayDeployment.Status == DeploymentStatus.Running)
+                                @if (selectedDeployment.Status == DeploymentStatus.Running)
                                 {
                                     <span class="status-badge status-running" style="margin-left: 0.5rem; font-size: 0.75rem;">Live</span>
                                 }
                             </h3>
                             <div class="logs-actions">
-                                @if (selectedDeployment != null)
+                                @if (selectedDeployment.Status == DeploymentStatus.Running || selectedDeployment.Status == DeploymentStatus.Queued)
                                 {
-                                    <button class="btn btn-sm btn-secondary" @onclick="ClearSelectedDeployment">Close</button>
+                                    <button class="btn btn-sm btn-secondary" @onclick="ToggleAutoScroll">
+                                        @(autoScrollEnabled ? "Disable Auto-scroll" : "Enable Auto-scroll")
+                                    </button>
                                 }
+                                <button class="btn btn-sm btn-secondary" @onclick="ClearSelectedDeployment">Close</button>
                             </div>
                         </div>
-                        <div class="build-logs-container">
+                        <div class="build-logs-container" id="selected-deployment-logs-container">
                             @if (buildLogs.Count == 0)
                             {
                                 <div class="logs-empty">
-                                    @if (displayDeployment.Status == DeploymentStatus.Queued)
+                                    @if (selectedDeployment.Status == DeploymentStatus.Queued)
                                     {
                                         <span>Waiting for build to start...</span>
                                     }
@@ -1242,6 +1289,50 @@
         outline: 2px solid #6366f1;
         outline-offset: 2px;
     }
+
+    /* Active deployment card */
+    .active-deployment-card {
+        border: 1px solid rgba(99, 102, 241, 0.35);
+        background: linear-gradient(145deg, #0b1220 0%, #0f172a 100%);
+        box-shadow: 0 0 0 1px rgba(99, 102, 241, 0.15), 0 12px 30px rgba(0, 0, 0, 0.35);
+        margin-bottom: 1rem;
+    }
+
+    .active-deployment-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 0.75rem;
+        flex-wrap: wrap;
+    }
+
+    .active-deployment-title {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+
+    .active-deployment-meta {
+        display: flex;
+        gap: 0.5rem;
+    }
+
+    .active-deployment-logs {
+        position: relative;
+    }
+
+    .active-deployment-logs .build-logs-container {
+        max-height: 300px;
+    }
+
+    .logs-toolbar {
+        display: flex;
+        justify-content: flex-end;
+        padding: 0.5rem 0.75rem;
+        border-top: 1px solid #1f2937;
+        background: #0a0f1c;
+        border-radius: 0 0 var(--radius-md, 12px) var(--radius-md, 12px);
+    }
 </style>
 
 @code {
@@ -1276,6 +1367,7 @@
     private List<DeploymentLogDto> buildLogs = new();
     private int lastLogId = 0;
     private System.Timers.Timer? logPollingTimer;
+    private bool autoScrollEnabled = true;
 
     // Runtime monitoring state
     private ApplicationMetricsDto? runtimeMetrics;
@@ -1346,7 +1438,11 @@
                     buildLogs.Add(log);
                     if (log.Id > lastLogId) lastLogId = log.Id;
                 }
-                await InvokeAsync(StateHasChanged);
+                await InvokeAsync(async () =>
+                {
+                    StateHasChanged();
+                    await ScrollLogsToBottomAsync();
+                });
             }
 
             // Check deployment status
@@ -1489,6 +1585,35 @@
             buildLogs.Clear();
         }
         StateHasChanged();
+    }
+
+    private void ToggleAutoScroll()
+    {
+        autoScrollEnabled = !autoScrollEnabled;
+        if (autoScrollEnabled)
+        {
+            _ = ScrollLogsToBottomAsync();
+        }
+    }
+
+    private async Task ScrollLogsToBottomAsync()
+    {
+        if (!autoScrollEnabled) return;
+        try
+        {
+            await Js.InvokeVoidAsync("eval", @"
+                (function() {
+                    var containers = document.querySelectorAll('.build-logs-container');
+                    containers.forEach(function(el) {
+                        el.scrollTop = el.scrollHeight;
+                    });
+                })();
+            ");
+        }
+        catch
+        {
+            // JS interop may fail during disposal
+        }
     }
 
     private void BackToApplications()

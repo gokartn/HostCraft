@@ -34,9 +34,9 @@ public class DeploymentOrchestrator : IDeploymentOrchestrator
         var dockerService = scope.ServiceProvider.GetRequiredService<IDockerService>();
         var proxyService = scope.ServiceProvider.GetRequiredService<IProxyService>();
         var logService = scope.ServiceProvider.GetRequiredService<IDeploymentLogService>();
-        
+
         var deployment = await deploymentRepository.GetByIdWithApplicationDetailsAsync(deploymentId, cancellationToken);
-        
+
         if (deployment == null)
         {
             _logger.LogError("Deployment {DeploymentId} not found", deploymentId);
@@ -50,7 +50,7 @@ public class DeploymentOrchestrator : IDeploymentOrchestrator
             // Log deployment start
             await logService.AddLogAsync(deploymentId, $"Starting deployment for {app.Name}", "Info");
             await logService.AddLogAsync(deploymentId, $"Target server: {app.Server.Name} ({app.Server.Host})", "Info");
-            _logger.LogInformation("Starting deployment {DeploymentId} for application {AppName} on server {ServerName}", 
+            _logger.LogInformation("Starting deployment {DeploymentId} for application {AppName} on server {ServerName}",
                 deploymentId, app.Name, app.Server.Name);
 
             // Docker Swarm Best Practice: Services can only be created on manager nodes
@@ -71,51 +71,116 @@ public class DeploymentOrchestrator : IDeploymentOrchestrator
             var containerName = app.ServiceName;
             var registryAuth = GetRegistryAuth(app);
 
-            // Clean up previous deployment resources
-            await CleanupPreviousDeploymentAsync(app, deployment, containerName, dockerService, logService, deploymentId, cancellationToken);
+            // ── Safe deployment: build/pull image FIRST, keep old running ──
+            // The previous deployment stays alive until the new one is confirmed working.
+            await logService.AddLogAsync(deploymentId, "Safe deployment: keeping current version running during build...", "Info");
 
-            // Determine and prepare the Docker image
+            // Determine and prepare the Docker image (clone + build or pull)
             string imageToUse = await PrepareImageAsync(app, deployment, containerName, dockerService, logService, scope, registryAuth, deploymentId, cancellationToken);
 
             // Prepare environment and labels
             var envVars = await GetEnvironmentVariablesAsync(app.Id, scope, cancellationToken);
             var labels = BuildApplicationLabels(app, deployment);
             var traefikLabels = HostCraft.Infrastructure.Proxy.TraefikLabelBuilder.BuildLabels(app, "hostcraft_hostcraft-network");
-            
+
             foreach (var label in traefikLabels)
             {
                 labels[label.Key] = label.Value;
             }
-            
+
             await logService.AddLogAsync(deploymentId, $"Generated {traefikLabels.Count} Traefik labels", "Info");
 
             // Configure networks
             var networks = new List<string>();
-            
+
             // Add Traefik network if domains are configured
             if (traefikLabels.Count > 0 && !networks.Contains("hostcraft_hostcraft-network"))
             {
                 networks.Add("hostcraft_hostcraft-network");
                 await logService.AddLogAsync(deploymentId, "Adding hostcraft_hostcraft-network network for domain routing", "Info");
             }
-            
+
             // Ensure project-specific network exists and add it
             var projectNetworkName = $"{HostCraft.Infrastructure.Docker.DockerNameHelper.NormalizeNetworkName(app.Project.Name)}-network";
             await dockerService.EnsureNetworkExistsAsync(app.Server, projectNetworkName, cancellationToken);
-            
+
             if (!networks.Contains(projectNetworkName))
             {
                 networks.Add(projectNetworkName);
                 await logService.AddLogAsync(deploymentId, $"Adding project network: {projectNetworkName}", "Info");
             }
 
-            // Deploy to Docker (Swarm or standalone)
+            // ── Image is ready. Now deploy the new version. ──
+            // For Swarm services: update-in-place handles rolling updates natively.
+            // For standalone containers: deploy with a staging name, verify, then swap.
+
             if (app.Server.IsSwarm)
             {
                 await DeploySwarmServiceAsync(app, deployment, imageToUse, containerName, envVars, labels, networks, traefikLabels.Count, registryAuth, dockerService, logService, deploymentId, cancellationToken);
             }
             else
             {
+                // Safe standalone deployment: use a staging container name
+                var stagingName = $"{containerName}-staging-{deployment.Id}";
+                await logService.AddLogAsync(deploymentId, $"Deploying new version as staging container: {stagingName}", "Info");
+
+                await DeployStandaloneContainerAsync(app, deployment, imageToUse, stagingName, envVars, labels, networks, dockerService, logService, deploymentId, cancellationToken);
+
+                // Verify staging container is running
+                await logService.AddLogAsync(deploymentId, "Verifying new container is running...", "Info");
+                await Task.Delay(2000, cancellationToken); // Brief stabilisation window
+
+                var allContainers = await dockerService.ListContainersAsync(app.Server, false);
+                var stagingContainer = allContainers.FirstOrDefault(c =>
+                    c.Name.TrimStart('/').Equals(stagingName, StringComparison.OrdinalIgnoreCase));
+
+                if (stagingContainer == null || !string.Equals(stagingContainer.State, "running", StringComparison.OrdinalIgnoreCase))
+                {
+                    // New container failed to start - clean it up and abort
+                    await logService.AddLogAsync(deploymentId, "ERROR: New container failed to start. Rolling back - keeping current version running.", "Error");
+                    try
+                    {
+                        if (stagingContainer != null)
+                        {
+                            await dockerService.StopContainerAsync(app.Server, stagingContainer.Id);
+                            await dockerService.RemoveContainerAsync(app.Server, stagingContainer.Id);
+                        }
+                        // Also try by deployment's container ID in case listing didn't find it
+                        else if (!string.IsNullOrEmpty(deployment.ContainerId))
+                        {
+                            try { await dockerService.StopContainerAsync(app.Server, deployment.ContainerId); } catch { }
+                            try { await dockerService.RemoveContainerAsync(app.Server, deployment.ContainerId); } catch { }
+                        }
+                    }
+                    catch (Exception cleanupEx)
+                    {
+                        _logger.LogWarning(cleanupEx, "Failed to clean up failed staging container");
+                    }
+
+                    throw new InvalidOperationException("New container failed to start. Previous version is still running.");
+                }
+
+                await logService.AddLogAsync(deploymentId, "New container verified running. Removing old version...", "Success");
+
+                // Now safe to remove old deployment resources
+                await CleanupPreviousDeploymentAsync(app, deployment, containerName, dockerService, logService, deploymentId, cancellationToken);
+
+                // Rename staging container to the real name by stopping staging, removing any
+                // orphan with the target name, and recreating with the correct name.
+                // Docker doesn't support rename over API in all backends, so we stop staging
+                // and redeploy with the final name using the same image.
+                await logService.AddLogAsync(deploymentId, "Promoting staging container to production...", "Info");
+                try
+                {
+                    await dockerService.StopContainerAsync(app.Server, stagingContainer.Id);
+                    await dockerService.RemoveContainerAsync(app.Server, stagingContainer.Id);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to remove staging container during promotion");
+                }
+
+                // Deploy final container with the correct name
                 await DeployStandaloneContainerAsync(app, deployment, imageToUse, containerName, envVars, labels, networks, dockerService, logService, deploymentId, cancellationToken);
             }
 
@@ -294,10 +359,31 @@ public class DeploymentOrchestrator : IDeploymentOrchestrator
         var buildContext = app.BuildContext ?? ".";
         var fullBuildContext = buildContext == "." ? clonePath : Path.Combine(clonePath, buildContext.TrimStart('.', '/', '\\'));
 
+        // Parse build args from comma-separated KEY=VALUE format
+        Dictionary<string, string>? buildArgs = null;
+        if (!string.IsNullOrWhiteSpace(app.BuildArgs))
+        {
+            buildArgs = new Dictionary<string, string>();
+            foreach (var arg in app.BuildArgs.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                var eqIndex = arg.IndexOf('=');
+                if (eqIndex > 0)
+                {
+                    buildArgs[arg[..eqIndex]] = arg[(eqIndex + 1)..];
+                }
+            }
+        }
+
+        var buildTarget = string.IsNullOrWhiteSpace(app.DockerBuildTarget) ? null : app.DockerBuildTarget;
+
         await logService.AddLogAsync(deploymentId, $"Building Docker image: {imageName}", "Info");
         await logService.AddLogAsync(deploymentId, $"Dockerfile: {dockerfilePath}", "Info");
+        if (buildTarget != null)
+            await logService.AddLogAsync(deploymentId, $"Build target: {buildTarget}", "Info");
+        if (buildArgs?.Count > 0)
+            await logService.AddLogAsync(deploymentId, $"Build args: {string.Join(", ", buildArgs.Keys)}", "Info");
 
-        var buildRequest = new BuildImageRequest(dockerfilePath, fullBuildContext, imageName, null);
+        var buildRequest = new BuildImageRequest(dockerfilePath, fullBuildContext, imageName, buildArgs, buildTarget);
         var buildProgress = new Progress<string>(async msg =>
         {
             if (!string.IsNullOrWhiteSpace(msg))

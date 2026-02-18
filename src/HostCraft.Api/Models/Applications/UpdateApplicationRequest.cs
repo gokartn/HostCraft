@@ -36,6 +36,12 @@ public record UpdateApplicationRequest(
     string? GitBranch = null,
     int? GitProviderId = null,
     bool? AutoDeployOnPush = null,
+    bool? CloneSubmodules = null,
+    bool? EnableGitLfs = null,
+
+    // Preview deployments
+    bool? EnablePreviewDeployments = null,
+    string? PreviewUrlTemplate = null,
 
     // Resource limits
     int? MemoryLimitMb = null,

@@ -66,11 +66,11 @@ public class WebhookService : IWebhookService
             return new WebhookProcessingResult(false, "Branch not configured for deployment");
         }
 
-        // Check if auto-deploy is enabled
-        if (!application.AutoDeploy || !application.AutoDeployOnPush)
+        // Check if auto-deploy on push is enabled
+        if (!application.AutoDeployOnPush)
         {
-            _logger.LogInformation("Auto-deploy disabled for {App}", application.Name);
-            return new WebhookProcessingResult(false, "Auto-deploy disabled");
+            _logger.LogInformation("Auto-deploy on push disabled for {App}", application.Name);
+            return new WebhookProcessingResult(false, "Auto-deploy on push disabled");
         }
 
         // Get commit info
