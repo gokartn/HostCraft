@@ -39,8 +39,23 @@ echo "🗑️  Step 1: Stopping and removing HostCraft..."
 if [ "$SWARM_ACTIVE" = "true" ]; then
     echo "   Using Docker Stack (Swarm mode)..."
     docker stack rm hostcraft 2>/dev/null || true
-    echo "   Waiting for services to stop..."
-    sleep 15
+    echo "   Waiting for services to fully stop..."
+    max_wait=60
+    elapsed=0
+    while [ $elapsed -lt $max_wait ]; do
+        remaining=$(docker service ls --filter "label=com.docker.stack.namespace=hostcraft" -q 2>/dev/null | wc -l)
+        if [ "$remaining" -eq 0 ]; then
+            echo "   ✅ All services removed"
+            sleep 5
+            break
+        fi
+        echo "   ... ${remaining} service(s) still draining (${elapsed}s/${max_wait}s)"
+        sleep 3
+        elapsed=$((elapsed + 3))
+    done
+    if [ $elapsed -ge $max_wait ]; then
+        echo "   ⚠️  Timed out waiting for services. Continuing anyway."
+    fi
 else
     echo "   Using Docker Compose (standalone mode)..."
     if [ -f docker-compose.yml ]; then
@@ -62,7 +77,16 @@ docker volume ls --filter "name=traefik" --format "{{.Name}}" | xargs -r docker 
 
 echo ""
 echo "🗑️  Step 4: Removing networks..."
-docker network ls --filter "name=hostcraft" --format "{{.Name}}" | xargs -r docker network rm 2>/dev/null || true
+for attempt in 1 2 3; do
+    remaining_nets=$(docker network ls --filter "name=hostcraft" --format "{{.Name}}" 2>/dev/null | wc -l)
+    if [ "$remaining_nets" -eq 0 ]; then
+        break
+    fi
+    docker network ls --filter "name=hostcraft" --format "{{.Name}}" | xargs -r docker network rm 2>/dev/null || true
+    if [ $attempt -lt 3 ]; then
+        sleep 5
+    fi
+done
 
 echo ""
 echo "🗑️  Step 5: Removing application data..."

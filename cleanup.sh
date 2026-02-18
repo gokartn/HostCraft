@@ -49,16 +49,38 @@ fi
 echo ""
 
 echo "🗑️  Step 1: Stopping and removing Docker stacks..."
+
+# Function to wait for a stack's services and containers to fully drain
+wait_for_stack_removal() {
+    local stack_name="$1"
+    local max_wait=60
+    local elapsed=0
+
+    echo "   Waiting for ${stack_name} stack services to fully stop..."
+    while [ $elapsed -lt $max_wait ]; do
+        # Check if any services from this stack still exist
+        remaining=$(docker service ls --filter "label=com.docker.stack.namespace=${stack_name}" -q 2>/dev/null | wc -l)
+        if [ "$remaining" -eq 0 ]; then
+            echo "   ✅ All ${stack_name} services removed"
+            # Extra wait for container cleanup and network detach
+            sleep 5
+            return 0
+        fi
+        echo "   ... ${remaining} service(s) still draining (${elapsed}s/${max_wait}s)"
+        sleep 3
+        elapsed=$((elapsed + 3))
+    done
+    echo "   ⚠️  Timed out waiting for ${stack_name} services to stop. Continuing anyway."
+}
+
 if docker stack ls 2>/dev/null | grep -q hostcraft; then
     docker stack rm hostcraft
-    echo "   Waiting for HostCraft stack removal to complete..."
-    sleep 10
+    wait_for_stack_removal "hostcraft"
 fi
 
 if docker stack ls 2>/dev/null | grep -q traefik; then
     docker stack rm traefik
-    echo "   Waiting for Traefik stack removal to complete..."
-    sleep 10
+    wait_for_stack_removal "traefik"
 fi
 
 echo ""
@@ -82,8 +104,19 @@ docker volume ls --filter "name=traefik" --format "{{.Name}}" | xargs -r docker 
 
 echo ""
 echo "🗑️  Step 6: Removing all HostCraft networks..."
-docker network ls --filter "name=hostcraft" --format "{{.Name}}" | xargs -r docker network rm 2>/dev/null || true
-docker network ls --filter "name=traefik-public" --format "{{.Name}}" | xargs -r docker network rm 2>/dev/null || true
+# Retry network removal - Docker may need a moment after services fully detach
+for attempt in 1 2 3; do
+    remaining_nets=$(docker network ls --filter "name=hostcraft" --format "{{.Name}}" 2>/dev/null | wc -l)
+    remaining_traefik=$(docker network ls --filter "name=traefik-public" --format "{{.Name}}" 2>/dev/null | wc -l)
+    if [ "$remaining_nets" -eq 0 ] && [ "$remaining_traefik" -eq 0 ]; then
+        break
+    fi
+    docker network ls --filter "name=hostcraft" --format "{{.Name}}" | xargs -r docker network rm 2>/dev/null || true
+    docker network ls --filter "name=traefik-public" --format "{{.Name}}" | xargs -r docker network rm 2>/dev/null || true
+    if [ $attempt -lt 3 ]; then
+        sleep 5
+    fi
+done
 
 echo ""
 echo "🐝 Step 7: Docker Swarm Cleanup..."
