@@ -947,6 +947,12 @@ echo "[Deploy] Starting HostCraft..."
 if [ "$SWARM_ACTIVE" = "true" ]; then
     echo "   [Mode] Deploying as Docker Swarm stack..."
 
+    # Export .env variables so docker stack deploy can substitute them.
+    # Unlike docker compose, docker stack deploy does NOT read .env files automatically.
+    set -a
+    source .env
+    set +a
+
     # Deploy with registry and traefik profiles
     docker stack deploy -c docker-compose.yml --with-registry-auth hostcraft
 

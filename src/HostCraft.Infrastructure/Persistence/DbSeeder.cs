@@ -1,3 +1,4 @@
+using Docker.DotNet;
 using HostCraft.Core.Entities;
 using HostCraft.Core.Enums;
 using Microsoft.EntityFrameworkCore;
@@ -8,6 +9,9 @@ namespace HostCraft.Infrastructure.Persistence;
 
 public static class DbSeeder
 {
+    private record DockerSwarmStatus(bool IsAvailable, bool IsSwarmActive, bool IsSwarmManager,
+        string? SwarmNodeId = null, string? SwarmId = null, string? SwarmNodeAddress = null,
+        string? SwarmNodeState = null, string? SwarmNodeAvailability = null, string? Hostname = null);
     public static async Task SeedAsync(HostCraftDbContext context)
     {
         // NOTE: We no longer seed a default user here.
@@ -140,42 +144,51 @@ public static class DbSeeder
         {
             return;
         }
-        
+
         // Check if localhost server already exists
-        var localhostExists = await context.Servers.AnyAsync(s => 
+        var localhostExists = await context.Servers.AnyAsync(s =>
             s.Host == "localhost" || s.Host == "127.0.0.1");
-        
+
         if (localhostExists)
         {
             return;
         }
-        
-        // Check if Docker is available on localhost
-        var isDockerAvailable = IsDockerAvailable();
-        
-        if (!isDockerAvailable)
+
+        // Detect Docker availability and Swarm status via Docker.DotNet (socket-based).
+        // The docker CLI is not available inside the container, but the Docker socket
+        // (/var/run/docker.sock) is mounted from the host.
+        var status = await DetectDockerSwarmStatusAsync();
+
+        if (!status.IsAvailable)
         {
-            // Don't auto-configure if Docker is not available
             return;
         }
-        
-        // Detect if Docker Swarm is active and if this node is a manager
-        // This auto-detection is more reliable than environment variables
-        var isSwarmManager = IsSwarmActive() && IsSwarmManager();
-        
-        // Create localhost server entry
+
+        var serverType = status.IsSwarmActive && status.IsSwarmManager
+            ? ServerType.SwarmManager
+            : status.IsSwarmActive
+                ? ServerType.SwarmWorker
+                : ServerType.Standalone;
+
         var localhostServer = new Server
         {
             Name = "Local Server",
             Host = "localhost",
-            Port = 22, // Not actually used for localhost
+            Port = 22,
             Username = Environment.UserName,
             Status = ServerStatus.Online,
-            Type = isSwarmManager ? ServerType.SwarmManager : ServerType.Standalone,
+            Type = serverType,
             ProxyType = ProxyType.None,
-            RegionId = null, // No region assigned by default
-            PrivateKeyId = null, // No SSH key needed for localhost
-            IsSwarmManager = isSwarmManager,
+            RegionId = null,
+            PrivateKeyId = null,
+            IsSwarmManager = status.IsSwarmActive && status.IsSwarmManager,
+            IsSwarmWorker = status.IsSwarmActive && !status.IsSwarmManager,
+            ActualHostname = status.Hostname,
+            SwarmNodeId = status.SwarmNodeId,
+            SwarmId = status.SwarmId,
+            SwarmAdvertiseAddress = status.SwarmNodeAddress,
+            SwarmNodeState = status.SwarmNodeState,
+            SwarmNodeAvailability = status.SwarmNodeAvailability,
             CreatedAt = DateTime.UtcNow
         };
 
@@ -189,134 +202,87 @@ public static class DbSeeder
         {
             // Duplicate server - race condition between API replicas
             // This is expected and safe to ignore
-            // The unique constraint ensures only one localhost server exists
         }
     }
-    
-    private static bool IsDockerAvailable()
+
+    /// <summary>
+    /// Detects Docker availability and Swarm status using Docker.DotNet via the mounted socket.
+    /// This works inside containers where the docker CLI is not installed but the socket is mounted.
+    /// Falls back to the LOCALHOST_IS_SWARM_MANAGER env var if Docker.DotNet fails.
+    /// </summary>
+    private static async Task<DockerSwarmStatus> DetectDockerSwarmStatusAsync()
     {
         try
         {
-            // IMPORTANT: When running in container, check if HOST's Docker socket is mounted
-            // The mounted /var/run/docker.sock gives us access to the HOST's Docker
             var isWindows = RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
-            var dockerSocket = isWindows ? "//./pipe/docker_engine" : "/var/run/docker.sock";
+            var dockerUri = isWindows
+                ? new Uri("npipe://./pipe/docker_engine")
+                : new Uri("unix:///var/run/docker.sock");
 
-            if (isWindows)
+            // Quick availability check: on Linux, verify the socket file exists
+            if (!isWindows && !File.Exists("/var/run/docker.sock"))
             {
-                // On Windows, check if named pipe exists (difficult to check directly)
-                // Try to run docker command if available
+                return FallbackToEnvVar();
+            }
+
+            using var client = new DockerClientConfiguration(dockerUri).CreateClient();
+            var info = await client.System.GetSystemInfoAsync();
+
+            var swarmActive = info.Swarm?.LocalNodeState == "active";
+            var isManager = info.Swarm?.ControlAvailable ?? false;
+
+            string? swarmNodeId = null;
+            string? swarmId = null;
+            string? swarmNodeAddress = null;
+            string? swarmNodeState = null;
+            string? swarmNodeAvailability = null;
+
+            if (swarmActive)
+            {
+                swarmNodeId = info.Swarm?.NodeID;
+                swarmNodeAddress = info.Swarm?.NodeAddr;
+
                 try
                 {
-                    var processStartInfo = new System.Diagnostics.ProcessStartInfo
-                    {
-                        FileName = "docker",
-                        Arguments = "info",
-                        RedirectStandardOutput = true,
-                        RedirectStandardError = true,
-                        UseShellExecute = false,
-                        CreateNoWindow = true
-                    };
+                    var swarm = await client.Swarm.InspectSwarmAsync();
+                    swarmId = swarm?.ID;
 
-                    using var process = System.Diagnostics.Process.Start(processStartInfo);
-                    if (process != null)
+                    if (!string.IsNullOrEmpty(swarmNodeId))
                     {
-                        process.WaitForExit(5000);
-                        return process.ExitCode == 0;
+                        var node = await client.Swarm.InspectNodeAsync(swarmNodeId);
+                        swarmNodeState = node?.Status?.State?.ToString()?.ToLower();
+                        swarmNodeAvailability = node?.Spec?.Availability?.ToLower();
                     }
                 }
                 catch
                 {
-                    // Fall through to return false
+                    // Non-critical: swarm metadata is nice-to-have during seeding
                 }
-                return false;
             }
-            else
-            {
-                // On Linux/Unix, check if Docker socket file exists
-                // If we're in a container, this checks for the MOUNTED socket from host
-                // which is exactly what we want - it means we CAN access Docker (the host's)
-                return File.Exists(dockerSocket);
-            }
+
+            return new DockerSwarmStatus(
+                IsAvailable: true,
+                IsSwarmActive: swarmActive,
+                IsSwarmManager: isManager,
+                SwarmNodeId: swarmNodeId,
+                SwarmId: swarmId,
+                SwarmNodeAddress: swarmNodeAddress,
+                SwarmNodeState: swarmNodeState,
+                SwarmNodeAvailability: swarmNodeAvailability,
+                Hostname: info.Name);
         }
         catch
         {
-            return false;
+            return FallbackToEnvVar();
         }
     }
 
-    /// <summary>
-    /// Detects if Docker Swarm is active by running 'docker info' and checking for "Swarm: active"
-    /// This is more reliable than environment variables for detecting swarm mode
-    /// </summary>
-    private static bool IsSwarmActive()
+    private static DockerSwarmStatus FallbackToEnvVar()
     {
-        try
-        {
-            var processStartInfo = new System.Diagnostics.ProcessStartInfo
-            {
-                FileName = "docker",
-                Arguments = "info --format '{{.Swarm.LocalNodeState}}'",
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            };
-
-            using var process = System.Diagnostics.Process.Start(processStartInfo);
-            if (process != null)
-            {
-                var output = process.StandardOutput.ReadToEnd();
-                process.WaitForExit(5000);
-
-                // Check if swarm is active
-                return output.Contains("active", StringComparison.OrdinalIgnoreCase);
-            }
-        }
-        catch
-        {
-            // Fall through to check env var
-        }
-
-        // Fallback: check environment variable
         var swarmManagerEnv = Environment.GetEnvironmentVariable("LOCALHOST_IS_SWARM_MANAGER");
-        return !string.IsNullOrEmpty(swarmManagerEnv) && swarmManagerEnv.Equals("true", StringComparison.OrdinalIgnoreCase);
-    }
-
-    /// <summary>
-    /// Checks if the current node is a swarm manager (vs worker)
-    /// </summary>
-    private static bool IsSwarmManager()
-    {
-        try
-        {
-            var processStartInfo = new System.Diagnostics.ProcessStartInfo
-            {
-                FileName = "docker",
-                Arguments = "info --format '{{.Swarm.ControlAvailable}}'",
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            };
-
-            using var process = System.Diagnostics.Process.Start(processStartInfo);
-            if (process != null)
-            {
-                var output = process.StandardOutput.ReadToEnd();
-                process.WaitForExit(5000);
-
-                // ControlAvailable is true for managers
-                return output.Contains("true", StringComparison.OrdinalIgnoreCase);
-            }
-        }
-        catch
-        {
-            // Fall through
-        }
-
-        // Fallback: check environment variable
-        var swarmManagerEnv = Environment.GetEnvironmentVariable("LOCALHOST_IS_SWARM_MANAGER");
-        return !string.IsNullOrEmpty(swarmManagerEnv) && swarmManagerEnv.Equals("true", StringComparison.OrdinalIgnoreCase);
+        var isManager = !string.IsNullOrEmpty(swarmManagerEnv) &&
+                        swarmManagerEnv.Equals("true", StringComparison.OrdinalIgnoreCase);
+        // If the env var says swarm manager, Docker must be available (the install script set it)
+        return new DockerSwarmStatus(IsAvailable: isManager, IsSwarmActive: isManager, IsSwarmManager: isManager);
     }
 }
