@@ -87,11 +87,25 @@ public static class TraefikLabelBuilder
                     labels[$"traefik.http.routers.{httpsRouterName}.tls.certresolver"] = "letsencrypt";
                     labels[$"traefik.http.routers.{httpsRouterName}.service"] = serviceName;
 
-                    
                     var httpRouterName = $"{serviceName}-http";
                     labels[$"traefik.http.routers.{httpRouterName}.rule"] = hostRules;
                     labels[$"traefik.http.routers.{httpRouterName}.entrypoints"] = "web";
-                    labels[$"traefik.http.routers.{httpRouterName}.service"] = serviceName;
+
+                    if (forceHttps)
+                    {
+                        // Redirect all HTTP traffic to HTTPS
+                        var redirectMiddleware = $"{serviceName}-redirect-https";
+                        labels[$"traefik.http.middlewares.{redirectMiddleware}.redirectscheme.scheme"] = "https";
+                        labels[$"traefik.http.middlewares.{redirectMiddleware}.redirectscheme.permanent"] = "true";
+                        labels[$"traefik.http.routers.{httpRouterName}.middlewares"] = redirectMiddleware;
+                        // HTTP router still points to the service for ACME challenge fallback
+                        labels[$"traefik.http.routers.{httpRouterName}.service"] = serviceName;
+                    }
+                    else
+                    {
+                        // Serve app on both HTTP and HTTPS (no redirect)
+                        labels[$"traefik.http.routers.{httpRouterName}.service"] = serviceName;
+                    }
                 }
                 else
                 {
