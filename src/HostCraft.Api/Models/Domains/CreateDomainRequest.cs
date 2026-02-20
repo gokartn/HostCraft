@@ -6,6 +6,7 @@ public record CreateDomainRequest(
     string Host,
     string? Path = "/",
     int Port = 80,
+    int? TargetPort = null,
     bool? HttpsEnabled = true,
     bool? ForceHttps = true,
     string? CertificateType = "letsencrypt",

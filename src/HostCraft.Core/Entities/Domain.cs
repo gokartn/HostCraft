@@ -25,9 +25,18 @@ public class Domain
     public string Path { get; set; } = "/";
 
     /// <summary>
-    /// Target port on the container/service
+    /// External port - what Traefik listens on (the entrypoint port).
+    /// For TCP domains this is the port clients connect to (e.g. 5435).
+    /// For HTTP domains this is unused (Traefik always uses 80/443).
     /// </summary>
     public int Port { get; set; } = 80;
+
+    /// <summary>
+    /// Container/service target port - the port the application is actually listening on inside Docker.
+    /// For TCP domains this is the internal port (e.g. 5432 for PostgreSQL).
+    /// Defaults to Port when not set, which is correct for HTTP.
+    /// </summary>
+    public int? TargetPort { get; set; }
 
     /// <summary>
     /// Enable HTTPS for this domain

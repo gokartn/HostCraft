@@ -162,9 +162,21 @@
                                 <input type="text" @bind="domainForm.Path" placeholder="/" class="form-control" readonly="@IsTcpProtocol" />
                             </div>
                             <div class="form-group">
-                                <label>Port</label>
+                                <label>@(IsTcpProtocol ? "External Port" : "Port")</label>
                                 <input type="number" @bind="domainForm.Port" class="form-control" />
+                                @if (IsTcpProtocol)
+                                {
+                                    <small>Port clients connect to on your server (e.g. 5435).</small>
+                                }
                             </div>
+                            @if (IsTcpProtocol)
+                            {
+                                <div class="form-group">
+                                    <label>Container Port</label>
+                                    <input type="number" @bind="domainForm.TargetPort" class="form-control" placeholder="@GetDefaultTargetPort(domainForm.Port)" />
+                                    <small>Port the service listens on inside Docker (e.g. 5432). Leave blank to use app default.</small>
+                                </div>
+                            }
                         </div>
 
                         <div class="form-group">
@@ -839,6 +851,7 @@
             Host = domain.Host,
             Path = domain.Path,
             Port = domain.Port,
+            TargetPort = domain.TargetPort,
             HttpsEnabled = domain.HttpsEnabled,
             ForceHttps = domain.ForceHttps,
             CertificateType = domain.CertificateType,
@@ -958,6 +971,25 @@
         return 80;
     }
 
+    private string GetDefaultTargetPort(int externalPort)
+    {
+        // Return the app's actual container port as placeholder hint
+        if (app?.Port.HasValue == true)
+            return app.Port.Value.ToString();
+        if (app?.PublishedPort.HasValue == true)
+            return app.PublishedPort.Value.ToString();
+        // Fall back to the standard database port for the given external port
+        return externalPort switch
+        {
+            5432 or 5433 or 5434 or 5435 => "5432",
+            3306 or 3307 => "3306",
+            6379 or 6380 => "6379",
+            27017 => "27017",
+            1433 => "1433",
+            _ => externalPort.ToString()
+        };
+    }
+
     private void NormalizeDomainFormForProtocol()
     {
         if (domainForm.Protocol == ProxyProtocol.Tcp)
@@ -1039,6 +1071,7 @@
         string Host,
         string Path,
         int Port,
+        int? TargetPort,
         bool HttpsEnabled,
         bool ForceHttps,
         string CertificateType,
@@ -1067,6 +1100,7 @@
         public string Host { get; set; } = "";
         public string Path { get; set; } = "/";
         public int Port { get; set; } = 80;
+        public int? TargetPort { get; set; }
         public bool HttpsEnabled { get; set; } = true;
         public bool ForceHttps { get; set; } = true;
         public string CertificateType { get; set; } = "letsencrypt";

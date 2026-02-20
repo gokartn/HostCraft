@@ -22,4 +22,11 @@ public interface IProxyService
     /// Configure Traefik dashboard with optional domain and authentication
     /// </summary>
     Task<bool> ConfigureTraefikDashboardAsync(string? dashboardDomain, bool enableAuth, string? username, string? passwordHash, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Ensures the running Traefik service has entrypoints and published ports for the given TCP port.
+    /// Called when a TCP domain is added/updated so that existing Traefik deployments gain the port without
+    /// requiring a full re-deploy.
+    /// </summary>
+    Task EnsureTcpEntrypointAsync(int port, CancellationToken cancellationToken = default);
 }

@@ -10,6 +10,7 @@ public record DomainDto
     public string Host { get; init; } = string.Empty;
     public string Path { get; init; } = "/";
     public int Port { get; init; }
+    public int? TargetPort { get; init; }
     public bool HttpsEnabled { get; init; }
     public bool ForceHttps { get; init; }
     public string CertificateType { get; init; } = string.Empty;

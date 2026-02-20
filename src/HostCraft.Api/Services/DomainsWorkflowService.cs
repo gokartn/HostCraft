@@ -115,12 +115,21 @@ public class DomainsWorkflowService : IDomainsWorkflowService
         domain.CompressionEnabled = compressionEnabled;
         domain.ProxyProtocol = protocol;
 
+        // For TCP domains: TargetPort is the container's internal listening port.
+        // If the user didn't specify it, default to the application's actual container port.
+        // This keeps Port (external entrypoint) separate from TargetPort (container port).
+        if (protocol == ProxyProtocol.Tcp && domain.TargetPort == null)
+            domain.TargetPort = request.TargetPort ?? app.Port ?? app.PublishedPort ?? desiredPort;
+
         DomainConfigurationHelper.NormalizeDomainForProtocol(domain);
 
         await _domainRepository.AddAsync(domain, cancellationToken);
         _logger.LogInformation("Added domain {Host} to application {AppId}", domain.Host, applicationId);
 
         await _traefikService.UpdateServiceLabelsAsync(applicationId, cancellationToken);
+
+        if (domain.ProxyProtocol == ProxyProtocol.Tcp)
+            await _proxyService.EnsureTcpEntrypointAsync(domain.Port, cancellationToken);
 
         return ApiActionResult<DomainDto>.Ok(_mapper.Map<DomainDto>(domain), StatusCodes.Status201Created);
     }
@@ -168,6 +177,8 @@ public class DomainsWorkflowService : IDomainsWorkflowService
             domain.IsActive = request.IsActive.Value;
         if (request.Protocol.HasValue)
             domain.ProxyProtocol = request.Protocol.Value;
+        if (request.TargetPort.HasValue)
+            domain.TargetPort = request.TargetPort.Value;
 
         DomainConfigurationHelper.NormalizeDomainForProtocol(domain);
 
@@ -186,6 +197,9 @@ public class DomainsWorkflowService : IDomainsWorkflowService
         _logger.LogInformation("Updated domain {DomainId} for application {AppId}", id, applicationId);
 
         await _traefikService.UpdateServiceLabelsAsync(applicationId, cancellationToken);
+
+        if (domain.ProxyProtocol == ProxyProtocol.Tcp)
+            await _proxyService.EnsureTcpEntrypointAsync(domain.Port, cancellationToken);
 
         return ApiActionResult<DomainDto>.Ok(_mapper.Map<DomainDto>(domain));
     }

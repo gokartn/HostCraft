@@ -342,6 +342,17 @@ public class ProxyService : IProxyService
                             "--providers.swarm.network=hostcraft_hostcraft-network",
                             "--entrypoints.web.address=:80",
                             "--entrypoints.websecure.address=:443",
+                            // TCP entrypoints for database passthrough
+                            "--entrypoints.postgres.address=:5432",
+                            "--entrypoints.postgres-alt.address=:5433",
+                            "--entrypoints.postgres-alt2.address=:5434",
+                            "--entrypoints.postgres-alt3.address=:5435",
+                            "--entrypoints.mysql.address=:3306",
+                            "--entrypoints.mysql-alt.address=:3307",
+                            "--entrypoints.redis.address=:6379",
+                            "--entrypoints.redis-tls.address=:6380",
+                            "--entrypoints.mongo.address=:27017",
+                            "--entrypoints.mssql.address=:1433",
                             $"--certificatesresolvers.letsencrypt.acme.email={server.DefaultLetsEncryptEmail}",
                             "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json",
                             "--certificatesresolvers.letsencrypt.acme.httpchallenge=true",
@@ -394,27 +405,20 @@ public class ProxyService : IProxyService
                 {
                     Ports = new List<PortConfig>
                     {
-                        new PortConfig
-                        {
-                            Protocol = "tcp",
-                            TargetPort = 80,
-                            PublishedPort = 80,
-                            PublishMode = "ingress"
-                        },
-                        new PortConfig
-                        {
-                            Protocol = "tcp",
-                            TargetPort = 443,
-                            PublishedPort = 443,
-                            PublishMode = "ingress"
-                        },
-                        new PortConfig
-                        {
-                            Protocol = "tcp",
-                            TargetPort = 8080,
-                            PublishedPort = 8080,
-                            PublishMode = "host"
-                        }
+                        new PortConfig { Protocol = "tcp", TargetPort = 80, PublishedPort = 80, PublishMode = "ingress" },
+                        new PortConfig { Protocol = "tcp", TargetPort = 443, PublishedPort = 443, PublishMode = "ingress" },
+                        new PortConfig { Protocol = "tcp", TargetPort = 8080, PublishedPort = 8080, PublishMode = "host" },
+                        // TCP database ports - published in ingress mode so any swarm node can route traffic
+                        new PortConfig { Protocol = "tcp", TargetPort = 5432, PublishedPort = 5432, PublishMode = "ingress" },
+                        new PortConfig { Protocol = "tcp", TargetPort = 5433, PublishedPort = 5433, PublishMode = "ingress" },
+                        new PortConfig { Protocol = "tcp", TargetPort = 5434, PublishedPort = 5434, PublishMode = "ingress" },
+                        new PortConfig { Protocol = "tcp", TargetPort = 5435, PublishedPort = 5435, PublishMode = "ingress" },
+                        new PortConfig { Protocol = "tcp", TargetPort = 3306, PublishedPort = 3306, PublishMode = "ingress" },
+                        new PortConfig { Protocol = "tcp", TargetPort = 3307, PublishedPort = 3307, PublishMode = "ingress" },
+                        new PortConfig { Protocol = "tcp", TargetPort = 6379, PublishedPort = 6379, PublishMode = "ingress" },
+                        new PortConfig { Protocol = "tcp", TargetPort = 6380, PublishedPort = 6380, PublishMode = "ingress" },
+                        new PortConfig { Protocol = "tcp", TargetPort = 27017, PublishedPort = 27017, PublishMode = "ingress" },
+                        new PortConfig { Protocol = "tcp", TargetPort = 1433, PublishedPort = 1433, PublishMode = "ingress" },
                     }
                 },
                 Labels = new Dictionary<string, string>
@@ -458,6 +462,17 @@ public class ProxyService : IProxyService
                 "--providers.docker.network=hostcraft-network",
                 "--entrypoints.web.address=:80",
                 "--entrypoints.websecure.address=:443",
+                // TCP entrypoints for database passthrough
+                "--entrypoints.postgres.address=:5432",
+                "--entrypoints.postgres-alt.address=:5433",
+                "--entrypoints.postgres-alt2.address=:5434",
+                "--entrypoints.postgres-alt3.address=:5435",
+                "--entrypoints.mysql.address=:3306",
+                "--entrypoints.mysql-alt.address=:3307",
+                "--entrypoints.redis.address=:6379",
+                "--entrypoints.redis-tls.address=:6380",
+                "--entrypoints.mongo.address=:27017",
+                "--entrypoints.mssql.address=:1433",
                 $"--certificatesresolvers.letsencrypt.acme.email={server.DefaultLetsEncryptEmail}",
                 "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json",
                 "--certificatesresolvers.letsencrypt.acme.httpchallenge=true",
@@ -474,7 +489,18 @@ public class ProxyService : IProxyService
                 {
                     ["80/tcp"] = new List<PortBinding> { new() { HostPort = "80" } },
                     ["443/tcp"] = new List<PortBinding> { new() { HostPort = "443" } },
-                    ["8080/tcp"] = new List<PortBinding> { new() { HostPort = "8080" } }
+                    ["8080/tcp"] = new List<PortBinding> { new() { HostPort = "8080" } },
+                    // TCP database ports
+                    ["5432/tcp"] = new List<PortBinding> { new() { HostPort = "5432" } },
+                    ["5433/tcp"] = new List<PortBinding> { new() { HostPort = "5433" } },
+                    ["5434/tcp"] = new List<PortBinding> { new() { HostPort = "5434" } },
+                    ["5435/tcp"] = new List<PortBinding> { new() { HostPort = "5435" } },
+                    ["3306/tcp"] = new List<PortBinding> { new() { HostPort = "3306" } },
+                    ["3307/tcp"] = new List<PortBinding> { new() { HostPort = "3307" } },
+                    ["6379/tcp"] = new List<PortBinding> { new() { HostPort = "6379" } },
+                    ["6380/tcp"] = new List<PortBinding> { new() { HostPort = "6380" } },
+                    ["27017/tcp"] = new List<PortBinding> { new() { HostPort = "27017" } },
+                    ["1433/tcp"] = new List<PortBinding> { new() { HostPort = "1433" } },
                 },
                 RestartPolicy = new RestartPolicy { Name = RestartPolicyKind.UnlessStopped }
             },
@@ -1156,6 +1182,94 @@ public class ProxyService : IProxyService
             throw;
         }
     }
+
+    /// <summary>
+    /// Ensures the running Traefik Swarm service has an entrypoint and published port for the given TCP port.
+    /// No-op if the port is already configured or if Traefik is not found.
+    /// </summary>
+    public async Task EnsureTcpEntrypointAsync(int port, CancellationToken cancellationToken = default)
+    {
+        if (port <= 0)
+            return;
+
+        try
+        {
+            using var dockerClient = new DockerClientConfiguration(
+                new Uri("unix:///var/run/docker.sock")).CreateClient();
+
+            var services = await dockerClient.Swarm.ListServicesAsync(cancellationToken: cancellationToken);
+            var traefikService = services.FirstOrDefault(s =>
+                s.Spec.Name.Contains("traefik", StringComparison.OrdinalIgnoreCase));
+
+            if (traefikService == null)
+            {
+                _logger.LogWarning("Traefik service not found, cannot ensure TCP entrypoint for port {Port}", port);
+                return;
+            }
+
+            var currentSpec = traefikService.Spec;
+            var args = currentSpec.TaskTemplate.ContainerSpec.Args?.ToList() ?? new List<string>();
+            var entrypointName = GetTcpEntrypointArgName(port);
+            var entrypointArg = $"--entrypoints.{entrypointName}.address=:{port}";
+
+            // Only update if this entrypoint is not already configured
+            if (args.Any(a => a.Contains($"--entrypoints.{entrypointName}.address")))
+            {
+                _logger.LogDebug("Traefik already has entrypoint {Entrypoint} for port {Port}", entrypointName, port);
+                return;
+            }
+
+            args.Add(entrypointArg);
+            currentSpec.TaskTemplate.ContainerSpec.Args = args;
+
+            // Add published port if not already present
+            var endpointSpec = currentSpec.EndpointSpec ?? new EndpointSpec { Ports = new List<PortConfig>() };
+            endpointSpec.Ports ??= new List<PortConfig>();
+
+            if (!endpointSpec.Ports.Any(p => p.PublishedPort == (uint)port))
+            {
+                endpointSpec.Ports.Add(new PortConfig
+                {
+                    Protocol = "tcp",
+                    TargetPort = (uint)port,
+                    PublishedPort = (uint)port,
+                    PublishMode = "ingress"
+                });
+                currentSpec.EndpointSpec = endpointSpec;
+            }
+
+            var updateParams = new ServiceUpdateParameters
+            {
+                Service = currentSpec,
+                Version = (long)traefikService.Version.Index
+            };
+
+            await dockerClient.Swarm.UpdateServiceAsync(traefikService.ID, updateParams, cancellationToken);
+            _logger.LogInformation("Traefik updated with TCP entrypoint {Entrypoint} on port {Port}", entrypointName, port);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to ensure TCP entrypoint for port {Port} in Traefik", port);
+            // Don't throw - this should not break the calling domain operation
+        }
+    }
+
+    private static string GetTcpEntrypointArgName(int port) => port switch
+    {
+        5432 => "postgres",
+        5433 => "postgres-alt",
+        5434 => "postgres-alt2",
+        5435 => "postgres-alt3",
+        3306 => "mysql",
+        3307 => "mysql-alt",
+        6379 => "redis",
+        6380 => "redis-tls",
+        27017 => "mongo",
+        9000 => "clickhouse",
+        8123 => "clickhouse-http",
+        1433 => "mssql",
+        _ => $"tcp-{port}"
+    };
 
     /// <summary>
     /// Updates the Traefik service with a new Let's Encrypt email address.

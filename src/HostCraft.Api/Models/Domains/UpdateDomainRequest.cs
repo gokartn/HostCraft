@@ -6,6 +6,7 @@ public record UpdateDomainRequest(
     string? Host = null,
     string? Path = null,
     int? Port = null,
+    int? TargetPort = null,
     bool? HttpsEnabled = null,
     bool? ForceHttps = null,
     string? CertificateType = null,

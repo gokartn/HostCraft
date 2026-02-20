@@ -198,7 +198,10 @@ public static class TraefikLabelBuilder
                     labels[$"traefik.tcp.routers.{tcpRouterName}.rule"] = "HostSNI(`*`)";
                 }
 
-                labels[$"traefik.tcp.services.{tcpServiceName}.loadbalancer.server.port"] = domain.Port.ToString();
+                // TargetPort = container's internal listening port (e.g. 5432 for PostgreSQL).
+                // Port = external entrypoint port (e.g. 5435 for a non-default exposure).
+                var containerPort = domain.TargetPort ?? domain.Port;
+                labels[$"traefik.tcp.services.{tcpServiceName}.loadbalancer.server.port"] = containerPort.ToString();
             }
         }
 
@@ -221,6 +224,8 @@ public static class TraefikLabelBuilder
         {
             5432 => "postgres",
             5433 => "postgres-alt",
+            5434 => "postgres-alt2",
+            5435 => "postgres-alt3",
             3306 => "mysql",
             3307 => "mysql-alt",
             6379 => "redis",
