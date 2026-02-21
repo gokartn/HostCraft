@@ -203,7 +203,10 @@ public class ApplicationRepository : IApplicationRepository
 
     public async Task UpdateAsync(Application application, CancellationToken cancellationToken = default)
     {
-        _context.Applications.Update(application);
+        // Use Entry().State instead of Update() to avoid cascading Modified state
+        // to navigation properties (e.g. EnvironmentVariables that may have been
+        // independently replaced and saved by ReplaceNonSecretEnvironmentVariablesAsync).
+        _context.Entry(application).State = EntityState.Modified;
         await _context.SaveChangesAsync(cancellationToken);
     }
 

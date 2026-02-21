@@ -56,13 +56,14 @@ public class WebhookService : IWebhookService
         var refValue = payload.GetProperty("ref").GetString();
         var branch = refValue?.Replace("refs/heads/", "");
 
-        // Check if this is the configured branch
-        if (branch != application.GitBranch)
+        // Check if this is the configured branch (case-insensitive)
+        var configuredBranch = application.GitBranch ?? "main";
+        if (!string.Equals(branch, configuredBranch, StringComparison.OrdinalIgnoreCase))
         {
             _logger.LogInformation(
                 "Push to {Branch} ignored, configured branch is {ConfiguredBranch}",
                 branch,
-                application.GitBranch);
+                configuredBranch);
             return new WebhookProcessingResult(false, "Branch not configured for deployment");
         }
 
@@ -73,11 +74,21 @@ public class WebhookService : IWebhookService
             return new WebhookProcessingResult(false, "Auto-deploy on push disabled");
         }
 
-        // Get commit info
-        var headCommit = payload.GetProperty("head_commit");
-        var commitSha = headCommit.GetProperty("id").GetString();
-        var commitMessage = headCommit.GetProperty("message").GetString();
-        var commitAuthor = headCommit.GetProperty("author").GetProperty("name").GetString();
+        // head_commit is null for branch deletions, tag pushes, or when GitHub considers all commits already known.
+        if (!payload.TryGetProperty("head_commit", out var headCommitElement) ||
+            headCommitElement.ValueKind == JsonValueKind.Null)
+        {
+            _logger.LogInformation("Push event for {App} has no head_commit (branch deletion or tag push), skipping", application.Name);
+            return new WebhookProcessingResult(false, "No deployable commit in push event");
+        }
+
+        var headCommit = headCommitElement;
+        var commitSha = headCommit.TryGetProperty("id", out var idProp) ? idProp.GetString() : null;
+        var commitMessage = headCommit.TryGetProperty("message", out var msgProp) ? msgProp.GetString() : null;
+        var commitAuthor = headCommit.TryGetProperty("author", out var authorProp) &&
+                           authorProp.TryGetProperty("name", out var nameProp)
+            ? nameProp.GetString()
+            : null;
 
         // Check for skip keywords in commit message
         if (ShouldSkipDeployment(commitMessage))
@@ -136,8 +147,9 @@ public class WebhookService : IWebhookService
         var prBranch = pullRequest.GetProperty("head").GetProperty("ref").GetString();
         var prBaseBranch = pullRequest.GetProperty("base").GetProperty("ref").GetString();
 
-        // Only deploy to PRs targeting the configured branch
-        if (prBaseBranch != application.GitBranch)
+        // Only deploy to PRs targeting the configured branch (case-insensitive)
+        var configuredBranch = application.GitBranch ?? "main";
+        if (!string.Equals(prBaseBranch, configuredBranch, StringComparison.OrdinalIgnoreCase))
         {
             return new WebhookProcessingResult(false, "PR not targeting configured branch");
         }

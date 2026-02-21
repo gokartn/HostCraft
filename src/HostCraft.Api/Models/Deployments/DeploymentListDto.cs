@@ -14,4 +14,8 @@ public record DeploymentListDto
     public DateTime StartedAt { get; init; }
     public DateTime? FinishedAt { get; init; }
     public string? ErrorMessage { get; init; }
+    public string? TriggeredBy { get; init; }
+    public string? CommitSha { get; init; }
+    public string? CommitMessage { get; init; }
+    public string? CommitAuthor { get; init; }
 }

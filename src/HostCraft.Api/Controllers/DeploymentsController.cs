@@ -39,7 +39,11 @@ public class DeploymentsController : ControllerBase
             ServiceId = d.ServiceId,
             StartedAt = d.StartedAt,
             FinishedAt = d.FinishedAt,
-            ErrorMessage = d.ErrorMessage
+            ErrorMessage = d.ErrorMessage,
+            TriggeredBy = d.TriggeredBy,
+            CommitSha = d.CommitHash,
+            CommitMessage = d.CommitMessage,
+            CommitAuthor = d.CommitAuthor
         }));
     }
     

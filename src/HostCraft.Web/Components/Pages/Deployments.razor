@@ -45,7 +45,8 @@
                     <tr>
                         <th>Application</th>
                         <th>Status</th>
-                        <th>Type</th>
+                        <th>Trigger</th>
+                        <th>Commit</th>
                         <th>Started</th>
                         <th>Duration</th>
                         <th>Actions</th>
@@ -58,13 +59,13 @@
                             <td>
                                 <div class="deployment-app">
                                     <strong>@deployment.ApplicationName</strong>
-                                    @if (!string.IsNullOrEmpty(deployment.ContainerId))
-                                    {
-                                        <span class="deployment-id">Container: @deployment.ContainerId.Substring(0, 12)</span>
-                                    }
                                     @if (!string.IsNullOrEmpty(deployment.ServiceId))
                                     {
-                                        <span class="deployment-id">Service: @deployment.ServiceId</span>
+                                        <span class="deployment-id">🐝 @deployment.ServiceId</span>
+                                    }
+                                    else if (!string.IsNullOrEmpty(deployment.ContainerId))
+                                    {
+                                        <span class="deployment-id">🐳 @deployment.ContainerId.Substring(0, Math.Min(12, deployment.ContainerId.Length))</span>
                                     }
                                 </div>
                             </td>
@@ -74,17 +75,28 @@
                                 </span>
                             </td>
                             <td>
-                                @if (!string.IsNullOrEmpty(deployment.ServiceId))
+                                <span class="trigger-badge @GetTriggerClass(deployment.TriggeredBy)">
+                                    @GetTriggerIcon(deployment.TriggeredBy) @GetTriggerLabel(deployment.TriggeredBy)
+                                </span>
+                            </td>
+                            <td>
+                                @if (!string.IsNullOrEmpty(deployment.CommitSha))
                                 {
-                                    <span class="type-badge">🐝 Swarm</span>
-                                }
-                                else if (!string.IsNullOrEmpty(deployment.ContainerId))
-                                {
-                                    <span class="type-badge">🐳 Container</span>
+                                    <div class="commit-info">
+                                        <span class="commit-sha" title="@deployment.CommitSha">@deployment.CommitSha.Substring(0, Math.Min(7, deployment.CommitSha.Length))</span>
+                                        @if (!string.IsNullOrEmpty(deployment.CommitMessage))
+                                        {
+                                            <span class="commit-msg" title="@deployment.CommitMessage">@TruncateCommitMessage(deployment.CommitMessage)</span>
+                                        }
+                                        @if (!string.IsNullOrEmpty(deployment.CommitAuthor))
+                                        {
+                                            <span class="commit-author">@deployment.CommitAuthor</span>
+                                        }
+                                    </div>
                                 }
                                 else
                                 {
-                                    <span class="type-badge">❓ Unknown</span>
+                                    <span class="text-muted">-</span>
                                 }
                             </td>
                             <td>@deployment.StartedAt.ToString("g")</td>
@@ -231,6 +243,40 @@
         _ => "⚪"
     };
     
+    private string GetTriggerClass(string? trigger) => trigger?.ToLowerInvariant() switch
+    {
+        "manual" => "trigger-manual",
+        "webhook" or "github" => "trigger-webhook",
+        "auto" or "auto-deploy" => "trigger-auto",
+        "rollback" => "trigger-rollback",
+        _ => "trigger-unknown"
+    };
+
+    private string GetTriggerIcon(string? trigger) => trigger?.ToLowerInvariant() switch
+    {
+        "manual" => "👤",
+        "webhook" or "github" => "🔗",
+        "auto" or "auto-deploy" => "⚡",
+        "rollback" => "↩️",
+        _ => "❓"
+    };
+
+    private string GetTriggerLabel(string? trigger) => trigger?.ToLowerInvariant() switch
+    {
+        "manual" => "Manual",
+        "webhook" => "Webhook",
+        "github" => "GitHub",
+        "auto" or "auto-deploy" => "Auto",
+        "rollback" => "Rollback",
+        _ => trigger ?? "Unknown"
+    };
+
+    private string TruncateCommitMessage(string? message, int maxLength = 50)
+    {
+        if (string.IsNullOrEmpty(message)) return "";
+        return message.Length <= maxLength ? message : message[..maxLength] + "…";
+    }
+
     private record DeploymentListDto
     {
         public int Id { get; init; }
@@ -243,6 +289,10 @@
         public DateTime StartedAt { get; init; }
         public DateTime? FinishedAt { get; init; }
         public string? ErrorMessage { get; init; }
+        public string? TriggeredBy { get; init; }
+        public string? CommitSha { get; init; }
+        public string? CommitMessage { get; init; }
+        public string? CommitAuthor { get; init; }
     }
 }
 
