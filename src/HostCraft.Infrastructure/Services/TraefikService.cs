@@ -73,10 +73,21 @@ public class TraefikService : ITraefikService
                 allLabels[label.Key] = label.Value;
             }
 
-            // Auto-add hostcraft_hostcraft-network network if routing labels exist
-            var networks = traefikLabels.Any()
-                ? new List<string> { "hostcraft_hostcraft-network" }
-                : new List<string>();
+            // Build network list: always preserve the project network for internal DNS,
+            // and add Traefik network when routing labels are present.
+            var networks = new List<string>();
+
+            // Always include the project-scoped overlay network so inter-service DNS is preserved
+            if (app.Project != null)
+            {
+                var projectNetworkName = $"{Docker.DockerNameHelper.NormalizeNetworkName(app.Project.Name)}-network";
+                networks.Add(projectNetworkName);
+            }
+
+            if (traefikLabels.Any())
+            {
+                networks.Add("hostcraft_hostcraft-network");
+            }
 
             // Update the Docker service
             var updateRequest = new UpdateServiceRequest(

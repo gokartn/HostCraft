@@ -42,6 +42,7 @@ public class ApplicationRepository : IApplicationRepository
             .Include(a => a.Server)
                 .ThenInclude(s => s.PrivateKey)
             .Include(a => a.Domains)
+            .Include(a => a.Project)
             .FirstOrDefaultAsync(a => a.Id == id, cancellationToken);
     }
 

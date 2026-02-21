@@ -567,16 +567,24 @@ public class DockerService : IDockerService, IDisposable
             spec.Labels = request.Labels;
         }
 
-        // Update networks if provided - resolve names to IDs
+        // Update networks if provided - merge with existing to avoid dropping project networks
         if (request.Networks != null && request.Networks.Count > 0)
         {
-            var networkConfigs = new List<NetworkAttachmentConfig>();
+            var existingNetworkIds = spec.TaskTemplate.Networks?
+                .Select(n => n.Target)
+                .Where(t => !string.IsNullOrEmpty(t))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase)
+                ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
             foreach (var networkName in request.Networks)
             {
                 var networkId = await EnsureNetworkExistsAsync(server, networkName, cancellationToken);
-                networkConfigs.Add(new NetworkAttachmentConfig { Target = networkId });
+                existingNetworkIds.Add(networkId);
             }
-            spec.TaskTemplate.Networks = networkConfigs;
+
+            spec.TaskTemplate.Networks = existingNetworkIds
+                .Select(id => new NetworkAttachmentConfig { Target = id })
+                .ToList();
         }
 
         // Enforce placement spread so new replicas balance across swarm nodes (HA/DR default)
